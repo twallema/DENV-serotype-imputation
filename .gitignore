@@ -169,5 +169,4 @@ dmypy.json
 .Rhistory
 
 # Data
-data/raw/DENV_datasus
-data/raw/DENV_datasus/composite_dataset
+data/raw/datasus_DENV-linelist

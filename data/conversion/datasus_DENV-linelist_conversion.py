@@ -46,7 +46,7 @@ def choose_date(row):
 ####################
 
 # Load and sort all filenames
-filenames = [f for f in os.listdir('../raw/DENV_datasus/composite_dataset') if os.path.isfile(os.path.join('../raw/DENV_datasus/composite_dataset', f)) and f != '.DS_Store' and f != 'README.md' and f != '.Rhistory']
+filenames = [f for f in os.listdir('../raw/datasus_DENV-linelist/composite_dataset') if os.path.isfile(os.path.join('../raw/datasus_DENV-linelist/composite_dataset', f)) and f != '.DS_Store' and f != 'README.md' and f != '.Rhistory']
 filenames.sort()
 
 # Figure out corresponding year
@@ -61,7 +61,7 @@ for fn,yr in zip(filenames, corresponding_years):
         # define serotype column name
         serotype_column = 'SOROTIPO'
         # load data
-        df = pd.read_csv(f'../raw/DENV_datasus/composite_dataset/{fn}', delimiter=';')
+        df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', delimiter=';')
         # find right Brazilian UF
         zip2uf_map = pd.read_csv('../raw/sprint_2025/map_regional_health.csv')[['uf', 'geocode']].drop_duplicates().set_index('geocode')['uf'].to_dict()
         df['SG_UF'] = df['MUNIATEND'].map(zip2uf_map)
@@ -85,7 +85,7 @@ for fn,yr in zip(filenames, corresponding_years):
         serotype_column = 'RESUL_VIRA'
         # load data
         read_csv_kwargs = {'delimiter': ';'} if yr == 1999 else {'delimiter':',', 'encoding':"ISO-8859-1"}
-        df = pd.read_csv(f'../raw/DENV_datasus/composite_dataset/{fn}', **read_csv_kwargs)
+        df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', **read_csv_kwargs)
         # find most likely date
         ## strategy: take minimum of columns containing a date: ['DT_NOTIFIC', 'DT_SIN_PRI', 'DT_FEBRE'] # consider adding collection date
         ## Lags compared to 'DT_NOTIFIC':
@@ -115,7 +115,7 @@ for fn,yr in zip(filenames, corresponding_years):
         serotype_column = 'SOROTIPO'
         # load data
         if yr == 2008:
-            df = pd.read_csv(f'../raw/DENV_datasus/composite_dataset/{fn}', delimiter=',', encoding="ISO-8859-1")
+            df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', delimiter=',', encoding="ISO-8859-1")
             # remove b'' for 2008 (using raw data)
             df = df.applymap(decode_or_nan)
             # convert 'SOROTIPO' and 'SG_UF' to numerics
@@ -123,7 +123,7 @@ for fn,yr in zip(filenames, corresponding_years):
             df['SG_UF'] = pd.to_numeric(df['SG_UF'])
             df['CLASSI_FIN'] = pd.to_numeric(df['CLASSI_FIN'])
         else:
-            df = pd.read_csv(f'../raw/DENV_datasus/composite_dataset/{fn}', delimiter=',', encoding="ISO-8859-1")
+            df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', delimiter=',', encoding="ISO-8859-1")
         # convert UF code in UF abbreviation
         zip2uf_map = pd.read_csv('../raw/sprint_2025/map_regional_health.csv')[['uf', 'uf_code']].drop_duplicates().set_index('uf_code')['uf'].to_dict()
         df['SG_UF'] = df['SG_UF'].map(zip2uf_map)
@@ -218,7 +218,7 @@ df = pd.concat(df_collect, ignore_index=True)
 weekly_df = df.sort_values(by=['date', 'UF']).reset_index(drop=True)
 
 # Save result (weekly frequency)
-weekly_df.to_csv('../interim/DENV_datasus/DENV-serotypes_1996-2025_weekly.csv', index=False)
+weekly_df.to_csv('../interim/datasus_DENV-linelist/DENV-serotypes_1996-2025_weekly.csv', index=False)
 
 # Save result (monthly frequency)
 monthly_df = (
@@ -228,7 +228,7 @@ monthly_df = (
     .sum(min_count=1)                 # Ensure NaN if all values are NaN
     .reset_index()                    # Flatten index
 )
-monthly_df.to_csv('../interim/DENV_datasus/DENV-serotypes_1996-2025_monthly.csv', index=False)
+monthly_df.to_csv('../interim/datasus_DENV-linelist/DENV-serotypes_1996-2025_monthly.csv', index=False)
 
 ###################
 ## Visualisation ##
@@ -254,7 +254,7 @@ ax[1].set_ylabel('Monthly DENV incidence')
 ax[2].set_ylabel('Monthly DENV incidence')
 mx = max([max(df_vis.loc[slice(None), 'DENV_1'].values), max(df_vis.loc[slice(None), 'DENV_2'].values), max(df_vis.loc[slice(None), 'DENV_3'].values), max(df_vis.loc[slice(None), 'DENV_4'].values)])
 ax[2].set_ylim([0, 0.06*mx])
-plt.savefig('../interim/DENV_datasus/figs/Brasil.png', dpi=300)
+plt.savefig('../interim/datasus_DENV-linelist/figs/Brasil.png', dpi=300)
 plt.close()
 
 ## States
@@ -279,5 +279,5 @@ for UF in df_vis.index.get_level_values('UF').unique():
     ax[0].set_xlim([min(dates), max(dates)])
     mx = max([np.nanmax(df_vis.loc[(slice(None), UF), 'DENV_1'].values), np.nanmax(df_vis.loc[(slice(None), UF), 'DENV_2'].values), np.nanmax(df_vis.loc[(slice(None), UF), 'DENV_4'].values)])
     ax[2].set_ylim([0, 0.15*mx]) if not np.isnan(mx) else ax[2].set_ylim([0, 100])
-    plt.savefig(f'../interim/DENV_datasus/figs/{UF}.png', dpi=300)
+    plt.savefig(f'../interim/datasus_DENV-linelist/figs/{UF}.png', dpi=300)
     plt.close()
