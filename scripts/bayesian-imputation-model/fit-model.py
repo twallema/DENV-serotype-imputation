@@ -35,7 +35,7 @@ distance_matrix = args.distance_matrix
 CAR_per_lag = args.CAR_per_lag
 
 # Make folder structure
-output_folder=f'AR({p})/distance_matrix-{distance_matrix}/CARperlag-{CAR_per_lag}/{ID}_{datetime.today().strftime("%Y-%m-%d")}' # Path to backend
+output_folder=f'../../data/interim/bayesian-imputation-model_output/AR({p})/distance_matrix-{distance_matrix}/CARperlag-{CAR_per_lag}/{ID}_{datetime.today().strftime("%Y-%m-%d")}' # Path to backend
 # check if samples folder exists, if not, make it
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
