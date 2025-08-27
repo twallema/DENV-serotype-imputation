@@ -58,7 +58,7 @@ else:
 # Region mapping
 # ~~~~~~~~~~~~~~
 
-uf2region_map = pd.read_csv('uf2region.csv')[['uf', 'region']].drop_duplicates().set_index('uf')['region'].to_dict()
+uf2region_map = pd.read_csv('../../data/interim/uf2region.csv')[['uf', 'region']].drop_duplicates().set_index('uf')['region'].to_dict()
 
 
 # Incidence data
@@ -253,9 +253,7 @@ if CAR_per_lag:
         # D_shared: (n_states, n_states)
         # zeta_car: (n_serotypes, p)
         # We need to broadcast D_shared against zeta
-        D_shared = pm.MutableData("D_shared", D)
-        D_expanded = D_shared[None, None, :, :]
-        W = pt.exp(-D_expanded / zeta_expanded)
+        W = pt.exp(-D[None, :, :] / zeta_expanded)
         # Construct degree tensor (matrix equivalent: row sums of weighted distance matrix on diagonal of eye(n_states))
         degree = pt.sum(W, axis=-1)[:, :, :, None]
         I = pt.eye(n_states)[None, None, :, :]
@@ -408,9 +406,7 @@ else:
         # D_shared: (n_states, n_states)
         # zeta_car: (n_serotypes, p)
         # We need to broadcast D_shared against zeta
-        D_shared = pm.MutableData("D_shared", D)
-        D_expanded = D_shared[None, :, :]
-        W = pt.exp(-D_expanded / zeta)
+        W = pt.exp(-D[None, :, :] / zeta)
         # Construct degree tensor (matrix equivalent: row sums of weighted distance matrix on diagonal of eye(n_states))
         degree = pt.sum(W, axis=-1)[:, :, None]
         I = pt.eye(n_states)[None, :, :]
