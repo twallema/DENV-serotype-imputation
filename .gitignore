@@ -169,4 +169,4 @@ dmypy.json
 .Rhistory
 
 # Data
-data/raw/datasus_DENV-linelist
+data/raw/datasus_DENV-linelist/composite_dataset/composite_*
