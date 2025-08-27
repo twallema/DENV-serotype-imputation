@@ -345,33 +345,33 @@ else:
         # \delta_{s,t} ~ LogitNormal(\mu_{s,t}, \sigma^2_{delta})
         # mu_{s,t} = \beta + \beta_{s,t}
 
-        # \beta (global intercept)
-        beta = pm.Normal("beta", mu=-4.5, sigma=1.5)
+        # # \beta (global intercept)
+        # beta = pm.Normal("beta", mu=-4.5, sigma=1.5)
 
-        # \beta_{s,t}: State-year-specific typing effort random effect: \beta_{s,t} = \beta_{r[s],t} + \epsilon_{s,t}
-        # Region-year effect
-        beta_rt_shrinkage = pm.HalfNormal("beta_rt_shrinkage", 1)
-        beta_rt_sigma = pm.HalfNormal("beta_rt_sigma", sigma=beta_rt_shrinkage, shape=n_region_years)
-        beta_rt = pm.Normal("beta_rt", mu=0.0, sigma=beta_rt_sigma, shape=n_region_years)
-        # State-year deviation from region-year
-        ratio_sigma = pm.Beta("ratio_sigma", alpha=1, beta=2)
-        eps_st_sigma = pm.Deterministic("eps_st_sigma", ratio_sigma * beta_rt_sigma[state_year_to_region_year])
-        eps_st = pm.Normal("eps_st", mu=0.0, sigma=eps_st_sigma, shape=n_state_years)
-        # Final state-year effect
-        beta_st = pm.Deterministic("beta_st", beta_rt[region_year_idx] + eps_st[state_year_idx])
+        # # \beta_{s,t}: State-year-specific typing effort random effect: \beta_{s,t} = \beta_{r[s],t} + \epsilon_{s,t}
+        # # Region-year effect
+        # beta_rt_shrinkage = pm.HalfNormal("beta_rt_shrinkage", 1)
+        # beta_rt_sigma = pm.HalfNormal("beta_rt_sigma", sigma=beta_rt_shrinkage, shape=n_region_years)
+        # beta_rt = pm.Normal("beta_rt", mu=0.0, sigma=beta_rt_sigma, shape=n_region_years)
+        # # State-year deviation from region-year
+        # ratio_sigma = pm.Beta("ratio_sigma", alpha=1, beta=2)
+        # eps_st_sigma = pm.Deterministic("eps_st_sigma", ratio_sigma * beta_rt_sigma[state_year_to_region_year])
+        # eps_st = pm.Normal("eps_st", mu=0.0, sigma=eps_st_sigma, shape=n_state_years)
+        # # Final state-year effect
+        # beta_st = pm.Deterministic("beta_st", beta_rt[region_year_idx] + eps_st[state_year_idx])
 
-        # Alternative: model serotyped fraction as a logit-normal since beta is close to zero
-        logit_delta_obs = np.log(delta_obs / (1 - delta_obs)) 
-        logit_mu = beta  + beta_st
-        # logit_delta_sigma is important because it controls the overall noise levels on the serotyped cases (lower = less noise)
-        # it also controls an important trade-off in this model: the relationship between N_total and N_typed is not perfectly linear, i.e. you can't fit both N_total and delta_st perfectly
-        # Values of 0.001-0.002 sacrifices delta_st for a better fit to N_total, while a value of 0.001 gives a good fit to delta_st but a poorer fit to N_typed an too much uncertainty
-        logit_delta_sigma = pm.HalfNormal("logit_delta_sigma", sigma=0.002) 
-        logit_delta = pm.Normal("logit_delta", mu=logit_mu, sigma=logit_delta_sigma, observed=logit_delta_obs)
-        delta_st = pm.Deterministic("delta_st", pm.math.sigmoid(logit_delta))
+        # # Alternative: model serotyped fraction as a logit-normal since beta is close to zero
+        # logit_delta_obs = np.log(delta_obs / (1 - delta_obs)) 
+        # logit_mu = beta  + beta_st
+        # # logit_delta_sigma is important because it controls the overall noise levels on the serotyped cases (lower = less noise)
+        # # it also controls an important trade-off in this model: the relationship between N_total and N_typed is not perfectly linear, i.e. you can't fit both N_total and delta_st perfectly
+        # # Values of 0.001-0.002 sacrifices delta_st for a better fit to N_total, while a value of 0.001 gives a good fit to delta_st but a poorer fit to N_typed an too much uncertainty
+        # logit_delta_sigma = pm.HalfNormal("logit_delta_sigma", sigma=0.002) 
+        # logit_delta = pm.Normal("logit_delta", mu=logit_mu, sigma=logit_delta_sigma, observed=logit_delta_obs)
+        # delta_st = pm.Deterministic("delta_st", pm.math.sigmoid(logit_delta))
 
         # N^*_{s,t} ~ Binomial(N_{total,s,t}, \delta_{s,t})
-        N_typed_latent = pm.Binomial("N_typed_latent", n=N_total, p=delta_st, observed=N_typed)
+        N_typed_latent = N_typed #pm.Binomial("N_typed_latent", n=N_total, p=delta_st, observed=N_typed)
 
         # --- Subtype Composition Model ---
         # p_{i,s,t} ~ Softmax(\theta_{i,s,t})
@@ -490,7 +490,7 @@ else:
 
 # NUTS
 with model:
-    trace = pm.sample(100, tune=100, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True)
+    trace = pm.sample(200, tune=800, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True)
 
 # Plot posterior predictive checks
 with model:
@@ -512,7 +512,7 @@ if CAR_per_lag:
     if distance_matrix:
         variables2plot += ['zeta_intercept', 'zeta_slope']
 else:
-    variables2plot = ['beta', 'beta_rt_shrinkage', 'beta_rt_sigma', 'beta_rt', 'ratio_sigma',
+    variables2plot = [
                       'total_sigma', 'proportion_uncorr', 'AR_init',
                     ]
     if distance_matrix:
