@@ -65,7 +65,7 @@ uf2region_map = pd.read_csv('uf2region.csv')[['uf', 'region']].drop_duplicates()
 # ~~~~~~~~~~~~~~
 
 # Fetch incidence data
-df = pd.read_csv('../../data/interim/DENV_datasus/DENV-serotypes_1996-2025_monthly.csv', parse_dates=['date'])
+df = pd.read_csv('../../data/interim/datasus_DENV-linelist/DENV-serotypes_1996-2025_monthly.csv', parse_dates=['date'])
 
 # 1. Check if all columns are present
 sero_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4"]
