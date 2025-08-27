@@ -54,22 +54,6 @@ else:
     # Load distance matrix
     D = pd.read_csv('../../data/interim/weighted_distance_matrix.csv', index_col=0).values
 
-# Covariates
-# ~~~~~~~~~~
-
-# Fetch covariates
-X = pd.read_csv('../../data/interim/state_covariates.csv', index_col=0)
-# Normalise all covariates
-# Standardization ensures a change of 1 unit in X_j corresponds to a 1 SD change — makes priors and posteriors comparable across covariates.
-# X: shape (n_states, n_covariates)
-# Rows: states, Columns: covariates
-X_mean = np.mean(X, axis=0)         # mean per covariate
-X_std = np.std(X, axis=0, ddof=0)   # std dev per covariate
-# Avoid divide-by-zero
-X_std[X_std == 0] = 1.0
-# Standardize
-X = ((X - X_mean) / X_std).values
-
 
 # Region mapping
 # ~~~~~~~~~~~~~~
@@ -153,7 +137,6 @@ n_months = int(len(df["month_idx"].unique()))
 n_years = int(df["year_idx"].max() + 1)
 n_state_years = len(state_year_labels)
 n_region_years = len(region_year_labels)
-n_covariates = int(X.shape[1])
 n_serotypes = len(sero_cols)
 n_regions = len(region_labels)
 
