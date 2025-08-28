@@ -372,7 +372,7 @@ else:
 
         # N^*_{s,t} ~ Binomial(N_{total,s,t}, \delta_{s,t})
         N_typed_latent = N_typed #pm.Binomial("N_typed_latent", n=N_total, p=delta_st, observed=N_typed)
-
+        
         # --- Subtype Composition Model ---
         # p_{i,s,t} ~ Softmax(\theta_{i,s,t})
         # \theta_{i,s,t} = \sum_{k=1}^p \rho_k \alpha_{i,s,t-k} +  \kappa_{i,s,t}^{corr} + \kappa_{i,s,t}^{uncorr}          # AR(p) process
