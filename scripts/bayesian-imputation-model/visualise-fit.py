@@ -14,6 +14,7 @@ def str_to_bool(value):
 # arguments are used to find the result
 # How to run: python visualise-fit.py -date 2025-08-27 -ID test -p 2 -distance_matrix False -CAR_per_lag False
 parser = argparse.ArgumentParser()
+parser.add_argument("-state", type=str, help="Abbreviation of brazilian federative unit.")
 parser.add_argument("-date", type=str, help="Date experiment was run.")
 parser.add_argument("-ID", type=str, help="Sampler output name.")
 parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
@@ -22,6 +23,7 @@ parser.add_argument("-CAR_per_lag", type=str_to_bool, help="Use one spatial inno
 args = parser.parse_args()
 
 # assign to desired variables
+state = args.state
 date = args.date
 ID = args.ID
 p = args.p
@@ -38,8 +40,6 @@ if not os.path.exists(output_folder):
 ## Settings ##
 ##############
 
-# select state
-state = 'ES'
 # set confidence level
 confidence = 95
 
@@ -138,12 +138,11 @@ Y_obs['p_3'] = Y_obs['DENV_3']/(Y_obs['DENV_1'] + Y_obs['DENV_2'] + Y_obs['DENV_
 Y_obs['p_4'] = Y_obs['DENV_4']/(Y_obs['DENV_1'] + Y_obs['DENV_2'] + Y_obs['DENV_3'] + Y_obs['DENV_4'])
 
 # Get total typed cases from model and data
-N_typed = df[['UF','date']]
-N_typed['N_typed_median'] = ppc['posterior_predictive']['N_typed_latent'].median(dim=['chain','draw']).values
-N_typed['N_typed_lower'] = ppc['posterior_predictive']['N_typed_latent'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values
-N_typed['N_typed_upper'] = ppc['posterior_predictive']['N_typed_latent'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values
-N_typed['N_typed'] = ppc['observed_data']['N_typed_latent'].values
-N_typed = N_typed.set_index(['UF','date'])
+N_typed = df[['date', 'UF', 'DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+N_typed['N_typed_latent'] = N_typed[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].sum(axis=1)
+N_typed['N_typed_latent'][N_typed['N_typed_latent'] == 0] = np.nan
+N_typed = N_typed.set_index(['UF','date'])['N_typed_latent']
+print(N_typed)
 
 # Get serotype fractions
 ## Mean
@@ -171,9 +170,7 @@ time = df['date'].unique()
 fig,ax=plt.subplots(nrows=6, sharex=True, figsize=(8.7, 11.3))
 
 # Step 1: total serotyped cases
-ax[0].plot(time, N_typed.loc[(state, slice(None)), 'N_typed_median'].values, color='black')
-ax[0].fill_between(time, N_typed.loc[(state, slice(None)), 'N_typed_lower'].values, N_typed.loc[(state, slice(None)), 'N_typed_upper'].values, color='black', alpha=0.2)
-ax[0].scatter(time, N_typed.loc[(state, slice(None)), 'N_typed'].values, marker='o', s=2, color='black')
+ax[0].scatter(time, N_typed.loc[state, slice(None)].values, marker='o', s=2, color='black')
 ax[0].set_ylim([0,500])
 ax[0].set_ylabel('Total serotyped (-)')
 ax[0].set_title(f'Brasil (State: {state})')
