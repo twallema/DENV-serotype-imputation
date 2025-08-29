@@ -218,7 +218,7 @@ df = pd.concat(df_collect, ignore_index=True)
 weekly_df = df.sort_values(by=['date', 'UF']).reset_index(drop=True)
 
 # Save result (weekly frequency)
-weekly_df.to_csv('../interim/datasus_DENV-linelist/DENV-serotypes_1996-2025_weekly.csv', index=False)
+weekly_df.to_csv('../interim/datasus_DENV-linelist/uf/DENV-serotypes_1996-2025_weekly.csv', index=False)
 
 # Save result (monthly frequency)
 monthly_df = (
@@ -228,7 +228,7 @@ monthly_df = (
     .sum(min_count=1)                 # Ensure NaN if all values are NaN
     .reset_index()                    # Flatten index
 )
-monthly_df.to_csv('../interim/datasus_DENV-linelist/DENV-serotypes_1996-2025_monthly.csv', index=False)
+monthly_df.to_csv('../interim/datasus_DENV-linelist/uf/DENV-serotypes_1996-2025_monthly.csv', index=False)
 
 ###################
 ## Visualisation ##
@@ -254,7 +254,7 @@ ax[1].set_ylabel('Monthly DENV incidence')
 ax[2].set_ylabel('Monthly DENV incidence')
 mx = max([max(df_vis.loc[slice(None), 'DENV_1'].values), max(df_vis.loc[slice(None), 'DENV_2'].values), max(df_vis.loc[slice(None), 'DENV_3'].values), max(df_vis.loc[slice(None), 'DENV_4'].values)])
 ax[2].set_ylim([0, 0.06*mx])
-plt.savefig('../interim/datasus_DENV-linelist/figs/Brasil.png', dpi=300)
+plt.savefig('../interim/datasus_DENV-linelist/uf/figs/Brasil.png', dpi=300)
 plt.close()
 
 ## States
@@ -279,5 +279,5 @@ for UF in df_vis.index.get_level_values('UF').unique():
     ax[0].set_xlim([min(dates), max(dates)])
     mx = max([np.nanmax(df_vis.loc[(slice(None), UF), 'DENV_1'].values), np.nanmax(df_vis.loc[(slice(None), UF), 'DENV_2'].values), np.nanmax(df_vis.loc[(slice(None), UF), 'DENV_4'].values)])
     ax[2].set_ylim([0, 0.15*mx]) if not np.isnan(mx) else ax[2].set_ylim([0, 100])
-    plt.savefig(f'../interim/datasus_DENV-linelist/figs/{UF}.png', dpi=300)
+    plt.savefig(f'../interim/datasus_DENV-linelist/uf/figs/{UF}.png', dpi=300)
     plt.close()
