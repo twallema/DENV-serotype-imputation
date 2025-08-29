@@ -218,7 +218,7 @@ df = pd.concat(df_collect, ignore_index=True)
 weekly_df = df.sort_values(by=['date', 'UF']).reset_index(drop=True)
 
 # Save result (weekly frequency)
-weekly_df.to_csv('../interim/datasus_DENV-linelist/uf/DENV-serotypes_1996-2025_weekly.csv', index=False)
+weekly_df.to_csv('../interim/datasus_DENV-linelist/uf/DENV-serotypes_1996-2025_weekly_uf.csv', index=False)
 
 # Save result (monthly frequency)
 monthly_df = (
@@ -228,7 +228,7 @@ monthly_df = (
     .sum(min_count=1)                 # Ensure NaN if all values are NaN
     .reset_index()                    # Flatten index
 )
-monthly_df.to_csv('../interim/datasus_DENV-linelist/uf/DENV-serotypes_1996-2025_monthly.csv', index=False)
+monthly_df.to_csv('../interim/datasus_DENV-linelist/uf/DENV-serotypes_1996-2025_monthly_uf.csv', index=False)
 
 ###################
 ## Visualisation ##

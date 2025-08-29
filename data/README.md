@@ -32,7 +32,14 @@ These data are partly confidential and can be found on the Bento lab box.
 
 ### Datasus DENV linelist dataset
 
-+ `DENV-serotypes_1996-2025_monthly/weekly.csv`: Weekly or monthly total confirmed (not discarded) DENV cases, as well as number of serotyped cases per DENV serotype. Generated using `DENV_datasus_conversion.py`. 
+#### UF
+
++ `DENV-serotypes_1996-2025_monthly/weekly_UF.csv`: Weekly or monthly total confirmed (not discarded) DENV cases at the municipality level, as well as number of serotyped cases per DENV serotype. Generated using `DENV_datasus_conversion.py`. 
+
+#### Muncipality
+
++ ``: Weekly or monthly total confirmed (not discarded) DENV cases at the municipality level, as well as number of serotyped cases per DENV serotype. Generated using `DENV_datasus_conversion.py`. 
+
 
 ### Imputed DENV datasus
 
