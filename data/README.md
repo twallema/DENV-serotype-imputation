@@ -14,6 +14,8 @@ Downloaded using the instructions under '2 - Using FTPWeb' on https://sprint.mos
 
 + `shape_muni.gpkg`: Geometry of Brazilian municipalities in `shape_muni.gpkg` (source = IBGE).
 
++ `environ_vars.csv`: Environmental characteristics of the municipalities (columns 'koppen' and 'biome').
+
 ### Datasus DENV linelist dataset
 
 These data are partly confidential and can be found on the Bento lab box.
@@ -23,6 +25,10 @@ These data are partly confidential and can be found on the Bento lab box.
 + `weighted_distance_matrix.csv`: Contains a square origin-destination-type distance matrix with the population-weighted distance between Brazil's 27 states.
 
 + `adjacency_matrix.csv`: Contains a square origin-destination-type adjacency matrix of the Brasilian states.
+
+### Geographic dataset
+
++ `geographic-dataset.gpkg`: Dataset containing geometries of Brazilian municipalities, along with variables relevant for clustering. Columns: 'geocode', 'geocode_name', 'uf', 'uf_code', 'geometry', 'pop', 'pop_density', 'koppen', 'biome'.
 
 ### Datasus DENV linelist dataset
 
@@ -37,3 +43,5 @@ These data are partly confidential and can be found on the Bento lab box.
 + `build_distance-adjacency-matrix.py`: Notebook used to build an adjacency matrix and a demographically-weighted distance matrix between Brazilian states.
 
 + `datasus_DENV-linelist_conversion.py`: Script used to convert the (partly confidential) raw linelisted datasus DENV data (`~/data/raw/datasus_DENV-linelist/composite_dataset`) into a more pleasant interim format.
+
++ `build_geographic-dataset.py`: A script merging the Brazilian municipalities' geometries, population, population density and environmental characteristics.
