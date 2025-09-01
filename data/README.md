@@ -4,6 +4,10 @@ Here we list a description of all datasets, raw datasets are unaltered original 
 
 ## Raw
 
+### RG2017_regioesgeograficas2017_20180911
+
++ `RG2017_regioesgeograficas2017.shp`: Shapefiles of the Brazilian municipalities, including the names of the immediate (508) and intermediate (133) Brazilian regions. Downloaded from IBGE: https://geoftp.ibge.gov.br/organizacao_do_territorio/divisao_regional/divisao_regional_do_brasil/divisao_regional_do_brasil_em_regioes_geograficas_2017/shp/RG2017_regioesgeograficas2017_20180911.zip
+
 ### Sprint 2025
 
 Downloaded using the instructions under '2 - Using FTPWeb' on https://sprint.mosqlimate.org/data/.

@@ -9,7 +9,7 @@ from datetime import datetime
 # Fetch the municipality shapefiles and demographics and merge them
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-# Load geodata
+# Load geodata by sprint 2025
 gdf = gpd.read_file("../raw/sprint_2025/shape_muni.gpkg", layer="shape_muni")
 
 # Load demography
@@ -40,6 +40,22 @@ gdf_eq["area_km2"] = gdf_eq.geometry.area / 1e6
 
 # Population density (people per km²)
 gdf["pop_density"] = gdf_eq["pop"] / gdf_eq["area_km2"]
+
+
+# Attach the immediate and intermediate regions
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# Load geodata by sprint 2025
+regions = gpd.read_file("../raw/RG2017_regioesgeograficas2017_20180911/RG2017_regioesgeograficas2017.shp")
+
+# Rename columns to facilitate merging
+regions = regions.rename(columns={'CD_GEOCODI': 'geocode', 'nome_rgi': 'immediate_region_name', 'nome_rgint': 'intermediate_region_name'})
+
+# Set geocde to int
+regions['geocode'] = regions['geocode'].astype(int)
+
+# Merge demography with the geodata
+gdf = gdf.merge(regions[['geocode', 'immediate_region_name', 'intermediate_region_name']], on="geocode")
 
 
 # Attach Koppen classification
