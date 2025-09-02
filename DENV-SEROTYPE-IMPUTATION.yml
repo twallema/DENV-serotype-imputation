@@ -13,3 +13,4 @@ dependencies:
   - geopandas
   - spopt
   - libpysal
+  - shapely

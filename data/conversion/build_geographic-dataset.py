@@ -1,3 +1,4 @@
+import shapely
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -76,6 +77,9 @@ gdf = gdf.merge(koppen, on="geocode")
 
 # Save result
 # >>>>>>>>>>>
+
+# To avoid geometry dissolution issues later down the line
+gdf["geometry"] = gdf.geometry.apply(shapely.make_valid)
 
 # Save to a GeoPackage
 gdf.to_file("../interim/geographic-dataset.gpkg", driver="GPKG")
