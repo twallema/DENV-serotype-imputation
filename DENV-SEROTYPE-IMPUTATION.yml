@@ -14,3 +14,4 @@ dependencies:
   - spopt
   - libpysal
   - shapely
+  - pyarrow
