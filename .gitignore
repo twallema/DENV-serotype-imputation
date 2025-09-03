@@ -171,7 +171,7 @@ dmypy.json
 # Data
 data/raw/datasus_DENV-linelist/composite_dataset/composite_*
 data/interim/bayesian-imputation-model_output
-data/interim/datasus_DENV-linelist/municipality/DENV-serotypes_1996-2025_weekly_municipality.csv
+data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_weekly_mun.csv
 data/raw/BR_Municipios_2023/BR_Municipios_2023.cpg
 data/raw/BR_Municipios_2023/BR_Municipios_2023.dbf
 data/raw/BR_Municipios_2023/BR_Municipios_2023.prj
