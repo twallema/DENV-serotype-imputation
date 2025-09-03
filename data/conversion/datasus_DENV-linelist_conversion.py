@@ -156,6 +156,7 @@ for fn,yr in zip(filenames, corresponding_years):
         # CD_UF is the first two digits of ID_MN_RESI
         df['CD_UF'] = df['ID_MN_RESI'].apply(lambda x: str(x)[0:2])
         df = df[df['CD_UF'] != 'na']
+        df = df[df['CD_UF'] != 'P'] # why not?
         df['CD_UF'] = pd.to_numeric(df['CD_UF'])
         # Rename ID_MN_RES to CD_MUN
         df = df.rename(columns={'ID_MN_RESI': 'CD_MUN'})
