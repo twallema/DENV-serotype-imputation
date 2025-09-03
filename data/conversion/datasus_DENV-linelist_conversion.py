@@ -52,19 +52,24 @@ filenames.sort()
 # Figure out corresponding year
 corresponding_years = [int(fn[10:14]) for fn in filenames]
 
-# Loop over files
-df_collect=[]
-for fn,yr in zip(filenames, corresponding_years):
+# Formatted data collection
+df_uf_collect=[]
+df_municipality_collect=[]
 
+# Loop over files
+for fn,yr in zip(filenames, corresponding_years):
+    print(f'Working on year {yr}')
     # 1996, 1997, 1998
     if 1996 <= yr <= 1998:
         # define serotype column name
         serotype_column = 'SOROTIPO'
         # load data
         df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', delimiter=';')
+        # rename municipality geocode column for consistency
+        df = df.rename(columns={'MUNIATEND': 'ID_MUNICIP'})
         # find right Brazilian UF
         zip2uf_map = pd.read_csv('../raw/sprint_2025/map_regional_health.csv')[['uf', 'geocode']].drop_duplicates().set_index('geocode')['uf'].to_dict()
-        df['SG_UF'] = df['MUNIATEND'].map(zip2uf_map)
+        df['SG_UF'] = df['ID_MUNICIP'].map(zip2uf_map)
         # find most likely date
         ## strategy: take minimum of columns containing a date: ['DTCOLETA', 'DTMAC1', 'DTMAC2', 'DTINIHEMA1', 'DTINIHEMA2']
         ## BUT: MAC1/MAC2/DTINIHEMA1/DTINIHEMA2 always lag 'DTCOLECTA' (98% confidence interval > 0), except MAC1 in 1997 which has strongly negative lagging outliers compared to 'DTCOLECTA' (1% lags more than 150 days)
@@ -77,7 +82,6 @@ for fn,yr in zip(filenames, corresponding_years):
         # drop if date not present (very rare)
         df = df.dropna(subset=['date'])
         # the column telling us if the case was 'confirmed' is unknown --> have to assume all cases are confirmed (even though 1999-2006 indicates this is not the case)
-        
         pass
 
     elif 1999 <= yr <= 2006:
@@ -107,7 +111,8 @@ for fn,yr in zip(filenames, corresponding_years):
         df = df.dropna(subset=['date'])
         # filter out the discards (CON_CLASSI==5) but leave in the undocumented value '0' and inconclusive '8'
         df = df[df['CON_CLASSI'] != 5]
-
+        # drop column 'UF'
+        df = df.drop('UF', axis=1)
         pass
 
     elif 2007 <= yr <= 2025:
@@ -121,6 +126,7 @@ for fn,yr in zip(filenames, corresponding_years):
             # convert 'SOROTIPO' and 'SG_UF' to numerics
             df['SOROTIPO'] = pd.to_numeric(df['SOROTIPO'])
             df['SG_UF'] = pd.to_numeric(df['SG_UF'])
+            df['ID_MUNICIP'] = pd.to_numeric(df['ID_MUNICIP'])
             df['CLASSI_FIN'] = pd.to_numeric(df['CLASSI_FIN'])
         else:
             df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', delimiter=',', encoding="ISO-8859-1")
@@ -171,16 +177,27 @@ for fn,yr in zip(filenames, corresponding_years):
         # filter out 'discarded' (CLASSI_FIN==5) but keep 'inconclusive' (CLASSI_FIN==8)
         df = df[df['CLASSI_FIN'] != 5]
 
-        pass
+        # drop column 'UF'
+        df = df.drop('UF', axis=1)
 
+        pass
+    
+
+    # General conversions (both municipality and UF spatial levels)
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     # convert to the next saturday
     df['date'] = df['date'].apply(next_saturday)
     # clean the serotype column
     df['serotype'] = df[serotype_column].where(df[serotype_column].isin([1, 2, 3, 4]), np.nan)
+    # rename UF column for convenience & rename ID_MUNICIP to geocode (in line with other files in repo)
+    df = df.rename(columns={'SG_UF': 'UF', 'ID_MUNICIP': 'geocode'})
+
+
+    # Collect data at UF spatial level
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    df_copy = df.copy()
     # retain only relevant columns
-    df = df[['date', 'SG_UF', 'serotype']]
-    # rename UF column for convenience
-    df = df.rename(columns={'SG_UF': 'UF'})
+    df = df[['date', 'UF', 'serotype']]
     # drop if patient residency not provided 
     df = df.dropna(subset=['UF'])
     # build an expanded dataframe
@@ -211,32 +228,91 @@ for fn,yr in zip(filenames, corresponding_years):
         .merge(total_counts, on=['date', 'UF'], how='left')
     )
     # save result
-    df_collect.append(final_df)
+    df_uf_collect.append(final_df)
 
-# Final concatenation of dataframes
-df = pd.concat(df_collect, ignore_index=True)
-weekly_df = df.sort_values(by=['date', 'UF']).reset_index(drop=True)
+
+    # Collect data at muncipality level
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    df = df_copy
+    # retain only relevant columns
+    df = df[['date', 'geocode', 'serotype']]
+    # drop if patient residency not provided 
+    df = df.dropna(subset=['geocode'])
+    # build an expanded dataframe
+    all_dates = pd.date_range(start=f'{yr}-01-01', end=f'{yr}-12-31', freq='W-SAT')
+    all_states = pd.read_csv('../raw/sprint_2025/map_regional_health.csv')['geocode'].unique()
+    full_index = pd.MultiIndex.from_product([all_dates, all_states], names=['date', 'geocode'])
+    full_df = pd.DataFrame(index=full_index).reset_index()
+    # count serotypes
+    serotype_counts = (
+        df.dropna(subset=['serotype'])
+        .groupby(['date', 'geocode', 'serotype'])
+        .size()
+        .unstack(level='serotype')  # wide format, columns are 1.0–4.0
+        .reindex(columns=[1.0, 2.0, 3.0, 4.0], fill_value=np.nan)  # ensures all 4 exist
+        .rename(columns=lambda x: f'DENV_{int(x)}')
+        .reset_index()
+    )
+    # count total observations
+    total_counts = (
+        df.groupby(['date', 'geocode'])
+        .size()
+        .reset_index(name='DENV_total')
+    )
+    # merge together 
+    final_df = (
+        full_df
+        .merge(serotype_counts, on=['date', 'geocode'], how='left')
+        .merge(total_counts, on=['date', 'geocode'], how='left')
+    )
+    # save result
+    df_municipality_collect.append(final_df)
+
+
+# Final concatenation of dataframes at uf spatial level
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+df_uf = pd.concat(df_uf_collect, ignore_index=True)
+weekly_df_uf = df_uf.sort_values(by=['date', 'UF']).reset_index(drop=True)
 
 # Save result (weekly frequency)
-weekly_df.to_csv('../interim/datasus_DENV-linelist/DENV-serotypes_1996-2025_weekly.csv', index=False)
+weekly_df_uf.to_csv('../interim/datasus_DENV-linelist/uf/DENV-serotypes_1996-2025_weekly_uf.csv', index=False)
 
 # Save result (monthly frequency)
-monthly_df = (
-    df.set_index(['UF', 'date'])
+monthly_df_uf = (
+    df_uf.set_index(['UF', 'date'])
     .groupby(level='UF')              # Group by state
     .resample('ME', level='date')     # Resample by month at the 'date' level
     .sum(min_count=1)                 # Ensure NaN if all values are NaN
     .reset_index()                    # Flatten index
 )
-monthly_df.to_csv('../interim/datasus_DENV-linelist/DENV-serotypes_1996-2025_monthly.csv', index=False)
+monthly_df_uf.to_csv('../interim/datasus_DENV-linelist/uf/DENV-serotypes_1996-2025_monthly_uf.csv', index=False)
 
-###################
-## Visualisation ##
-###################
+# Final concatenation of dataframes at municipality spatial level
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+df_municipality = pd.concat(df_municipality_collect, ignore_index=True)
+weekly_df_municipality = df_municipality.sort_values(by=['date', 'geocode']).reset_index(drop=True)
+
+# Save result (weekly frequency)
+weekly_df_municipality.to_csv('../interim/datasus_DENV-linelist/municipality/DENV-serotypes_1996-2025_weekly_municipality.csv', index=False)
+
+# Save result (monthly frequency)
+monthly_df_municipality = (
+    df_municipality.set_index(['geocode', 'date'])
+    .groupby(level='geocode')              # Group by state
+    .resample('ME', level='date')     # Resample by month at the 'date' level
+    .sum(min_count=1)                 # Ensure NaN if all values are NaN
+    .reset_index()                    # Flatten index
+)
+monthly_df_municipality.to_csv('../interim/datasus_DENV-linelist/municipality/DENV-serotypes_1996-2025_monthly_municipality.csv', index=False)
+
+
+#############################
+## Visualisation (UF only) ##
+#############################
 
 # Visualise results 
 ## Brasil
-df_vis = monthly_df.groupby(by='date').sum(min_count=1)
+df_vis = monthly_df_uf.groupby(by='date').sum(min_count=1)
 fig,ax=plt.subplots(nrows=3, figsize=(8.3,11.7/1.5), sharex=True)
 ### Not serotyped
 ax[0].plot(df_vis.index, df_vis.loc[slice(None), 'DENV_total'], color='black')
@@ -252,13 +328,16 @@ ax[0].set_title('Brasil')
 ax[0].set_ylabel('Monthly DENV incidence')
 ax[1].set_ylabel('Monthly DENV incidence')
 ax[2].set_ylabel('Monthly DENV incidence')
-mx = max([max(df_vis.loc[slice(None), 'DENV_1'].values), max(df_vis.loc[slice(None), 'DENV_2'].values), max(df_vis.loc[slice(None), 'DENV_3'].values), max(df_vis.loc[slice(None), 'DENV_4'].values)])
+try:
+    mx = max([max(df_vis.loc[slice(None), 'DENV_1'].values), max(df_vis.loc[slice(None), 'DENV_2'].values), max(df_vis.loc[slice(None), 'DENV_3'].values), max(df_vis.loc[slice(None), 'DENV_4'].values)])
+except:
+    mx = 1000
 ax[2].set_ylim([0, 0.06*mx])
-plt.savefig('../interim/datasus_DENV-linelist/figs/Brasil.png', dpi=300)
+plt.savefig('../interim/datasus_DENV-linelist/uf/figs/Brasil.png', dpi=300)
 plt.close()
 
 ## States
-df_vis = monthly_df.set_index(['date', 'UF'])
+df_vis = monthly_df_uf.set_index(['date', 'UF'])
 dates = df_vis.index.get_level_values('date').unique()
 for UF in df_vis.index.get_level_values('UF').unique():
     fig,ax=plt.subplots(nrows=3, figsize=(8.3,11.7/1.5), sharex=True)
@@ -279,5 +358,5 @@ for UF in df_vis.index.get_level_values('UF').unique():
     ax[0].set_xlim([min(dates), max(dates)])
     mx = max([np.nanmax(df_vis.loc[(slice(None), UF), 'DENV_1'].values), np.nanmax(df_vis.loc[(slice(None), UF), 'DENV_2'].values), np.nanmax(df_vis.loc[(slice(None), UF), 'DENV_4'].values)])
     ax[2].set_ylim([0, 0.15*mx]) if not np.isnan(mx) else ax[2].set_ylim([0, 100])
-    plt.savefig(f'../interim/datasus_DENV-linelist/figs/{UF}.png', dpi=300)
+    plt.savefig(f'../interim/datasus_DENV-linelist/uf/figs/{UF}.png', dpi=300)
     plt.close()

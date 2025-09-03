@@ -11,3 +11,6 @@ dependencies:
   - pandas
   - matplotlib
   - geopandas
+  - spopt
+  - libpysal
+  - shapely

@@ -170,4 +170,6 @@ dmypy.json
 
 # Data
 data/raw/datasus_DENV-linelist/composite_dataset/composite_*
-Data/interim/bayesian-imputation-model_output
+data/interim/bayesian-imputation-model_output
+data/interim/datasus_DENV-linelist/municipality/DENV-serotypes_1996-2025_weekly_municipality.csv
+data/raw/RG2017_regioesgeograficas2017_20180911

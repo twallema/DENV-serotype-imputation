@@ -32,3 +32,5 @@ Downloaded from [datasus](https://datasus.saude.gov.br/transferencia-de-arquivos
     + On line 457453, column "DT_FEBRE" an invalid date "1-05-22" was rectified to "2001-05-22".
 
 + `composite_2002.csv`: In this dataset, there were roughly 50 similar mistakes, about 10 in the column "DT_SIN_PRI" and about 40 in the column "DT_FEBRE". Because fixing these mistakes takes about 20 minutes for each year, I've abstained from manual rectification of dates from 2002 onwards.
+
++ `composite_2008.csv`: In this dataset, line 617303 was removed because the municipality ID was '33p440'.
