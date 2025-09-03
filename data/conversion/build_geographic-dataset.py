@@ -15,7 +15,7 @@ gdf = gpd.read_file("../raw/BR_Municipios_2023/BR_Municipios_2023.shp")[['CD_MUN
 
 # Convert unit codes to numeric type
 for col in ['CD_MUN', 'CD_RGI', 'CD_RGINT', 'CD_UF', 'CD_REGIAO']:
-    gdf[col] = pd.to_numeric(gdf[col], downcast='integer')
+    gdf[col] = pd.to_numeric(gdf[col])
 
 # Load demography
 demographics = pd.read_csv('../raw/sprint_2025/datasus_population_2001_2024.csv')
@@ -70,6 +70,12 @@ gdf = gdf.merge(environ_vars, on="CD_MUN")
 
 # To avoid geometry dissolution issues later down the line
 gdf["geometry"] = gdf.geometry.apply(shapely.make_valid)
+
+# Convert codes to int
+gdf['CD_RGI'] = gdf['CD_RGI'].astype(int)
+gdf['CD_RGINT'] = gdf['CD_RGINT'].astype(int)
+gdf['CD_UF'] = gdf['CD_UF'].astype(int)
+gdf['CD_REGIAO'] = gdf['CD_REGIAO'].astype(int)
 
 # Save to a GeoPackage
 gdf.to_parquet("../interim/geographic-dataset.parquet", compression='brotli')
