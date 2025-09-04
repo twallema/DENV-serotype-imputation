@@ -165,7 +165,7 @@ w = Rook.from_dataframe(geography)
 # Setup and run the max-p model
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-threshold = 200  # Your chosen minimum sum per cluster
+threshold = 250  # Your chosen minimum sum per cluster
 model = MaxPHeuristic(
     geography,
     w, 
