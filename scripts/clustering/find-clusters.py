@@ -9,16 +9,16 @@ from scipy.ndimage import gaussian_filter1d
 from sklearn.preprocessing import StandardScaler
 
 
-region = 'immediate'
+region = 'CD_RGI'
 
 # Load raw data
 # >>>>>>>>>>>>>
 
 # Load geodata
-geography = gpd.read_file("../../data/interim/geographic-dataset.gpkg")
+geography = gpd.read_parquet("../../data/interim/geographic-dataset.parquet")
 
 # Load case data
-denv = pd.read_csv('../../data/interim/datasus_DENV-linelist/municipality/DENV-serotypes_1996-2025_monthly_municipality.csv', parse_dates=True)
+denv = pd.read_csv('../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv', parse_dates=True)
 
 
 # Aggregate to the intermediate/immediate regions
@@ -26,42 +26,42 @@ denv = pd.read_csv('../../data/interim/datasus_DENV-linelist/municipality/DENV-s
 
 if region:
 
-    assert ((region != 'immediate') | (region != 'intermediate')), "'region' must be either 'immediate' or 'intermediate''"
+    assert ((region != 'CD_RGI') | (region != 'CD_RGINT')), "'region' must be either 'CD_RGI' or 'CD_RGINT''"
 
     # Geography
     # >>>>>>>>>
 
-    muncipality_region_map = geography[['geocode', f'{region}_region_name']]
+    muncipality_region_map = geography[['CD_MUN', f'{region}']]
 
     # --- 1. Majority vote of biome per immediate region ---
     # Count how many municipalities per biome in each immediate region
     biome_majority = (
-        geography.groupby([f'{region}_region_name', 'biome'])
+        geography.groupby([f'{region}', 'biome'])
         .size()
         .reset_index(name='count')
     )
     # For each immediate region, keep the biome with max count
     biome_majority = (
         biome_majority
-        .sort_values([f'{region}_region_name', 'count'], ascending=[True, False])
-        .drop_duplicates(f'{region}_region_name')
-        .set_index(f'{region}_region_name')['biome']
+        .sort_values([f'{region}', 'count'], ascending=[True, False])
+        .drop_duplicates(f'{region}')
+        .set_index(f'{region}')['biome']
     )
     # --- 2. Dissolve geometries by immediate region ---
-    gdf_regions = geography.dissolve(by=f'{region}_region_name', aggfunc={'pop': 'sum'})
+    gdf_regions = geography.dissolve(by=f'{region}', aggfunc={'POP': 'sum'})
     # --- 3. Attach the majority biome back ---
     gdf_regions['biome'] = gdf_regions.index.map(biome_majority)
     # --- 4. Retain only relevant columns ---
     gdf_regions = gdf_regions.reset_index()
-    geography = gdf_regions[[f'{region}_region_name', 'biome', 'pop', 'geometry']]
-    # --- 5. Rename 'immediate_region_name' to 'geocode' ---
-    geography = geography.rename(columns={f'{region}_region_name': 'geocode'})
+    geography = gdf_regions[[f'{region}', 'biome', 'POP', 'geometry']]
+    # --- 5. Rename 'immediate_region_name' to 'CD_MUN' ---
+    geography = geography.rename(columns={f'{region}': 'CD_MUN'})
 
     # Incidence
     # >>>>>>>>>
 
     # Merge incidence with mapping
-    denv = denv.merge(muncipality_region_map, on="geocode", how="left")
+    denv = denv.merge(muncipality_region_map, on="CD_MUN", how="left")
     # Define custom aggregation function to treat the Nans
     def nan_to_zero_sum(series):
         if series.isna().all():
@@ -72,25 +72,27 @@ if region:
     denv_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
     # Group and aggregate
     denv = (
-        denv.groupby([f"{region}_region_name", "date"])[denv_cols]
+        denv.groupby([f"{region}", "date"])[denv_cols]
         .agg(nan_to_zero_sum)
         .reset_index()
     )
-    denv = denv.rename(columns={f'{region}_region_name': 'geocode'})
-    # Start in 1999
-    denv['date'] = pd.to_datetime(denv['date'])
-    denv = denv[denv['date'] > datetime(2000,1,1)]
-
+    denv = denv.rename(columns={f'{region}': 'CD_MUN'})
 
 # Dynamic Time Warping
 # >>>>>>>>>>>>>>>>>>>>
 
 # normalize total dengue cases to incidence per 100K
-total_DENV = denv[['geocode', 'date', 'DENV_total']]
-total_DENV = total_DENV.merge(geography[['geocode', 'pop']], on="geocode", how="left")
+total_DENV = denv[['CD_MUN', 'date', 'DENV_total']]
+total_DENV = total_DENV.merge(geography[['CD_MUN', 'POP']], on="CD_MUN", how="left")
 total_DENV["DENV_per_100k"] = (
-    total_DENV["DENV_total"] / total_DENV["pop"] * 1e5
+    total_DENV["DENV_total"] / total_DENV["POP"] * 1e5
 )
+
+# smooth with a gaussian filter and z-score
+
+# perform DTW
+
+# perform MDS to reduce the dimensionality of the DTW distance matrix
 
 
 # Compute threshold
@@ -103,14 +105,14 @@ denv["year"] = pd.to_datetime(denv["date"]).dt.year
 denv["total_cases"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
 
 # Sum cases during active months by year
-active_sum = denv.groupby(["geocode","year"]).apply(lambda x: x.loc[x.total_cases>0,"total_cases"].sum()).reset_index(name="active_sum")
+active_sum = denv.groupby(["CD_MUN","year"]).apply(lambda x: x.loc[x.total_cases>0,"total_cases"].sum()).reset_index(name="active_sum")
 
 # Take mean across years
-mean_active_sum = active_sum.groupby("geocode")["active_sum"].mean().reset_index()
+mean_active_sum = active_sum.groupby("CD_MUN")["active_sum"].mean().reset_index()
 mean_active_sum.rename(columns={"active_sum":"mean_active_sum"}, inplace=True)
 
 # Merge min_yearly_sum
-geography = geography.merge(mean_active_sum, on="geocode", how="left")
+geography = geography.merge(mean_active_sum, on="CD_MUN", how="left")
 
 
 # Make biome covariate
@@ -163,7 +165,7 @@ w = Rook.from_dataframe(geography)
 # Setup and run the max-p model
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-threshold = 20  # Your chosen minimum sum per cluster
+threshold = 250  # Your chosen minimum sum per cluster
 model = MaxPHeuristic(
     geography,
     w, 
@@ -173,8 +175,8 @@ model = MaxPHeuristic(
     top_n=2,
     verbose=True,
     policy='multiple',
-    max_iterations_construction=10000,
-    max_iterations_sa=50,
+    max_iterations_construction=1000,
+    max_iterations_sa=100,
 )
 model.solve()
 
@@ -200,4 +202,4 @@ ax.axis("off")
 plt.show()
 plt.close()
 
-geography[['geocode', 'clusters']].to_csv('../../data/interim/clusters.csv')
+geography[['CD_MUN', 'clusters']].to_csv('../../data/interim/clusters.csv')

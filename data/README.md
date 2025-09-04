@@ -4,19 +4,15 @@ Here we list a description of all datasets, raw datasets are unaltered original 
 
 ## Raw
 
-### RG2017_regioesgeograficas2017_20180911
+### BR_Municipios_2023
 
-+ `RG2017_regioesgeograficas2017.shp`: Shapefiles of the Brazilian municipalities, including the names of the immediate (508) and intermediate (133) Brazilian regions. Downloaded from IBGE: https://geoftp.ibge.gov.br/organizacao_do_territorio/divisao_regional/divisao_regional_do_brasil/divisao_regional_do_brasil_em_regioes_geograficas_2017/shp/RG2017_regioesgeograficas2017_20180911.zip
+Shapefiles of the Brazilian municipalities, including the area codes and names of the immediate regions (508), intermediate regions (133), federative units (27) and regions (5) of Brazil. Ommitted from Github due to file size limitations. Downloaded from IBGE: https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_municipais/municipio_2023/Brasil/BR_Municipios_2023.zip 
 
 ### Sprint 2025
 
 Downloaded using the instructions under '2 - Using FTPWeb' on https://sprint.mosqlimate.org/data/.
 
 + `datasus_population_2001_2024.csv`: Population data (source: SVS). Files with population by Brazilian municipality and year (2001 - 2024). Source: http://tabnet.datasus.gov.br/cgi/deftohtm.exe?ibge/cnv/popsvs2024br.def 
-
-+ `map_regional_health.csv`: Link between each city and its regional and macroregional health center (source = IBGE).
-
-+ `shape_muni.gpkg`: Geometry of Brazilian municipalities in `shape_muni.gpkg` (source = IBGE).
 
 + `environ_vars.csv`: Environmental characteristics of the municipalities (columns 'koppen' and 'biome').
 
@@ -30,9 +26,9 @@ These data are partly confidential and can be found on the Bento lab box.
 
 + `adjacency_matrix.csv`: Contains a square origin-destination-type adjacency matrix of the Brasilian states.
 
-### Geographic dataset
++ `geographic-dataset.parquet`: Compressed (brotli compression) geographical dataset. Dataset containing geometries of Brazilian municipalities, along with variables relevant for clustering. Made using `data/conversion/build_geographic-dataset.py` from `data/raw/BR_Municipios_2023`.
 
-+ `geographic-dataset.gpkg`: Dataset containing geometries of Brazilian municipalities, along with variables relevant for clustering. Columns: 'geocode', 'geocode_name', 'uf', 'uf_code', 'geometry', 'pop', 'pop_density', 'koppen', 'biome'.
++ `spatial_units_mapping.csv`: Area codes and names of the municipalities, immediate regions, intermediate regions, federative units and regions. Also available in `geographic-dataset.parquet` but saved seperately to lower IO burden.
 
 ### Datasus DENV linelist dataset
 

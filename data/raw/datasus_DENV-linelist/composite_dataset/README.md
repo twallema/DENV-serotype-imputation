@@ -1,20 +1,22 @@
-## Origin of these data
+## Missing data
 
-### 1996-1999
+The DENV linelist data files are large and partly confidential and have thus been ommitted from Github.
+The data can be found on the Bento lab Box in the folder `DENV > linelist_to_serotypes > data > linelist_data > composite_dataset`.
 
-Updated data received by PI Bento in 2025.
+The following data are confidential:
 
-### 2000-2007
++ `composite_dataset/composite_1996.csv`
++ `composite_dataset/composite_1997.csv`
++ `composite_dataset/composite_1998.csv`
++ `composite_dataset/composite_1999.csv`
 
-Downloaded from [datasus](https://datasus.saude.gov.br/transferencia-de-arquivos/#) by Siyu Chen on May 21, 2025.
+The following public data are "broken" (but we have a confidential working copy)
 
-### 2008
++ `composite_dataset/composite_2008.csv`
 
-Data received by PI Bento in 2021.
+All other publicy available data were downloaded from datasus (21-05-2025): https://datasus.saude.gov.br/transferencia-de-arquivos/#
 
-### 2009-2025
-
-Downloaded from [datasus](https://datasus.saude.gov.br/transferencia-de-arquivos/#) by Siyu Chen on May 21, 2025.
+**To use the script `data/conversion/datasus_DENV-linelist_conversion.py`, copy the files from the Bento lab Box to this folder.**
 
 ## Alterations made to these data in Excel
 
