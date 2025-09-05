@@ -22,7 +22,7 @@ geography = gpd.read_parquet("../../data/interim/geographic-dataset.parquet")
 denv = pd.read_csv('../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv', parse_dates=True)
 
 # Load DTW-MDS embedding
-DTW_covariates = pd.read_csv(f'../../data/interim/DTW-MDS-embedding_{region_filename}.csv')
+DTW_covariates = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/DTW-MDS-embedding_{region_filename}.csv')
 
 
 
@@ -188,15 +188,15 @@ model = MaxPHeuristic(
     top_n=3,
     verbose=True,
     policy='multiple',
-    max_iterations_construction=10000,
-    max_iterations_sa=200,
+    max_iterations_construction=1000,
+    max_iterations_sa=100,
 )
 model.solve()
 
 
 
-# Save and visualise the results
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# Save and visualise the clustering results
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # add cluster labels to GeoDataFrame
 geography["cluster"] = model.labels_
@@ -204,7 +204,7 @@ geography["cluster"] = model.labels_
 # visualise clusters on a map
 fig, ax = plt.subplots(figsize=(10, 10))
 geography.plot(
-    column="clusters",          # color regions by cluster label
+    column="cluster",          # color regions by cluster label
     categorical=True,
     cmap="tab20",             # categorical colormap
     linewidth=0.1,
@@ -214,8 +214,53 @@ geography.plot(
 )
 ax.set_title("Max-p Regionalization of Brazilian Municipalities", fontsize=14)
 ax.axis("off")
+plt.savefig(f'../../data/interim/clusters/clusters_{region_filename}.png', dpi=200)
 plt.show()
 plt.close()
 
 # save the result
-geography[[f'{region}', 'cluster']].to_csv(f'../../data/interim/clusters_{region_filename}.csv')
+geography[[f'{region}', 'cluster']].to_csv(f'../../data/interim/clusters/clusters_{region_filename}.csv')
+
+
+
+# Build the clusters adjacency matrix needed for the Bayesian imputation model
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+
+# Step 1: Dissolve municipalities to state-level geometries
+clusters_geography = geography.dissolve(by='cluster', as_index=False)
+clusters_geography = clusters_geography.reset_index(drop=True)
+
+# Step 2: Ensure 'cluster' column is sorted
+clusters_geography = clusters_geography.sort_values('cluster').reset_index(drop=True)
+cluster_list = clusters_geography['cluster'].tolist()
+
+# Step 4: Build spatial index and adjacency dictionary
+sindex = clusters_geography.sindex
+adjacency = {idx: set() for idx in cluster_list}
+
+for i, row in clusters_geography.iterrows():
+    geom_i = row.geometry
+    uf_i = row['cluster']
+    possible_matches_index = list(sindex.intersection(geom_i.bounds))
+    
+    for j in possible_matches_index:
+        if i == j:
+            continue
+        geom_j = clusters_geography.loc[j, "geometry"]
+        uf_j = clusters_geography.loc[j, 'cluster']
+        
+        # Use intersects instead of touches for robustness
+        if geom_i.intersects(geom_j):
+            adjacency[uf_i].add(uf_j)
+            adjacency[uf_j].add(uf_i)  # symmetric
+
+# Step 5: Convert to binary adjacency matrix
+adj_matrix = pd.DataFrame(0, index=cluster_list, columns=cluster_list)
+
+for uf in cluster_list:
+    for neighbor in adjacency[uf]:
+        adj_matrix.loc[uf, neighbor] = 1
+
+# Save in a .csv
+adj_matrix.to_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}.csv')
