@@ -9,7 +9,8 @@ from scipy.ndimage import gaussian_filter1d
 from sklearn.preprocessing import StandardScaler
 
 
-region = 'CD_RGI'
+region = 'CD_RGI' # only CD_RGI
+region_filename = 'rgi'
 
 # Load raw data
 # >>>>>>>>>>>>>
@@ -20,9 +21,13 @@ geography = gpd.read_parquet("../../data/interim/geographic-dataset.parquet")
 # Load case data
 denv = pd.read_csv('../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv', parse_dates=True)
 
+# Load DTW-MDS embedding
+DTW_covariates = pd.read_csv(f'../../data/interim/DTW-MDS-embedding_{region_filename}.csv')
 
-# Aggregate to the intermediate/immediate regions
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+
+# Aggregate incidence and geographical dataset to the intermediate/immediate regions
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 if region:
 
@@ -54,8 +59,6 @@ if region:
     # --- 4. Retain only relevant columns ---
     gdf_regions = gdf_regions.reset_index()
     geography = gdf_regions[[f'{region}', 'biome', 'POP', 'geometry']]
-    # --- 5. Rename 'immediate_region_name' to 'CD_MUN' ---
-    geography = geography.rename(columns={f'{region}': 'CD_MUN'})
 
     # Incidence
     # >>>>>>>>>
@@ -76,24 +79,7 @@ if region:
         .agg(nan_to_zero_sum)
         .reset_index()
     )
-    denv = denv.rename(columns={f'{region}': 'CD_MUN'})
-
-# Dynamic Time Warping
-# >>>>>>>>>>>>>>>>>>>>
-
-# normalize total dengue cases to incidence per 100K
-total_DENV = denv[['CD_MUN', 'date', 'DENV_total']]
-total_DENV = total_DENV.merge(geography[['CD_MUN', 'POP']], on="CD_MUN", how="left")
-total_DENV["DENV_per_100k"] = (
-    total_DENV["DENV_total"] / total_DENV["POP"] * 1e5
-)
-
-# smooth with a gaussian filter and z-score
-
-# perform DTW
-
-# perform MDS to reduce the dimensionality of the DTW distance matrix
-
+   
 
 # Compute threshold
 # >>>>>>>>>>>>>>>>>
@@ -105,14 +91,15 @@ denv["year"] = pd.to_datetime(denv["date"]).dt.year
 denv["total_cases"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
 
 # Sum cases during active months by year
-active_sum = denv.groupby(["CD_MUN","year"]).apply(lambda x: x.loc[x.total_cases>0,"total_cases"].sum()).reset_index(name="active_sum")
+active_sum = denv.groupby([f'{region}',"year"]).apply(lambda x: x.loc[x.total_cases>0,"total_cases"].sum()).reset_index(name="active_sum")
 
 # Take mean across years
-mean_active_sum = active_sum.groupby("CD_MUN")["active_sum"].mean().reset_index()
+mean_active_sum = active_sum.groupby(f'{region}')["active_sum"].mean().reset_index()
 mean_active_sum.rename(columns={"active_sum":"mean_active_sum"}, inplace=True)
 
 # Merge min_yearly_sum
-geography = geography.merge(mean_active_sum, on="CD_MUN", how="left")
+geography = geography.merge(mean_active_sum, on=f'{region}', how="left")
+
 
 
 # Make biome covariate
@@ -130,6 +117,7 @@ geography = geography.merge(
 # ensure biome dummies are int (0/1)
 for col in biome_dummies.columns:
     geography[col] = geography[col].astype(float)
+
 
 
 # Make compactness covariate
@@ -152,14 +140,39 @@ alpha = 1   # try different values
 geography["cx"] *= alpha 
 geography["cy"] *= alpha
 
-# 5) Add these to your attrs list for MaxPHeuristic
-attrs = biome_dummies.columns.tolist() + ["cx", "cy"]
+
+# Make DTW-MDS covariate
+# >>>>>>>>>>>>>>>>>>>>>>
+
+
+# Merge to the geography
+geography = geography.merge(
+    DTW_covariates, 
+    on = f'{region}'
+)
+
+# Standardize DTW-MDS embedding
+sc = StandardScaler()
+DTW_covariates = [x for x in DTW_covariates.columns.to_list() if x != f'{region}']
+geography[DTW_covariates] = sc.fit_transform(geography[DTW_covariates])
+
+
+
+# Decide on attributes to use
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# my pick
+compactness = ["cx", "cy"]
+attrs = compactness + DTW_covariates #+ biome
+
+
 
 # Build weights matrix
 # >>>>>>>>>>>>>>>>>>>>>
 
-# Build Queen contiguity
+# Build contiguity weight map
 w = Rook.from_dataframe(geography)
+
 
 
 # Setup and run the max-p model
@@ -172,21 +185,23 @@ model = MaxPHeuristic(
     attrs_name=attrs,
     threshold_name='mean_active_sum',
     threshold=threshold,
-    top_n=2,
+    top_n=3,
     verbose=True,
     policy='multiple',
-    max_iterations_construction=1000,
-    max_iterations_sa=100,
+    max_iterations_construction=10000,
+    max_iterations_sa=200,
 )
 model.solve()
+
 
 
 # Save and visualise the results
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-# Add cluster labels to GeoDataFrame
-geography["clusters"] = model.labels_
+# add cluster labels to GeoDataFrame
+geography["cluster"] = model.labels_
 
+# visualise clusters on a map
 fig, ax = plt.subplots(figsize=(10, 10))
 geography.plot(
     column="clusters",          # color regions by cluster label
@@ -202,4 +217,5 @@ ax.axis("off")
 plt.show()
 plt.close()
 
-geography[['CD_MUN', 'clusters']].to_csv('../../data/interim/clusters.csv')
+# save the result
+geography[[f'{region}', 'cluster']].to_csv(f'../../data/interim/clusters_{region_filename}.csv')
