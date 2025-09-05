@@ -90,4 +90,4 @@ print(mds.stress_)
 # convert to dataframe
 embedding = pd.DataFrame(coords, index=ts.index, columns=[f"mds{i+1}" for i in range(n_mds_components)]).reset_index()
 # save dataframe
-embedding.to_csv(f'../../data/interim/DTW-MDS-embedding_{region_filename}.csv', index=False)
+embedding.to_csv(f'../../data/interim/DTW-MDS-embeddings/DTW-MDS-embedding_{region_filename}.csv', index=False)
