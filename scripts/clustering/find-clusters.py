@@ -18,7 +18,8 @@ region_filename = 'rgint'
 geography = gpd.read_parquet("../../data/interim/geographic-dataset.parquet")
 
 # Load case data
-denv = pd.read_csv('../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv', parse_dates=True)
+denv = pd.read_csv('../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv')
+denv['date'] = pd.to_datetime(denv['date'])
 
 # Load DTW-MDS embedding
 DTW_covariates = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/DTW-MDS-embedding_{region_filename}.csv')
@@ -85,21 +86,19 @@ if region:
 # >>>>>>>>>>>>>>>>>
 
 # Compute the mimimum sum of serotyped cases across all years (will have to be changed)
-# Extract year
+# limit time window (from 2020 onwards all regions have good subtyping)
+denv = denv[((denv['date'] > datetime(1900,1,1)) & (denv['date'] < datetime(2020,1,1)))]
+# extract year
 denv["year"] = pd.to_datetime(denv["date"]).dt.year
-# Compute total cases per month
-denv["total_cases"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
-
-# Sum cases during active months by year
-active_sum = denv.groupby([f'{region}',"year"]).apply(lambda x: x.loc[x.total_cases>0,"total_cases"].sum()).reset_index(name="active_sum")
-
-# Take mean across years
-mean_active_sum = active_sum.groupby(f'{region}')["active_sum"].mean().reset_index()
-mean_active_sum.rename(columns={"active_sum":"mean_active_sum"}, inplace=True)
-
-# Merge min_yearly_sum
+# compute total cases per month
+denv["N_typed"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
+# sum cases by year
+active_sum = denv.groupby([f'{region}',"year"])['N_typed'].sum().reset_index()
+# take mean across years
+mean_active_sum = active_sum.groupby(f'{region}')["N_typed"].mean().reset_index()
+mean_active_sum.rename(columns={"N_typed":"N_typed_monthly_mean"}, inplace=True)
+# merge min_yearly_sum
 geography = geography.merge(mean_active_sum, on=f'{region}', how="left")
-
 
 
 # Make biome covariate
@@ -160,7 +159,7 @@ geography[DTW_covariates] = sc.fit_transform(geography[DTW_covariates])
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # my pick
-attrs = DTW_covariates + [region+'_NORM'] + biome_dummies.columns.to_list() + ['cx', 'cy']
+attrs = DTW_covariates + ['cx', 'cy'] #+ [region+'_NORM'] #+ biome_dummies.columns.to_list() 
 
 
 
@@ -175,12 +174,12 @@ w = Rook.from_dataframe(geography)
 # Setup and run the max-p model
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-threshold = 250  # Your chosen minimum sum per cluster
+threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
 model = MaxPHeuristic(
     geography,
     w, 
     attrs_name=attrs,
-    threshold_name='mean_active_sum',
+    threshold_name='N_typed_monthly_mean',
     threshold=threshold,
     top_n=3,
     verbose=True,
