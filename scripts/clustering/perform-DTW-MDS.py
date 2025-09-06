@@ -2,7 +2,6 @@
 import pandas as pd
 import numpy as np
 import seaborn as sns
-import geopandas as gpd
 from datetime import datetime
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter1d
@@ -10,13 +9,19 @@ from tslearn.metrics import cdist_dtw
 from sklearn.manifold import MDS
 from sklearn.preprocessing import StandardScaler
 
-region = 'CD_MUN'
-region_filename = 'mun'
+# spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
+region_filename = 'rgi'
+region = 'CD_RGI'
+# number of dimensions to project the DTW matrix onto (bigger = better representation of DTW matrix BUT clustering becomes harder)
 n_mds_components = 3
+# sigma of gaussian filter used to smooth DENV incidence per 100K
 sigma = 1
+# z-score the DENV incidence per 100K (doesn't work well; just here to let you know I tried this)
 z_score = False
+# use all data
 start_date = datetime(1900,1,1)
 end_date = datetime(2100,1,1)
+
 
 # --- Step 1: Prepare and smooth incidence time series ---
 
@@ -55,6 +60,7 @@ if z_score:
 # plt.close()
 
 
+
 # --- Step 2: Compute DTW distance matrix ---
 
 # pivot to wide format
@@ -66,19 +72,21 @@ X = ts.fillna(0).to_numpy()[:, :, np.newaxis]
 # compute pairwise DTW distances
 dtw_dist = cdist_dtw(X, sakoe_chiba_radius=1, n_jobs=-1, verbose=True)
 
-# visualise results
+# visualise raw matrx
 plt.figure(figsize=(10, 8))
 plt.imshow(dtw_dist, cmap="viridis", aspect="auto")
 plt.colorbar(label="DTW distance")
 plt.title("DTW distance matrix across 508 regions")
 plt.axis("off")  # hide axis labels since 508 is too dense
-plt.show()
+plt.savefig(f'../../data/interim/DTW-MDS-embeddings/DTW-mat-raw_{region_filename}.pdf')
 plt.close()
 
-# visualise some more
+# visualise clustermap
 sns.clustermap(dtw_dist, cmap="viridis", figsize=(12, 12))
-plt.show()
+plt.savefig(f'../../data/interim/DTW-MDS-embeddings/DTW-mat-clustermap_{region_filename}.pdf')
 plt.close()
+
+
 
 # --- Step 3: Multidimensional Scaling (MDS) ---
 
