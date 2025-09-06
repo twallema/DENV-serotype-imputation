@@ -13,7 +13,7 @@ pytensor.config.cxx = '/usr/bin/clang++'
 pytensor.config.on_opt_error = "ignore"
 
 # analysis startdate
-startdate = datetime(2000,1,1)
+startdate = datetime(1900,1,1)
 
 # helper function for argument parsing
 def str_to_bool(value):
@@ -415,7 +415,7 @@ else:
 
 # NUTS
 with model:
-    trace = pm.sample(100, tune=100, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True)
+    trace = pm.sample(50, tune=50, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True)
 
 # Plot posterior predictive checks
 with model:
