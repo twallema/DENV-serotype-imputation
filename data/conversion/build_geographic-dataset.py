@@ -35,7 +35,7 @@ gdf = gdf.merge(demographics, on="CD_MUN")
 gdf = gdf.rename(columns={'population': 'POP'})
 
 # save a lightweight csv copy of the mapping between codes
-pd.DataFrame(gdf[['CD_MUN', 'NM_MUN', 'CD_RGI', 'NM_RGI', 'CD_RGINT', 'NM_RGINT', 'CD_UF', 'NM_UF', 'CD_REGIAO', 'NM_REGIAO']]).to_csv('../interim/spatial_units_mapping.csv')
+pd.DataFrame(gdf[['CD_MUN', 'NM_MUN', 'CD_RGI', 'NM_RGI', 'CD_RGINT', 'NM_RGINT', 'CD_UF', 'NM_UF', 'CD_REGIAO', 'NM_REGIAO']]).to_csv('../interim/spatial_units_mapping.csv', index=False)
 
 # Compute population density
 # >>>>>>>>>>>>>>>>>>>>>>>>>>
