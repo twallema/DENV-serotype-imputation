@@ -30,6 +30,10 @@ These data are partly confidential and can be found on the Bento lab box.
 
 + `spatial_units_mapping.csv`: Area codes and names of the municipalities, immediate regions, intermediate regions, federative units and regions. Also available in `geographic-dataset.parquet` but saved seperately to lower IO burden.
 
+### DENV_per_100k
+
++ `DENV_per_100k_mun.csv`: Total dengue incidence per 100K inhabitants at the municipality level. Made using the formatted linelist data in `data/interim/datasus_DENV-linelist` and `data/conversion/build_dengue-incidence-100k.py`.
+
 ### Datasus DENV linelist dataset
 
 #### UF

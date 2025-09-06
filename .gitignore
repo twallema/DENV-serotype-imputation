@@ -179,3 +179,4 @@ data/raw/BR_Municipios_2023/BR_Municipios_2023.qix
 data/raw/BR_Municipios_2023/BR_Municipios_2023.shp
 data/raw/BR_Municipios_2023/BR_Municipios_2023.shx
 data/interim/geographic-dataset.parquet
+data/interim/DTW-MDS-embeddings/DTW-mat-clustermap_mun.pdf

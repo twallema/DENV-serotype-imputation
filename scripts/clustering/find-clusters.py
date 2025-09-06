@@ -8,8 +8,8 @@ from libpysal.weights import Rook, Queen
 from scipy.ndimage import gaussian_filter1d
 from sklearn.preprocessing import StandardScaler
 
-
-region = 'CD_RGI'
+# spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
+region_filename = 'rgi'
 
 # Load raw data
 # >>>>>>>>>>>>>
@@ -18,11 +18,16 @@ region = 'CD_RGI'
 geography = gpd.read_parquet("../../data/interim/geographic-dataset.parquet")
 
 # Load case data
-denv = pd.read_csv('../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv', parse_dates=True)
+denv = pd.read_csv('../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv')
+denv['date'] = pd.to_datetime(denv['date'])
+
+# Load DTW-MDS embedding
+DTW_covariates = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/DTW-MDS-embedding_{region_filename}.csv')
+region = DTW_covariates.columns.to_list()[0]
 
 
-# Aggregate to the intermediate/immediate regions
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# Aggregate incidence and geographical dataset to the intermediate/immediate regions
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 if region:
 
@@ -54,8 +59,6 @@ if region:
     # --- 4. Retain only relevant columns ---
     gdf_regions = gdf_regions.reset_index()
     geography = gdf_regions[[f'{region}', 'biome', 'POP', 'geometry']]
-    # --- 5. Rename 'immediate_region_name' to 'CD_MUN' ---
-    geography = geography.rename(columns={f'{region}': 'CD_MUN'})
 
     # Incidence
     # >>>>>>>>>
@@ -76,43 +79,26 @@ if region:
         .agg(nan_to_zero_sum)
         .reset_index()
     )
-    denv = denv.rename(columns={f'{region}': 'CD_MUN'})
-
-# Dynamic Time Warping
-# >>>>>>>>>>>>>>>>>>>>
-
-# normalize total dengue cases to incidence per 100K
-total_DENV = denv[['CD_MUN', 'date', 'DENV_total']]
-total_DENV = total_DENV.merge(geography[['CD_MUN', 'POP']], on="CD_MUN", how="left")
-total_DENV["DENV_per_100k"] = (
-    total_DENV["DENV_total"] / total_DENV["POP"] * 1e5
-)
-
-# smooth with a gaussian filter and z-score
-
-# perform DTW
-
-# perform MDS to reduce the dimensionality of the DTW distance matrix
+   
 
 
 # Compute threshold
 # >>>>>>>>>>>>>>>>>
 
 # Compute the mimimum sum of serotyped cases across all years (will have to be changed)
-# Extract year
+# limit time window (before 1999 will likely be excluded because it's way too limited; from 2019 onwards all regions have good subtyping)
+denv = denv[((denv['date'] > datetime(1999,1,1)) & (denv['date'] < datetime(2019,1,1)))]
+# extract year
 denv["year"] = pd.to_datetime(denv["date"]).dt.year
-# Compute total cases per month
-denv["total_cases"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
-
-# Sum cases during active months by year
-active_sum = denv.groupby(["CD_MUN","year"]).apply(lambda x: x.loc[x.total_cases>0,"total_cases"].sum()).reset_index(name="active_sum")
-
-# Take mean across years
-mean_active_sum = active_sum.groupby("CD_MUN")["active_sum"].mean().reset_index()
-mean_active_sum.rename(columns={"active_sum":"mean_active_sum"}, inplace=True)
-
-# Merge min_yearly_sum
-geography = geography.merge(mean_active_sum, on="CD_MUN", how="left")
+# compute total cases per month
+denv["N_typed"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
+# sum cases by year
+active_sum = denv.groupby([f'{region}',"year"])['N_typed'].sum().reset_index()
+# take mean across years
+mean_active_sum = active_sum.groupby(f'{region}')["N_typed"].mean().reset_index()
+mean_active_sum.rename(columns={"N_typed":"N_typed_monthly_mean"}, inplace=True)
+# merge min_yearly_sum
+geography = geography.merge(mean_active_sum, on=f'{region}', how="left")
 
 
 # Make biome covariate
@@ -132,6 +118,7 @@ for col in biome_dummies.columns:
     geography[col] = geography[col].astype(float)
 
 
+
 # Make compactness covariate
 # >>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -147,32 +134,54 @@ geography["cy"] = geography.geometry.centroid.y
 sc = StandardScaler()
 geography[["cx","cy"]] = sc.fit_transform(geography[["cx","cy"]])
 
-# 4) Choose alpha (compactness weight). Try small values first.
-alpha = 1   # try different values
-geography["cx"] *= alpha 
-geography["cy"] *= alpha
+# 4) Normalize the area codes (similarity in codes reflects proximity in space)
+geography[region+'_NORM'] = sc.fit_transform(geography[[region]])
 
-# 5) Add these to your attrs list for MaxPHeuristic
-attrs = biome_dummies.columns.tolist() + ["cx", "cy"]
+
+
+# Make DTW-MDS covariate
+# >>>>>>>>>>>>>>>>>>>>>>
+
+# Merge to the geography
+geography = geography.merge(
+    DTW_covariates, 
+    on = f'{region}'
+)
+
+# Standardize DTW-MDS embedding
+sc = StandardScaler()
+DTW_covariates = [x for x in DTW_covariates.columns.to_list() if x != f'{region}']
+geography[DTW_covariates] = sc.fit_transform(geography[DTW_covariates])
+
+
+
+# Decide on attributes to use
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# my pick
+attrs = DTW_covariates + ['cx', 'cy']  #+ biome_dummies.columns.to_list() #+ [region+'_NORM'] 
+
+
 
 # Build weights matrix
 # >>>>>>>>>>>>>>>>>>>>>
 
-# Build Queen contiguity
+# Build contiguity weight map
 w = Rook.from_dataframe(geography)
+
 
 
 # Setup and run the max-p model
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-threshold = 250  # Your chosen minimum sum per cluster
+threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
 model = MaxPHeuristic(
     geography,
     w, 
     attrs_name=attrs,
-    threshold_name='mean_active_sum',
+    threshold_name='N_typed_monthly_mean',
     threshold=threshold,
-    top_n=2,
+    top_n=3,
     verbose=True,
     policy='multiple',
     max_iterations_construction=1000,
@@ -181,25 +190,74 @@ model = MaxPHeuristic(
 model.solve()
 
 
-# Save and visualise the results
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-# Add cluster labels to GeoDataFrame
-geography["clusters"] = model.labels_
+# Save and visualise the clustering results
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-fig, ax = plt.subplots(figsize=(10, 10))
+# add cluster labels to GeoDataFrame
+geography["cluster"] = model.labels_
+
+# visualise clusters on a map
+fig, ax = plt.subplots(figsize=(8.3, 11.7/3*2))
 geography.plot(
-    column="clusters",          # color regions by cluster label
+    column="cluster",          # color regions by cluster label
     categorical=True,
     cmap="tab20",             # categorical colormap
-    linewidth=0.1,
+    linewidth=0.2,
     edgecolor="grey",
     legend=True,
-    ax=ax
+    ax=ax,
+    legend_kwds={'fontsize': 7, 'ncol': 2, 'loc': 'lower right'}
 )
 ax.set_title("Max-p Regionalization of Brazilian Municipalities", fontsize=14)
 ax.axis("off")
+plt.savefig(f'../../data/interim/clusters/clusters_{region_filename}.png', dpi=200)
 plt.show()
 plt.close()
 
-geography[['CD_MUN', 'clusters']].to_csv('../../data/interim/clusters.csv')
+# save the result
+geography[[f'{region}', 'cluster']].to_csv(f'../../data/interim/clusters/clusters_{region_filename}.csv', index=False)
+
+
+
+# Build the clusters adjacency matrix needed for the Bayesian imputation model
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+
+# Step 1: Dissolve municipalities to state-level geometries
+clusters_geography = geography.dissolve(by='cluster', as_index=False)
+clusters_geography = clusters_geography.reset_index(drop=True)
+
+# Step 2: Ensure 'cluster' column is sorted
+clusters_geography = clusters_geography.sort_values('cluster').reset_index(drop=True)
+cluster_list = clusters_geography['cluster'].tolist()
+
+# Step 4: Build spatial index and adjacency dictionary
+sindex = clusters_geography.sindex
+adjacency = {idx: set() for idx in cluster_list}
+
+for i, row in clusters_geography.iterrows():
+    geom_i = row.geometry
+    uf_i = row['cluster']
+    possible_matches_index = list(sindex.intersection(geom_i.bounds))
+    
+    for j in possible_matches_index:
+        if i == j:
+            continue
+        geom_j = clusters_geography.loc[j, "geometry"]
+        uf_j = clusters_geography.loc[j, 'cluster']
+        
+        # Use intersects instead of touches for robustness
+        if geom_i.intersects(geom_j):
+            adjacency[uf_i].add(uf_j)
+            adjacency[uf_j].add(uf_i)  # symmetric
+
+# Step 5: Convert to binary adjacency matrix
+adj_matrix = pd.DataFrame(0, index=cluster_list, columns=cluster_list)
+
+for uf in cluster_list:
+    for neighbor in adjacency[uf]:
+        adj_matrix.loc[uf, neighbor] = 1
+
+# Save in a .csv
+adj_matrix.to_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}.csv')

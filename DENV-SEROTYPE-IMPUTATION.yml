@@ -15,3 +15,6 @@ dependencies:
   - libpysal
   - shapely
   - pyarrow
+  - tslearn
+  - seaborn
+  - scikit-learn
