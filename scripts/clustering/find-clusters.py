@@ -86,8 +86,8 @@ if region:
 # >>>>>>>>>>>>>>>>>
 
 # Compute the mimimum sum of serotyped cases across all years (will have to be changed)
-# limit time window (from 2020 onwards all regions have good subtyping)
-denv = denv[((denv['date'] > datetime(1900,1,1)) & (denv['date'] < datetime(2020,1,1)))]
+# limit time window (before 1999 will likely be excluded because it's way too limited; from 2019 onwards all regions have good subtyping)
+denv = denv[((denv['date'] > datetime(1999,1,1)) & (denv['date'] < datetime(2019,1,1)))]
 # extract year
 denv["year"] = pd.to_datetime(denv["date"]).dt.year
 # compute total cases per month
@@ -159,7 +159,7 @@ geography[DTW_covariates] = sc.fit_transform(geography[DTW_covariates])
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # my pick
-attrs = DTW_covariates + ['cx', 'cy'] #+ [region+'_NORM'] #+ biome_dummies.columns.to_list() 
+attrs = DTW_covariates + ['cx', 'cy']  #+ biome_dummies.columns.to_list() #+ [region+'_NORM'] 
 
 
 
@@ -174,7 +174,7 @@ w = Rook.from_dataframe(geography)
 # Setup and run the max-p model
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
+threshold = 40  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
 model = MaxPHeuristic(
     geography,
     w, 
@@ -198,15 +198,16 @@ model.solve()
 geography["cluster"] = model.labels_
 
 # visualise clusters on a map
-fig, ax = plt.subplots(figsize=(10, 10))
+fig, ax = plt.subplots(figsize=(8.3, 11.7/3*2))
 geography.plot(
     column="cluster",          # color regions by cluster label
     categorical=True,
     cmap="tab20",             # categorical colormap
-    linewidth=0.1,
+    linewidth=0.2,
     edgecolor="grey",
     legend=True,
-    ax=ax
+    ax=ax,
+    legend_kwds={'fontsize': 7, 'ncol': 2, 'loc': 'lower right'}
 )
 ax.set_title("Max-p Regionalization of Brazilian Municipalities", fontsize=14)
 ax.axis("off")

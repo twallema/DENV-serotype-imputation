@@ -180,8 +180,8 @@ if CAR_per_lag:
 
         # Try to combine an AR(p) with a CAR prior on every timestep in the past
         ## Regularisation of the overall noise & split between spatially structured and unstructured noise
-        total_sigma_shrinkage = pm.HalfNormal("total_sigma_shrinkage", sigma=0.001)
-        total_sigma = pm.HalfNormal("total_sigma", sigma=total_sigma_shrinkage, shape=n_serotypes)
+        #total_sigma_shrinkage = pm.HalfNormal("total_sigma_shrinkage", sigma=0.001)
+        total_sigma = pm.HalfNormal("total_sigma", sigma=0.0002)
         proportion_uncorr = pm.Beta("proportion_uncorr", alpha=1, beta=5)  # proportion of noise that is unstructured (encourages structured noise)
         uncorr_sigma = pm.Deterministic("uncorr_sigma", proportion_uncorr * total_sigma)
         corr_sigma = pm.Deterministic("corr_sigma", (1 - proportion_uncorr) * total_sigma)
@@ -305,8 +305,7 @@ else:
         # \kappa{i,s,t}^{uncorr} ~ Normal(0, (1-f_{corr}) * \sigma^2)                                                       # spatially uncorrelated noise
 
         ## Regularisation of the overall noise & split between spatially structured and unstructured noise
-        #total_sigma_shrinkage = pm.HalfNormal("total_sigma_shrinkage", sigma=0.001)
-        total_sigma = pm.HalfNormal("total_sigma", sigma=0.001)
+        total_sigma = pm.HalfNormal("total_sigma", sigma=0.0002)
         proportion_uncorr = pm.Beta("proportion_uncorr", alpha=1, beta=2)  # proportion of noise that is unstructured (encourages spatially structured noise)
         uncorr_sigma = pm.Deterministic("uncorr_sigma", proportion_uncorr * total_sigma) * pt.ones(n_serotypes)
         corr_sigma = pm.Deterministic("corr_sigma", (1 - proportion_uncorr) * total_sigma) * pt.ones(n_serotypes)
@@ -415,7 +414,7 @@ else:
 
 # NUTS
 with model:
-    trace = pm.sample(50, tune=50, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True)
+    trace = pm.sample(20, tune=30, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True)
 
 # Plot posterior predictive checks
 with model:
