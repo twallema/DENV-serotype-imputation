@@ -414,7 +414,7 @@ else:
 
 # NUTS
 with model:
-    trace = pm.sample(20, tune=30, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True)
+    trace = pm.sample(1000, tune=1000, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True)
 
 # Plot posterior predictive checks
 with model:

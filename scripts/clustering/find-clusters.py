@@ -9,7 +9,7 @@ from scipy.ndimage import gaussian_filter1d
 from sklearn.preprocessing import StandardScaler
 
 # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
-region_filename = 'rgint'
+region_filename = 'rgi'
 
 # Load raw data
 # >>>>>>>>>>>>>
@@ -174,7 +174,7 @@ w = Rook.from_dataframe(geography)
 # Setup and run the max-p model
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-threshold = 40  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
+threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
 model = MaxPHeuristic(
     geography,
     w, 
