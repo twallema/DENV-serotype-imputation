@@ -12,6 +12,9 @@ import pytensor.tensor as pt
 pytensor.config.cxx = '/usr/bin/clang++'
 pytensor.config.on_opt_error = "ignore"
 
+# analysis startdate
+startdate = datetime(2000,1,1)
+
 # helper function for argument parsing
 def str_to_bool(value):
     """Convert string arguments to boolean (for SLURM environment variables)."""
@@ -20,6 +23,7 @@ def str_to_bool(value):
 # arguments determine the model + data combo used to forecast
 # How to run: python fit-model.py -ID test -p 2 -distance_matrix False -CAR_per_lag False
 parser = argparse.ArgumentParser()
+parser.add_argument("-region_filename", type=str, help="Spatial aggregation clustering was performed on.", default='rgi')
 parser.add_argument("-chains", type=int, help="Number of parallel chains.", default=4)
 parser.add_argument("-ID", type=str, help="Sampler output name.")
 parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
@@ -28,6 +32,7 @@ parser.add_argument("-CAR_per_lag", type=str_to_bool, help="Use one spatial inno
 args = parser.parse_args()
 
 # assign to desired variables
+region_filename = args.region_filename
 chains = args.chains
 ID = args.ID
 p = args.p
@@ -44,122 +49,112 @@ if not os.path.exists(output_folder):
 ## Preparing the data ##
 ########################
 
+# Load clusters
+# >>>>>>>>>>>>>
+
+clusters = pd.read_csv(f'../../data/interim/clusters/clusters_{region_filename}.csv')
+region = clusters.columns.to_list()[0]
+
+# Load mapping
+# >>>>>>>>>>>>
+
+mapping = pd.read_csv(f'../../data/interim/spatial_units_mapping.csv')
+
 # Distance matrix
 # ~~~~~~~~~~~~~~~
 
 if distance_matrix == False:
     # Load adjacency matrix
-    D = pd.read_csv('../../data/interim/adjacency_matrix.csv', index_col=0).values
+    D = pd.read_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}.csv', index_col=0).values
 else:
     # Load distance matrix
     D = pd.read_csv('../../data/interim/weighted_distance_matrix.csv', index_col=0).values
-
-
-# Region mapping
-# ~~~~~~~~~~~~~~
-
-uf2region_map = pd.read_csv('../../data/interim/uf2region.csv')[['uf', 'region']].drop_duplicates().set_index('uf')['region'].to_dict()
+    raise NotImplementedError('Deprecated for now!')
 
 
 # Incidence data
 # ~~~~~~~~~~~~~~
 
 # Fetch incidence data
-df = pd.read_csv('../../data/interim/datasus_DENV-linelist/uf/DENV-serotypes_1996-2025_monthly_uf.csv', parse_dates=['date'])
+df = pd.read_csv('../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv', parse_dates=['date'])
 
 # 1. Check if all columns are present
 sero_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4"]
-required_cols = ["UF", "date", "DENV_total"] + sero_cols
+required_cols = ["CD_MUN", "date", "DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
 assert all(col in df.columns for col in required_cols)
 
 # 2. Sort for safety
-df = df.sort_values(["date", "UF"]).reset_index(drop=True)
+df = df.sort_values(["CD_MUN", "date"]).reset_index(drop=True)
 
-df = df[df['date'] > datetime(1999,1,1)]
+# 3. Take only from startdate
+df = df[df['date'] > startdate]
 
-# 3. Factorize states and time
-df["state_idx"], _ = pd.factorize(df["UF"])
-df["month_idx"], _ = pd.factorize(df["date"])
+# 4. Aggregate to the spatial clusters
+# make right mapping
+mapping = mapping[['CD_MUN', f'{region}']]
+mapping = clusters.merge(mapping, on="CD_RGINT", how="left")
+# do DENV_total first
+df_with_mapping = df.merge(mapping[["CD_MUN", "cluster"]], on="CD_MUN", how="left")
+## custom aggregation function
+def nan_sum(series):
+    if series.isna().all():
+        return np.nan
+    return series.sum(skipna=True)
+## aggregate
+agg_1 = (
+    df_with_mapping
+    .groupby(["date", "cluster"], as_index=False)
+    .agg({"DENV_total": nan_sum})
+)
+# then aggregate DENV_1-->4
+## follow same logic initially
+agg_2 = (
+    df_with_mapping
+    .groupby(["date", "cluster"], as_index=False)
+    .agg({
+        "DENV_1": nan_sum,
+        "DENV_2": nan_sum,
+        "DENV_3": nan_sum,
+        "DENV_4": nan_sum
+    })
+)
+## but if you observe any serotype, others must be zero instead of Nan
+mask = agg_2[["DENV_1", "DENV_2", "DENV_3", "DENV_4"]].notna().any(axis=1)
+agg_2.loc[mask] = agg_2.loc[mask].fillna(0)
+## merge both dataframes
+df = agg_1.merge(agg_2)
 
-# 5. Fill NaNs in a principled way
-def fill_serotypes(row):
-    sero = row[sero_cols]
-    if sero.notna().any():
-        # If at least one serotype is observed, treat missing ones as 0
-        for col in sero_cols:
-            if pd.isna(row[col]):
-                row[col] = 0.0
-    return row
-df = df.apply(fill_serotypes, axis=1)
+# 5. Add number of serotyped cases
+df["N_typed"] = df[sero_cols].sum(axis=1, skipna=False)           # if serotypes available --> sum them
+df.loc[df[sero_cols].isna().all(axis=1), 'N_typed'] = np.nan      # if all serotypes are Nan --> N_typed = 0 --> Wait, I don't think this is appropriate.
 
-# 6. Compute N_typed
-df["N_typed"] = df[sero_cols].sum(axis=1, skipna=False)                                     # if serotypes available --> sum them
-df.loc[df[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].isna().all(axis=1), 'N_typed'] = np.nan      # if all serotypes are Nan --> N_typed = 0 --> Wait, I don't think this is appropriate.
-
-# 7. Compute delta (typing fraction)
+# 6. Compute delta (typing fraction)
 df["delta"] = df["N_typed"] / df["DENV_total"]
 df['delta'] = df['delta'].where(df['N_typed'] > 0, np.nan) # When N_typed == 0, we don't know delta — mark as missing
 df["delta"] = df["delta"].clip(lower=1e-12, upper=1 - 1e-12)
 
-# 8. Compute year index
+# 7. Compute year and month index
 df["year"] = pd.to_datetime(df["date"]).dt.year
 df["year_idx"] = df["year"] - df["year"].min()
+df['month_idx'], _ = pd.factorize(df['date'])
 
-# 9. Compute year-state index
-df["state_year_idx"] = df["state_idx"].astype(str) + "_" + df["year_idx"].astype(str)
-df["state_year_idx"], state_year_labels = pd.factorize(df["state_year_idx"])
 
-# 10. Add year-region index
-df['region'] = df['UF'].map(uf2region_map)
-df["region_idx"], region_labels = pd.factorize(df["region"])
-df["region_year_idx"] = df["region_idx"].astype(str) + "_" + df["year_idx"].astype(str)
-df["region_year_idx"], region_year_labels = pd.factorize(df["region_year_idx"])
-
-# 11. Build PyMC arrays
-
+# 8. Build PyMC arrays
 # --- For Beta model (typing fraction, always available) ---
 delta_obs = df["delta"].to_numpy().astype(float)
 N_total = df["DENV_total"].to_numpy().astype(int)
-
 # --- For Multinomial model (subtypes, only when typed) ---
 Y_multinomial = df[sero_cols].to_numpy().astype(int)
 N_typed = df["N_typed"].to_numpy().astype(int)
-
 # --- Indices ---
-state_idx = df["state_idx"].to_numpy().astype(int)
-region_idx = df['region_idx'].to_numpy().astype(int)
+cluster_idx = df["cluster"].to_numpy().astype(int)
 month_idx = df["month_idx"].to_numpy().astype(int)
 year_idx = df["year_idx"].to_numpy().astype(int)
-state_year_idx = df["state_year_idx"].to_numpy().astype(int)
-region_year_idx = df["region_year_idx"].to_numpy().astype(int)
-n_states = int(len(df['UF'].unique()))
+# --- Lengths ---
+n_clusters = int(len(df['cluster'].unique()))
 n_months = int(len(df["month_idx"].unique()))
 n_years = int(df["year_idx"].max() + 1)
-n_state_years = len(state_year_labels)
-n_region_years = len(region_year_labels)
 n_serotypes = len(sero_cols)
-n_regions = len(region_labels)
-
-# This assumes each state-year belongs to exactly 1 region-year
-state_year_to_region_year = df.groupby("state_year_idx")["region_year_idx"].first().sort_index().tolist()
-
-# Maps years to state-years
-year_to_state_year = (
-    df[["state_year_idx", "year_idx"]]
-    .drop_duplicates()
-    .sort_values("state_year_idx")
-    .set_index("state_year_idx")["year_idx"]
-    .to_numpy()
-)
-
-# Maps years to region-years
-year_to_region_year = (
-    df[["region_year_idx", "year_idx"]]
-    .drop_duplicates()
-    .sort_values("region_year_idx")
-    .set_index("region_year_idx")["year_idx"]
-    .to_numpy()
-)
 
 #########################
 ## Preparing the model ##
@@ -176,41 +171,6 @@ if CAR_per_lag:
     #####################################################################
 
     with pm.Model() as model:
-
-        # --- Typing Effort Model ---
-        # N^*_{s,t} ~ Binomial(N_{total,s,t}, \delta_{s,t}),
-        # where N_{total,s,t} the observed total dengue incidence and \delta_{s,t} the fraction that gets subtyped.
-        #
-        # \delta_{s,t} ~ LogitNormal(\mu_{s,t}, \sigma^2_{delta})
-        # mu_{s,t} = \beta + \beta_{s,t}
-
-        # \beta (global intercept)
-        beta = pm.Normal("beta", mu=-4.5, sigma=1.5)
-
-        # \beta_{s,t}: State-year-specific typing effort random effect: \beta_{s,t} = \beta_{r[s],t} + \epsilon_{s,t}
-        # Region-year effect
-        beta_rt_shrinkage = pm.HalfNormal("beta_rt_shrinkage", 1)
-        beta_rt_sigma = pm.HalfNormal("beta_rt_sigma", sigma=beta_rt_shrinkage, shape=n_region_years)
-        beta_rt = pm.Normal("beta_rt", mu=0.0, sigma=beta_rt_sigma, shape=n_region_years)
-        # State-year deviation from region-year
-        ratio_sigma = pm.Beta("ratio_sigma", alpha=1, beta=2)
-        eps_st_sigma = pm.Deterministic("eps_st_sigma", ratio_sigma * beta_rt_sigma[state_year_to_region_year])
-        eps_st = pm.Normal("eps_st", mu=0.0, sigma=eps_st_sigma, shape=n_state_years)
-        # Final state-year effect
-        beta_st = pm.Deterministic("beta_st", beta_rt[region_year_idx] + eps_st[state_year_idx])
-
-        # Alternative: model serotyped fraction as a logit-normal since beta is close to zero
-        logit_delta_obs = np.log(delta_obs / (1 - delta_obs)) 
-        logit_mu = beta  + beta_st
-        # logit_delta_sigma is important because it controls the overall noise levels on the serotyped cases (lower = less noise)
-        # it also controls an important trade-off in this model: the relationship between N_total and N_typed is not perfectly linear, i.e. you can't fit both N_total and delta_st perfectly
-        # Values of 0.001-0.002 sacrifices delta_st for a better fit to N_total, while a value of 0.001 gives a good fit to delta_st but a poorer fit to N_typed an too much uncertainty
-        logit_delta_sigma = pm.HalfNormal("logit_delta_sigma", sigma=0.002) 
-        logit_delta = pm.Normal("logit_delta", mu=logit_mu, sigma=logit_delta_sigma, observed=logit_delta_obs)
-        delta_st = pm.Deterministic("delta_st", pm.math.sigmoid(logit_delta))
-
-        # N^*_{s,t} ~ Binomial(N_{total,s,t}, \delta_{s,t})
-        N_typed_latent = pm.Binomial("N_typed_latent", n=N_total, p=delta_st, observed=N_typed)
 
         # --- Subtype Composition Model ---
         # p_{i,s,t} ~ Softmax(\theta_{i,s,t})
@@ -250,49 +210,49 @@ if CAR_per_lag:
         a_car = pt.ones(p)
 
         # Pair-wise kernel first
-        # D_shared: (n_states, n_states)
+        # D_shared: (n_clusters, n_clusters)
         # zeta_car: (n_serotypes, p)
         # We need to broadcast D_shared against zeta
         W = pt.exp(-D[None, :, :] / zeta_expanded)
-        # Construct degree tensor (matrix equivalent: row sums of weighted distance matrix on diagonal of eye(n_states))
+        # Construct degree tensor (matrix equivalent: row sums of weighted distance matrix on diagonal of eye(n_clusters))
         degree = pt.sum(W, axis=-1)[:, :, :, None]
-        I = pt.eye(n_states)[None, None, :, :]
+        I = pt.eye(n_clusters)[None, None, :, :]
         D = I * degree
-        jitter = 1e-6 * pt.diag(pt.ones(n_states))
+        jitter = 1e-6 * pt.diag(pt.ones(n_clusters))
         jitter = jitter[None, None, :, :]
-        Q = D - a_car[None,:,None, None] * W + jitter # Q shape == (n_serotypes, p, n_states, n_states)
+        Q = D - a_car[None,:,None, None] * W + jitter # Q shape == (n_serotypes, p, n_clusters, n_clusters)
 
         # Compute the Cholesky of Q, scale with noise and reshape
         chol = pt.slinalg.cholesky(Q)
         chol = chol * corr_sigma[:, None, None, None]  # broadcast over p and states
-        chol = chol.transpose((1, 0, 2, 3)) # shape == (p, n_serotypes, n_states, n_states) --> makes more sense
+        chol = chol.transpose((1, 0, 2, 3)) # shape == (p, n_serotypes, n_clusters, n_clusters) --> makes more sense
         
         # Initialise AR(p) initial condition
-        AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(p, n_serotypes, n_states))
+        AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(p, n_serotypes, n_clusters))
 
         # Initialise spatial innovation noise (one per lag)
-        epsilon_corr = pm.Normal("epsilon_corr", 0, 1, shape=(n_months - p, p, n_serotypes, n_states))
+        epsilon_corr = pm.Normal("epsilon_corr", 0, 1, shape=(n_months - p, p, n_serotypes, n_clusters))
 
         # Initialise random noise
-        epsilon_uncorr = pm.Normal("epsilon_uncorr", mu=0, sigma=1, shape=(n_months - p, n_serotypes, n_states))
+        epsilon_uncorr = pm.Normal("epsilon_uncorr", mu=0, sigma=1, shape=(n_months - p, n_serotypes, n_clusters))
 
         # Define the recursion of the AR(p) process
         def ARp_step(epsilon_corr_t, epsilon_uncorr_t, previous_vals, rho, chol, uncorr_sigma):
             """
-            previous_vals: (p, n_serotypes, n_states)
-            epsilon_t: (p, n_serotypes, n_states)
-            epsilon_uncorr_t: (n_serotypes, n_states)
+            previous_vals: (p, n_serotypes, n_clusters)
+            epsilon_t: (p, n_serotypes, n_clusters)
+            epsilon_uncorr_t: (n_serotypes, n_clusters)
             """
             contributions = []
             for lag in range(p):
                 # Add spatial innovation at lag p to state at lag p
-                state_plus_noise = previous_vals[lag] + pt.batched_dot(epsilon_corr_t[lag], chol[lag]) # (n_serotypes, n_states)
+                state_plus_noise = previous_vals[lag] + pt.batched_dot(epsilon_corr_t[lag], chol[lag]) # (n_serotypes, n_clusters)
                 # Multiply by the temporal weight rho_k (serotype-specific) --> spatial innovation size declines over time
                 weighted = rho[:, lag][:, None] * state_plus_noise
                 contributions.append(weighted)
 
             # Sum weighted state and spatial innovation over lags
-            new_vals = sum(contributions)  # (n_serotypes, n_states)
+            new_vals = sum(contributions)  # (n_serotypes, n_clusters)
 
             # Finally add the spatially-uncorrelated noise
             uncorr_noise = epsilon_uncorr_t * uncorr_sigma[:, None]
@@ -301,7 +261,7 @@ if CAR_per_lag:
             # Shift lag window: insert new_vals at position 0
             updated_vals = pt.concatenate(
                 [new_vals[None, :, :], previous_vals[:-1]], axis=0
-            )  # (p, n_serotypes, n_states)
+            )  # (p, n_serotypes, n_clusters)
 
             return updated_vals
         
@@ -312,11 +272,11 @@ if CAR_per_lag:
             non_sequences=[rho, chol, uncorr_sigma],
         )
 
-        # sequences: (n_months - p, p, n_serotypes, n_states)
-        # alpha_init: (p, n_serotypes, n_states)
+        # sequences: (n_months - p, p, n_serotypes, n_clusters)
+        # alpha_init: (p, n_serotypes, n_clusters)
         theta_log_final = pt.concatenate([pt.repeat(AR_init[None, :, :, :], p, axis=0), sequences], axis=0)
         # Step 3: slice lag zero (p=0) over full time axis
-        theta_log_final = theta_log_final[:, 0, :, :]  # shape (n_months, n_serotypes, n_states)
+        theta_log_final = theta_log_final[:, 0, :, :]  # shape (n_months, n_serotypes, n_clusters)
         # Step 4: convert to flat format
         theta_log = theta_log_final.reshape((len(df), n_serotypes))
 
@@ -328,7 +288,7 @@ if CAR_per_lag:
         # --- Observed subtyped incidences ---
         # Y_{i,s,t} ~ Multinomial(N^*_{s,t}, p_{i,s,t})
 
-        Y_obs = pm.Multinomial("Y_obs", n=N_typed_latent, p=p, observed=Y_multinomial)
+        Y_obs = pm.Multinomial("Y_obs", n=N_typed, p=p, observed=Y_multinomial)
 
 else:
 
@@ -338,41 +298,6 @@ else:
 
     with pm.Model() as model:
 
-        # --- Typing Effort Model ---
-        # N^*_{s,t} ~ Binomial(N_{total,s,t}, \delta_{s,t}),
-        # where N_{total,s,t} the observed total dengue incidence and \delta_{s,t} the fraction that gets subtyped.
-        #
-        # \delta_{s,t} ~ LogitNormal(\mu_{s,t}, \sigma^2_{delta})
-        # mu_{s,t} = \beta + \beta_{s,t}
-
-        # # \beta (global intercept)
-        # beta = pm.Normal("beta", mu=-4.5, sigma=1.5)
-
-        # # \beta_{s,t}: State-year-specific typing effort random effect: \beta_{s,t} = \beta_{r[s],t} + \epsilon_{s,t}
-        # # Region-year effect
-        # beta_rt_shrinkage = pm.HalfNormal("beta_rt_shrinkage", 1)
-        # beta_rt_sigma = pm.HalfNormal("beta_rt_sigma", sigma=beta_rt_shrinkage, shape=n_region_years)
-        # beta_rt = pm.Normal("beta_rt", mu=0.0, sigma=beta_rt_sigma, shape=n_region_years)
-        # # State-year deviation from region-year
-        # ratio_sigma = pm.Beta("ratio_sigma", alpha=1, beta=2)
-        # eps_st_sigma = pm.Deterministic("eps_st_sigma", ratio_sigma * beta_rt_sigma[state_year_to_region_year])
-        # eps_st = pm.Normal("eps_st", mu=0.0, sigma=eps_st_sigma, shape=n_state_years)
-        # # Final state-year effect
-        # beta_st = pm.Deterministic("beta_st", beta_rt[region_year_idx] + eps_st[state_year_idx])
-
-        # # Alternative: model serotyped fraction as a logit-normal since beta is close to zero
-        # logit_delta_obs = np.log(delta_obs / (1 - delta_obs)) 
-        # logit_mu = beta  + beta_st
-        # # logit_delta_sigma is important because it controls the overall noise levels on the serotyped cases (lower = less noise)
-        # # it also controls an important trade-off in this model: the relationship between N_total and N_typed is not perfectly linear, i.e. you can't fit both N_total and delta_st perfectly
-        # # Values of 0.001-0.002 sacrifices delta_st for a better fit to N_total, while a value of 0.001 gives a good fit to delta_st but a poorer fit to N_typed an too much uncertainty
-        # logit_delta_sigma = pm.HalfNormal("logit_delta_sigma", sigma=0.002) 
-        # logit_delta = pm.Normal("logit_delta", mu=logit_mu, sigma=logit_delta_sigma, observed=logit_delta_obs)
-        # delta_st = pm.Deterministic("delta_st", pm.math.sigmoid(logit_delta))
-
-        # N^*_{s,t} ~ Binomial(N_{total,s,t}, \delta_{s,t})
-        N_typed_latent = N_typed #pm.Binomial("N_typed_latent", n=N_total, p=delta_st, observed=N_typed)
-        
         # --- Subtype Composition Model ---
         # p_{i,s,t} ~ Softmax(\theta_{i,s,t})
         # \theta_{i,s,t} = \sum_{k=1}^p \rho_k \alpha_{i,s,t-k} +  \kappa_{i,s,t}^{corr} + \kappa_{i,s,t}^{uncorr}          # AR(p) process
@@ -403,19 +328,19 @@ else:
         a_car = 1
 
         # Pair-wise kernel first
-        # D_shared: (n_states, n_states)
+        # D_shared: (n_clusters, n_clusters)
         # zeta_car: (n_serotypes, p)
         # We need to broadcast D_shared against zeta
         W = pt.exp(-D[None, :, :] / zeta)
-        # Construct degree tensor (matrix equivalent: row sums of weighted distance matrix on diagonal of eye(n_states))
+        # Construct degree tensor (matrix equivalent: row sums of weighted distance matrix on diagonal of eye(n_clusters))
         degree = pt.sum(W, axis=-1)[:, :, None]
-        I = pt.eye(n_states)[None, :, :]
+        I = pt.eye(n_clusters)[None, :, :]
         D = I * degree
         # Q = D - a * W + jitter
-        jitter = 1e-6 * pt.diag(pt.ones(n_states))
+        jitter = 1e-6 * pt.diag(pt.ones(n_clusters))
         jitter = jitter[None, :, :]
         Q = D - a_car * W + jitter
-        # Q shape == (n_serotypes, p, n_states, n_states)
+        # Q shape == (n_serotypes, p, n_clusters, n_clusters)
 
         # Compute the Cholesky of Q
         chol = pt.slinalg.cholesky(Q)
@@ -424,20 +349,20 @@ else:
         chol = chol * corr_sigma[:, None, None]  # broadcast over p and states
 
         # Initialise AR(p) initial condition
-        AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(p, n_serotypes, n_states))
+        AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(p, n_serotypes, n_clusters))
 
         # Initialise spatial innovation noise (one per lag)
-        epsilon_corr = pm.Normal("epsilon_corr", 0, 1, shape=(n_months - p, n_serotypes, n_states))
+        epsilon_corr = pm.Normal("epsilon_corr", 0, 1, shape=(n_months - p, n_serotypes, n_clusters))
 
         # Initialise random noise
-        epsilon_uncorr = pm.Normal("epsilon_uncorr", mu=0, sigma=1, shape=(n_months - p, n_serotypes, n_states))
+        epsilon_uncorr = pm.Normal("epsilon_uncorr", mu=0, sigma=1, shape=(n_months - p, n_serotypes, n_clusters))
 
 
         def arp_step(epsilon_corr_t, epsilon_uncorr_t, previous_vals, rho, chol, uncorr_sigma):
             """
-            previous_vals: (p, n_serotypes, n_states)
-            epsilon_t: (n_serotypes, n_states)
-            epsilon_uncorr_t: (n_serotypes, n_states)
+            previous_vals: (p, n_serotypes, n_clusters)
+            epsilon_t: (n_serotypes, n_clusters)
+            epsilon_uncorr_t: (n_serotypes, n_clusters)
             """
 
             spatial_noise = pt.batched_dot(epsilon_corr_t, chol)
@@ -448,12 +373,12 @@ else:
                 AR_mean.append(rho[:, lag][:, None] * previous_vals[lag])
 
             # Sum weighted AR and spatial noise over lags
-            new_vals = sum(AR_mean) + spatial_noise + AR_noise  # (n_serotypes, n_states)
+            new_vals = sum(AR_mean) + spatial_noise + AR_noise  # (n_serotypes, n_clusters)
 
             # Shift lag window: insert new_vals at position 0
             updated_vals = pt.concatenate(
                 [new_vals[None, :, :], previous_vals[:-1]], axis=0
-            )  # (p, n_serotypes, n_states)
+            )  # (p, n_serotypes, n_clusters)
 
             return updated_vals
         
@@ -465,11 +390,11 @@ else:
         )
 
 
-        # sequences: (n_months - p, p, n_serotypes, n_states)
-        # AR_init: (p, n_serotypes, n_states)
+        # sequences: (n_months - p, p, n_serotypes, n_clusters)
+        # AR_init: (p, n_serotypes, n_clusters)
         theta_log_final = pt.concatenate([pt.repeat(AR_init[None, :, :, :], p, axis=0), sequences], axis=0)
         # Step 3: slice lag zero (p=0) over full time axis
-        theta_log_final = theta_log_final[:, 0, :, :]  # shape (n_months, n_serotypes, n_states)
+        theta_log_final = theta_log_final[:, 0, :, :]  # shape (n_months, n_serotypes, n_clusters)
         # Step 4: convert to flat format
         theta_log= theta_log_final.reshape((len(df), n_serotypes))
 
@@ -482,7 +407,7 @@ else:
         # --- Observed subtyped incidences ---
         # Y_{i,s,t} ~ Multinomial(N^*_{s,t}, p_{i,s,t})
 
-        Y_obs = pm.Multinomial("Y_obs", n=N_typed_latent, p=p, observed=Y_multinomial)
+        Y_obs = pm.Multinomial("Y_obs", n=N_typed, p=p, observed=Y_multinomial)
 
 ########################
 ## Running the model  ##
@@ -490,7 +415,7 @@ else:
 
 # NUTS
 with model:
-    trace = pm.sample(200, tune=800, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True)
+    trace = pm.sample(100, tune=100, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True)
 
 # Plot posterior predictive checks
 with model:
