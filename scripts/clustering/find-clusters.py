@@ -8,9 +8,8 @@ from libpysal.weights import Rook, Queen
 from scipy.ndimage import gaussian_filter1d
 from sklearn.preprocessing import StandardScaler
 
-
-region = 'CD_RGI' # only CD_RGI
-region_filename = 'rgi'
+# spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
+region_filename = 'rgint'
 
 # Load raw data
 # >>>>>>>>>>>>>
@@ -23,7 +22,7 @@ denv = pd.read_csv('../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_
 
 # Load DTW-MDS embedding
 DTW_covariates = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/DTW-MDS-embedding_{region_filename}.csv')
-
+region = DTW_covariates.columns.to_list()[0]
 
 
 # Aggregate incidence and geographical dataset to the intermediate/immediate regions
@@ -81,6 +80,7 @@ if region:
     )
    
 
+
 # Compute threshold
 # >>>>>>>>>>>>>>>>>
 
@@ -135,15 +135,13 @@ geography["cy"] = geography.geometry.centroid.y
 sc = StandardScaler()
 geography[["cx","cy"]] = sc.fit_transform(geography[["cx","cy"]])
 
-# 4) Choose alpha (compactness weight). Try small values first.
-alpha = 1   # try different values
-geography["cx"] *= alpha 
-geography["cy"] *= alpha
+# 4) Normalize the area codes (similarity in codes reflects proximity in space)
+geography[region+'_NORM'] = sc.fit_transform(geography[[region]])
+
 
 
 # Make DTW-MDS covariate
 # >>>>>>>>>>>>>>>>>>>>>>
-
 
 # Merge to the geography
 geography = geography.merge(
@@ -162,8 +160,7 @@ geography[DTW_covariates] = sc.fit_transform(geography[DTW_covariates])
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # my pick
-compactness = ["cx", "cy"]
-attrs = compactness + DTW_covariates #+ biome
+attrs = DTW_covariates + [region+'_NORM'] + biome_dummies.columns.to_list() + ['cx', 'cy']
 
 
 
@@ -219,7 +216,7 @@ plt.show()
 plt.close()
 
 # save the result
-geography[[f'{region}', 'cluster']].to_csv(f'../../data/interim/clusters/clusters_{region_filename}.csv')
+geography[[f'{region}', 'cluster']].to_csv(f'../../data/interim/clusters/clusters_{region_filename}.csv', index=False)
 
 
 
