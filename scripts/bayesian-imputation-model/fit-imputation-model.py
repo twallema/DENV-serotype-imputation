@@ -68,8 +68,7 @@ if distance_matrix == False:
     D = pd.read_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}.csv', index_col=0).values
 else:
     # Load distance matrix
-    D = pd.read_csv('../../data/interim/weighted_distance_matrix.csv', index_col=0).values
-    raise NotImplementedError('Deprecated for now!')
+    D = pd.read_csv(f'../../data/interim/distance_matrix_{region_filename}.csv', index_col=0).values
 
 
 # Incidence data

@@ -22,10 +22,6 @@ These data are partly confidential and can be found on the Bento lab box.
 
 ## Interim
 
-+ `weighted_distance_matrix.csv`: Contains a square origin-destination-type distance matrix with the population-weighted distance between Brazil's 27 states. Made using `data/conversion/build_distance-adjacency-matrix.py` but no longer needed for the workflow of this repository (will be removed at a later stage).
-
-+ `adjacency_matrix.csv`: Contains a square origin-destination-type adjacency matrix of Brazil's 27 states. Made using `data/conversion/build_distance-adjacency-matrix.py` but no longer needed for the workflow of this repository (will be removed at a later stage).
-
 + `geographic-dataset.parquet`: Compressed (brotli compression) geographical dataset. Dataset containing geometries of Brazilian municipalities, along with variables relevant for clustering. Made using `data/conversion/build_geographic-dataset.py` from the data in `data/raw/BR_Municipios_2023`.
 
 + `spatial_units_mapping.csv`: Area codes and names of the municipalities, immediate regions, intermediate regions, federative units and regions. Also available in `geographic-dataset.parquet` but saved seperately to lower IO burden.
@@ -60,8 +56,6 @@ These data are partly confidential and can be found on the Bento lab box.
 This folder is not on GitHub but is automatically generated when users run the Bayesian serotype imputation model `~/scripts/bayesian-imputation-model/fit-imputation-model.py`. It will contain diagnostics of the model runs, as well as the final result (latent serotype distribution).
 
 ## Conversion scripts
-
-+ `build_distance-adjacency-matrix.py`: Notebook used to build an adjacency matrix and a demographically-weighted distance matrix between Brazilian states.
 
 + `datasus_DENV-linelist_conversion.py`: Script used to convert the (partly confidential) raw linelisted datasus DENV data (`~/data/raw/datasus_DENV-linelist/composite_dataset`) into a more pleasant interim format.
 
