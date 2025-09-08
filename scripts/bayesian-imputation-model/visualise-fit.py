@@ -84,7 +84,7 @@ df = df[df['date'] > startdate]
 # 4. Aggregate to the spatial clusters
 # make right mapping
 mapping = mapping[['CD_MUN', f'{region}']]
-mapping = clusters.merge(mapping, on="CD_RGINT", how="left")
+mapping = clusters.merge(mapping, on=f'{region}', how="left")
 # do DENV_total first
 df_with_mapping = df.merge(mapping[["CD_MUN", "cluster"]], on="CD_MUN", how="left")
 ## custom aggregation function

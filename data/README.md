@@ -22,11 +22,7 @@ These data are partly confidential and can be found on the Bento lab box.
 
 ## Interim
 
-+ `weighted_distance_matrix.csv`: Contains a square origin-destination-type distance matrix with the population-weighted distance between Brazil's 27 states.
-
-+ `adjacency_matrix.csv`: Contains a square origin-destination-type adjacency matrix of the Brasilian states.
-
-+ `geographic-dataset.parquet`: Compressed (brotli compression) geographical dataset. Dataset containing geometries of Brazilian municipalities, along with variables relevant for clustering. Made using `data/conversion/build_geographic-dataset.py` from `data/raw/BR_Municipios_2023`.
++ `geographic-dataset.parquet`: Compressed (brotli compression) geographical dataset. Dataset containing geometries of Brazilian municipalities, along with variables relevant for clustering. Made using `data/conversion/build_geographic-dataset.py` from the data in `data/raw/BR_Municipios_2023`.
 
 + `spatial_units_mapping.csv`: Area codes and names of the municipalities, immediate regions, intermediate regions, federative units and regions. Also available in `geographic-dataset.parquet` but saved seperately to lower IO burden.
 
@@ -38,21 +34,31 @@ These data are partly confidential and can be found on the Bento lab box.
 
 #### UF
 
-+ `DENV-serotypes_1996-2025_monthly/weekly_UF.csv`: Weekly or monthly total confirmed (not discarded) DENV cases at the municipality level, as well as number of serotyped cases per DENV serotype. Generated using `DENV_datasus_conversion.py`. 
++ `DENV-serotypes_1996-2025_weekly/monthly_uf.csv`: Weekly or monthly total confirmed (not discarded) DENV cases at the federative unit level, as well as number of serotyped cases per DENV serotype. Generated using `DENV_datasus_conversion.py`. 
 
 #### Muncipality
 
-+ ``: Weekly or monthly total confirmed (not discarded) DENV cases at the municipality level, as well as number of serotyped cases per DENV serotype. Generated using `DENV_datasus_conversion.py`. 
++ `DENV-serotypes_1996-2025_weekly/monthly_mun.csv`: Weekly or monthly total confirmed (not discarded) DENV cases at the municipality level, as well as number of serotyped cases per DENV serotype. Generated using `DENV_datasus_conversion.py`. 
 
 
-### Imputed DENV datasus
+### DTW-MDS-embeddings
 
-+ `DENV-serotypes-imputed_1996-2025_monthly.csv`: Monthly total confirmed DENV cases in every Brazilian UF (column: `DENV_total`), identical to `~/data/interim/DENV_datasus/DENV-serotypes_1996-2025_monthly.csv`. Contains the serotype fractions in columns `p_1`, `p_2`, `p_3` and `p_4`, as generated using the Bayesian serotype imputation model in `~/data/conversion/modeling_serotypes/fit-model.py`.
++ `DTW-MDS-embedding_mun.csv`: Made using `~/scripts/clustering/perform-DTW-MDS.py`.
+
+### Clusters
+
++ `clusters_rgi/rgint.csv`: Made using `~/scripts/clustering/find-clusters.py`.
+
++ `adjacency_matrix_rgi/rgint.csv`: Made using `~/scripts/clustering/find-clusters.py`.
+
+### bayesian-imputation-model_output
+
+This folder is not on GitHub but is automatically generated when users run the Bayesian serotype imputation model `~/scripts/bayesian-imputation-model/fit-imputation-model.py`. It will contain diagnostics of the model runs, as well as the final result (latent serotype distribution).
 
 ## Conversion scripts
-
-+ `build_distance-adjacency-matrix.py`: Notebook used to build an adjacency matrix and a demographically-weighted distance matrix between Brazilian states.
 
 + `datasus_DENV-linelist_conversion.py`: Script used to convert the (partly confidential) raw linelisted datasus DENV data (`~/data/raw/datasus_DENV-linelist/composite_dataset`) into a more pleasant interim format.
 
 + `build_geographic-dataset.py`: A script merging the Brazilian municipalities' geometries, population, population density and environmental characteristics.
+
++ `build_dengue-incidence-100k.py`: A script to convert the formatted linelist data in `data/interim/datasus_DENV-linelist` to the total dengue incidence per 100K inhabitants at the municipality level.

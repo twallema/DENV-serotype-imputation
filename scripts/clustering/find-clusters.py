@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import geopandas as gpd
+from shapely import Point
 from datetime import datetime
 import matplotlib.pyplot as plt
 from spopt.region import MaxPHeuristic
@@ -184,7 +185,7 @@ model = MaxPHeuristic(
     top_n=3,
     verbose=True,
     policy='multiple',
-    max_iterations_construction=1000,
+    max_iterations_construction=10000,
     max_iterations_sa=100,
 )
 model.solve()
@@ -220,8 +221,8 @@ geography[[f'{region}', 'cluster']].to_csv(f'../../data/interim/clusters/cluster
 
 
 
-# Build the clusters adjacency matrix needed for the Bayesian imputation model
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# Build the clusters' adjacency matrix needed for the Bayesian imputation model
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 
 # Step 1: Dissolve municipalities to state-level geometries
@@ -261,3 +262,42 @@ for uf in cluster_list:
 
 # Save in a .csv
 adj_matrix.to_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}.csv')
+
+
+
+# Build the clusters' weighted distance matrix for the Bayesian imputation model
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# Assure appropriate projection
+geography = geography.to_crs("EPSG:5880")
+
+# Calculate centroids at f'{region}' level
+geography['CENTROID'] = geography.geometry.centroid
+
+# Comptue weighted centroid 
+def weighted_centroid(group):
+    # Get x and y from centroid
+    x = group['CENTROID'].x
+    y = group['CENTROID'].y
+    weights = group['POP']
+    # Weighted average
+    x_bar = (x * weights).sum() / weights.sum()
+    y_bar = (y * weights).sum() / weights.sum()
+    return Point(x_bar, y_bar)
+
+# Group by f'{region}' and calculate weighted centroids
+weighted_centroids = geography.groupby('cluster').apply(weighted_centroid).reset_index()
+weighted_centroids.columns = ['cluster', 'geometry']
+centroids_gdf = gpd.GeoDataFrame(weighted_centroids, geometry='geometry', crs=geography.crs)
+
+# Create empty DataFrame
+dist_matrix = pd.DataFrame(index=cluster_list, columns=cluster_list, dtype=float)
+
+# Fill with distances in kilometers
+for i, row_i in centroids_gdf.iterrows():
+    for j, row_j in centroids_gdf.iterrows():
+        dist = row_i.geometry.distance(row_j.geometry) / 1000  # meters to km
+        dist_matrix.loc[row_i['cluster'], row_j['cluster']] = dist
+
+# Save the distance matrix to a csv file
+dist_matrix.to_csv(f'../../data/interim/clusters/distance_matrix_{region_filename}.csv')

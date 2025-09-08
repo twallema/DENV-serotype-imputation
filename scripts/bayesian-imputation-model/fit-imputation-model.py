@@ -68,8 +68,7 @@ if distance_matrix == False:
     D = pd.read_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}.csv', index_col=0).values
 else:
     # Load distance matrix
-    D = pd.read_csv('../../data/interim/weighted_distance_matrix.csv', index_col=0).values
-    raise NotImplementedError('Deprecated for now!')
+    D = pd.read_csv(f'../../data/interim/distance_matrix_{region_filename}.csv', index_col=0).values
 
 
 # Incidence data
@@ -92,7 +91,7 @@ df = df[df['date'] > startdate]
 # 4. Aggregate to the spatial clusters
 # make right mapping
 mapping = mapping[['CD_MUN', f'{region}']]
-mapping = clusters.merge(mapping, on="CD_RGINT", how="left")
+mapping = clusters.merge(mapping, on=f'{region}', how="left")
 # do DENV_total first
 df_with_mapping = df.merge(mapping[["CD_MUN", "cluster"]], on="CD_MUN", how="left")
 ## custom aggregation function
