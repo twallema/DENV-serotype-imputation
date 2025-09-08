@@ -184,8 +184,8 @@ model = MaxPHeuristic(
     top_n=3,
     verbose=True,
     policy='multiple',
-    max_iterations_construction=1000,
-    max_iterations_sa=100,
+    max_iterations_construction=10000,
+    max_iterations_sa=500,
 )
 model.solve()
 
