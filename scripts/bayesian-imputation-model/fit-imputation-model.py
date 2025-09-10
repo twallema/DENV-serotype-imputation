@@ -68,7 +68,7 @@ if distance_matrix == False:
     D = pd.read_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}.csv', index_col=0).values
 else:
     # Load distance matrix
-    D = pd.read_csv(f'../../data/interim/distance_matrix_{region_filename}.csv', index_col=0).values
+    D = pd.read_csv(f'../../data/interim/clusters/distance_matrix_{region_filename}.csv', index_col=0).values
 
 
 # Incidence data
@@ -179,11 +179,10 @@ if CAR_per_lag:
 
         # Try to combine an AR(p) with a CAR prior on every timestep in the past
         ## Regularisation of the overall noise & split between spatially structured and unstructured noise
-        #total_sigma_shrinkage = pm.HalfNormal("total_sigma_shrinkage", sigma=0.001)
         total_sigma = pm.HalfNormal("total_sigma", sigma=0.0002)
         proportion_uncorr = pm.Beta("proportion_uncorr", alpha=1, beta=5)  # proportion of noise that is unstructured (encourages structured noise)
-        uncorr_sigma = pm.Deterministic("uncorr_sigma", proportion_uncorr * total_sigma)
-        corr_sigma = pm.Deterministic("corr_sigma", (1 - proportion_uncorr) * total_sigma)
+        uncorr_sigma = pm.Deterministic("uncorr_sigma", proportion_uncorr * total_sigma) * pt.ones(n_serotypes)
+        corr_sigma = pm.Deterministic("corr_sigma", (1 - proportion_uncorr) * total_sigma) * pt.ones(n_serotypes)
 
         ## Temporal correlation structure: Decaying weights rho_k = 1/(k**gamma_i) --> identifiable but I think this is too strict
         gamma = pt.ones(n_serotypes)
@@ -429,8 +428,8 @@ arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
 
 # Traceplot
 if CAR_per_lag:
-    variables2plot = ['beta', 'beta_rt_shrinkage', 'beta_rt_sigma', 'beta_rt', 'ratio_sigma',
-                    'total_sigma_shrinkage', 'total_sigma', 'proportion_uncorr', 'AR_init',
+    variables2plot = [
+                    'total_sigma', 'proportion_uncorr', 'AR_init',
                     ]
     if distance_matrix:
         variables2plot += ['zeta_intercept', 'zeta_slope']
