@@ -17,4 +17,4 @@ dependencies:
   - pyarrow
   - tslearn
   - seaborn
-  - scikit-learn
+  - scikit-learn>=1.7
