@@ -10,7 +10,7 @@ from scipy.ndimage import gaussian_filter1d
 from sklearn.preprocessing import StandardScaler
 
 # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
-region_filename = 'rgi'
+region_filename = 'rgint'
 
 # Load raw data
 # >>>>>>>>>>>>>
@@ -170,134 +170,138 @@ attrs = DTW_covariates + ['cx', 'cy']  #+ biome_dummies.columns.to_list() #+ [re
 # Build contiguity weight map
 w = Rook.from_dataframe(geography)
 
+n = 50
 
+for numRun in range(1, n+1):
+    print(f"Starting clustering run {numRun} of {n}")
 
-# Setup and run the max-p model
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    # Setup and run the max-p model
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
-model = MaxPHeuristic(
-    geography,
-    w, 
-    attrs_name=attrs,
-    threshold_name='N_typed_monthly_mean',
-    threshold=threshold,
-    top_n=3,
-    verbose=True,
-    policy='multiple',
-    max_iterations_construction=10000,
-    max_iterations_sa=100,
-)
-model.solve()
-
-
-
-# Save and visualise the clustering results
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-# add cluster labels to GeoDataFrame
-geography["cluster"] = model.labels_
-
-# visualise clusters on a map
-fig, ax = plt.subplots(figsize=(8.3, 11.7/3*2))
-geography.plot(
-    column="cluster",          # color regions by cluster label
-    categorical=True,
-    cmap="tab20",             # categorical colormap
-    linewidth=0.2,
-    edgecolor="grey",
-    legend=True,
-    ax=ax,
-    legend_kwds={'fontsize': 7, 'ncol': 2, 'loc': 'lower right'}
-)
-ax.set_title("Max-p Regionalization of Brazilian Municipalities", fontsize=14)
-ax.axis("off")
-plt.savefig(f'../../data/interim/clusters/clusters_{region_filename}.png', dpi=200)
-plt.show()
-plt.close()
-
-# save the result
-geography[[f'{region}', 'cluster']].to_csv(f'../../data/interim/clusters/clusters_{region_filename}.csv', index=False)
+    threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
+    model = MaxPHeuristic(
+        geography,
+        w, 
+        attrs_name=attrs,
+        threshold_name='N_typed_monthly_mean',
+        threshold=threshold,
+        top_n=3,
+        verbose=True,
+        policy='multiple',
+        max_iterations_construction=1000,
+        max_iterations_sa=20,
+    )
+    model.solve() 
 
 
 
-# Build the clusters' adjacency matrix needed for the Bayesian imputation model
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    # Save and visualise the clustering results
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    # add cluster labels to GeoDataFrame
+    geography["cluster"] = model.labels_
+
+    # visualise clusters on a map
+    fig, ax = plt.subplots(figsize=(8.3, 11.7/3*2))
+    geography.plot(
+        column="cluster",          # color regions by cluster label
+        categorical=True,
+        cmap="tab20",             # categorical colormap
+        linewidth=0.2,
+        edgecolor="grey",
+        legend=True,
+        ax=ax,
+        legend_kwds={'fontsize': 7, 'ncol': 2, 'loc': 'lower right'}
+    )
+    ax.set_title(f"Max-p Regionalization of Brazilian Municipalities, Run {numRun}", fontsize=14)
+    ax.axis("off")
+    plt.savefig(f'../../data/interim/clusters/clusters_{region_filename}_run{numRun}.png', dpi=200)
+    # plt.show()
+    plt.close()
+
+    # save the result
+    geography[[f'{region}', 'cluster']].to_csv(f'../../data/interim/clusters/clusters_{region_filename}_run{numRun}.csv', index=False)
 
 
-# Step 1: Dissolve municipalities to state-level geometries
-clusters_geography = geography.dissolve(by='cluster', as_index=False)
-clusters_geography = clusters_geography.reset_index(drop=True)
 
-# Step 2: Ensure 'cluster' column is sorted
-clusters_geography = clusters_geography.sort_values('cluster').reset_index(drop=True)
-cluster_list = clusters_geography['cluster'].tolist()
+    # Build the clusters' adjacency matrix needed for the Bayesian imputation model
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-# Step 4: Build spatial index and adjacency dictionary
-sindex = clusters_geography.sindex
-adjacency = {idx: set() for idx in cluster_list}
 
-for i, row in clusters_geography.iterrows():
-    geom_i = row.geometry
-    uf_i = row['cluster']
-    possible_matches_index = list(sindex.intersection(geom_i.bounds))
-    
-    for j in possible_matches_index:
-        if i == j:
-            continue
-        geom_j = clusters_geography.loc[j, "geometry"]
-        uf_j = clusters_geography.loc[j, 'cluster']
+    # Step 1: Dissolve municipalities to state-level geometries
+    clusters_geography = geography.dissolve(by='cluster', as_index=False)
+    clusters_geography = clusters_geography.reset_index(drop=True)
+
+    # Step 2: Ensure 'cluster' column is sorted
+    clusters_geography = clusters_geography.sort_values('cluster').reset_index(drop=True)
+    cluster_list = clusters_geography['cluster'].tolist()
+
+    # Step 4: Build spatial index and adjacency dictionary
+    sindex = clusters_geography.sindex
+    adjacency = {idx: set() for idx in cluster_list}
+
+    for i, row in clusters_geography.iterrows():
+        geom_i = row.geometry
+        uf_i = row['cluster']
+        possible_matches_index = list(sindex.intersection(geom_i.bounds))
         
-        # Use intersects instead of touches for robustness
-        if geom_i.intersects(geom_j):
-            adjacency[uf_i].add(uf_j)
-            adjacency[uf_j].add(uf_i)  # symmetric
+        for j in possible_matches_index:
+            if i == j:
+                continue
+            geom_j = clusters_geography.loc[j, "geometry"]
+            uf_j = clusters_geography.loc[j, 'cluster']
+            
+            # Use intersects instead of touches for robustness
+            if geom_i.intersects(geom_j):
+                adjacency[uf_i].add(uf_j)
+                adjacency[uf_j].add(uf_i)  # symmetric
 
-# Step 5: Convert to binary adjacency matrix
-adj_matrix = pd.DataFrame(0, index=cluster_list, columns=cluster_list)
+    # Step 5: Convert to binary adjacency matrix
+    adj_matrix = pd.DataFrame(0, index=cluster_list, columns=cluster_list)
 
-for uf in cluster_list:
-    for neighbor in adjacency[uf]:
-        adj_matrix.loc[uf, neighbor] = 1
+    for uf in cluster_list:
+        for neighbor in adjacency[uf]:
+            adj_matrix.loc[uf, neighbor] = 1
 
-# Save in a .csv
-adj_matrix.to_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}.csv')
+    # Save in a .csv
+    adj_matrix.to_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}_run{numRun}.csv')
 
 
 
-# Build the clusters' weighted distance matrix for the Bayesian imputation model
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    # Build the clusters' weighted distance matrix for the Bayesian imputation model
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-# Assure appropriate projection
-geography = geography.to_crs("EPSG:5880")
+    # Assure appropriate projection
+    geography = geography.to_crs("EPSG:5880")
 
-# Calculate centroids at f'{region}' level
-geography['CENTROID'] = geography.geometry.centroid
+    # Calculate centroids at f'{region}' level
+    geography['CENTROID'] = geography.geometry.centroid
 
-# Comptue weighted centroid 
-def weighted_centroid(group):
-    # Get x and y from centroid
-    x = group['CENTROID'].x
-    y = group['CENTROID'].y
-    weights = group['POP']
-    # Weighted average
-    x_bar = (x * weights).sum() / weights.sum()
-    y_bar = (y * weights).sum() / weights.sum()
-    return Point(x_bar, y_bar)
+    # Comptue weighted centroid 
+    def weighted_centroid(group):
+        # Get x and y from centroid
+        x = group['CENTROID'].x
+        y = group['CENTROID'].y
+        weights = group['POP']
+        # Weighted average
+        x_bar = (x * weights).sum() / weights.sum()
+        y_bar = (y * weights).sum() / weights.sum()
+        return Point(x_bar, y_bar)
 
-# Group by f'{region}' and calculate weighted centroids
-weighted_centroids = geography.groupby('cluster').apply(weighted_centroid).reset_index()
-weighted_centroids.columns = ['cluster', 'geometry']
-centroids_gdf = gpd.GeoDataFrame(weighted_centroids, geometry='geometry', crs=geography.crs)
+    # Group by f'{region}' and calculate weighted centroids
+    weighted_centroids = geography.groupby('cluster').apply(weighted_centroid).reset_index()
+    weighted_centroids.columns = ['cluster', 'geometry']
+    centroids_gdf = gpd.GeoDataFrame(weighted_centroids, geometry='geometry', crs=geography.crs)
 
-# Create empty DataFrame
-dist_matrix = pd.DataFrame(index=cluster_list, columns=cluster_list, dtype=float)
+    # Create empty DataFrame
+    dist_matrix = pd.DataFrame(index=cluster_list, columns=cluster_list, dtype=float)
 
-# Fill with distances in kilometers
-for i, row_i in centroids_gdf.iterrows():
-    for j, row_j in centroids_gdf.iterrows():
-        dist = row_i.geometry.distance(row_j.geometry) / 1000  # meters to km
-        dist_matrix.loc[row_i['cluster'], row_j['cluster']] = dist
+    # Fill with distances in kilometers
+    for i, row_i in centroids_gdf.iterrows():
+        for j, row_j in centroids_gdf.iterrows():
+            dist = row_i.geometry.distance(row_j.geometry) / 1000  # meters to km
+            dist_matrix.loc[row_i['cluster'], row_j['cluster']] = dist
 
-# Save the distance matrix to a csv file
-dist_matrix.to_csv(f'../../data/interim/clusters/distance_matrix_{region_filename}.csv')
+    # Save the distance matrix to a csv file
+    dist_matrix.to_csv(f'../../data/interim/clusters/distance_matrix_{region_filename}_run{numRun}.csv')
+
