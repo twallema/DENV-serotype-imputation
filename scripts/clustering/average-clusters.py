@@ -1,9 +1,15 @@
-# Creates an adjacency matrix for each run of find-clusters, and then a probability matrix that gives the probabilities each region will be clustered with every other region
-
 import pandas as pd
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+from scipy.cluster.hierarchy import linkage, fcluster
+from scipy.spatial.distance import squareform
+from sklearn.cluster import SpectralClustering
+import networkx as nx 
+import community as community_louvain
+
+# Create basic probability matrix (first an adjacency matrix for each run of find-clusters, and then a probability matrix that gives the probabilities each region will be clustered with every other region)
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 def build_adjacency(df):
     # Convert the two columns to arrays
@@ -43,12 +49,77 @@ prob_matrix /= numRuns
 
 prob_matrix.to_csv("../../data/interim/clusters/prob_matrix_test.csv")
 
-# Heatmap
-plt.figure(figsize=(10,8))
-sns.heatmap(prob_matrix, cmap="crest")
+# Heatmap of Probability Matrix as it is
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# plt.figure(figsize=(10,8))
+# sns.heatmap(prob_matrix, cmap="crest")
 # plt.show()
 
-sns.clustermap(prob_matrix, cmap="viridis", figsize=(12, 12))
-# plt.savefig(f'../../data/interim/clusters/prob_matrix_clustermap{region_filename}.pdf')
+# Clustermap from Hierarchal Clustering, w/o fixed k = 35
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# sns.clustermap(prob_matrix, cmap="viridis", figsize=(12, 12))
+# plt.show()
+
+# Manual Hierarchal Clustering from Distance Matrix (1-prob_mat), to fix k clusters -- not sure about this one
+'''
+dist_matrix = 1 - prob_matrix
+np.fill_diagonal(dist_matrix.values, 0) # diagonal still needs to be 0 for squareform to work
+dist_matrix.to_csv("../../data/interim/clusters/dist_matrix.csv")
+
+dist_condensed = squareform(dist_matrix.values)
+
+Z = linkage(dist_condensed, method="average") # UPGMA?
+
+labels = fcluster(Z, t=35, criterion="maxclust") # Exactly 35 clusters
+
+clusters = pd.DataFrame({"region": prob_matrix.index, "cluster": labels})
+clusters.to_csv("../../data/interim/clusters/hierarchal_consensus_clusters.csv", index=False)
+
+# Reorder prob_matrix by cluster labels
+order = np.argsort(labels)
+reordered = prob_matrix.values[order][:, order]
+
+# Plot heatmap
+plt.figure(figsize=(12, 12))
+sns.heatmap(reordered, cmap="viridis", cbar=True)
+plt.title("Consensus Clusters (Hierarchical, k=35)")
+# plt.show()
+'''
+
+# Spectral Clustering
+# >>>>>>>>>>>>>>>>>>>>>>>>>>
+clustering = SpectralClustering(affinity='precomputed', random_state=0)
+labels = clustering.fit_predict(prob_matrix.values)
+
+# Reorder matrix by cluster assignment in order to see groupings
+sorted_spec = np.argsort(labels)
+sorted_regions = prob_matrix.index[sorted_spec]
+
+sorted_mat = prob_matrix.loc[sorted_regions, sorted_regions]
+
+# sns.heatmap(sorted_mat, cmap="viridis")
+# plt.show()
+
+# Community Detection - Louvain
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+G = nx.from_pandas_adjacency(prob_matrix)
+
+partition = community_louvain.best_partition(G,weight='weight',resolution=17)
+
+cd_clusters = pd.DataFrame({
+    "region": list(partition.keys()),
+    "cluster": list(partition.values())
+})
+
+cd_clusters.to_csv("../../data/interim/clusters/louvain_clusters.csv", index=False)
+
+pos = nx.spring_layout(G, seed=42) 
+plt.figure(figsize=(8,8))
+nx.draw_networkx_nodes(G, pos, node_size=50, node_color=list(partition.values()), cmap=plt.cm.get_cmap("tab20",40))
+nx.draw_networkx_edges(G, pos, alpha=0.05)
+plt.axis("off")
 plt.show()
-# plt.close()
+
+
+# New probability matrix with weighted averages based on the Best Objective Value score from each run (20 runs for testing rather than 50)
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>

@@ -8,6 +8,7 @@ from spopt.region import MaxPHeuristic
 from libpysal.weights import Rook, Queen
 from scipy.ndimage import gaussian_filter1d
 from sklearn.preprocessing import StandardScaler
+import sys
 
 # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
 region_filename = 'rgint'
@@ -96,10 +97,18 @@ denv["N_typed"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
 # sum cases by year
 active_sum = denv.groupby([f'{region}',"year"])['N_typed'].sum().reset_index()
 # take mean across years
-mean_active_sum = active_sum.groupby(f'{region}')["N_typed"].mean().reset_index()
+mean_active_sum = active_sum.groupby(f'{region}')["N_typed"].mean().reset_index() # array for clustering
 mean_active_sum.rename(columns={"N_typed":"N_typed_monthly_mean"}, inplace=True)
 # merge min_yearly_sum
 geography = geography.merge(mean_active_sum, on=f'{region}', how="left")
+
+sum = np.sum(mean_active_sum["N_typed_monthly_mean"])
+print(sum)
+
+print(mean_active_sum[mean_active_sum["N_typed_monthly_mean"]> 50])
+#or i in mean_active_sum["N_typed_monthly_mean"]:
+
+sys.exit()
 
 
 # Make biome covariate
@@ -170,7 +179,7 @@ attrs = DTW_covariates + ['cx', 'cy']  #+ biome_dummies.columns.to_list() #+ [re
 # Build contiguity weight map
 w = Rook.from_dataframe(geography)
 
-n = 50
+n = 20
 
 for numRun in range(1, n+1):
     print(f"Starting clustering run {numRun} of {n}")
@@ -304,4 +313,6 @@ for numRun in range(1, n+1):
 
     # Save the distance matrix to a csv file
     dist_matrix.to_csv(f'../../data/interim/clusters/distance_matrix_{region_filename}_run{numRun}.csv')
+
+    
 
