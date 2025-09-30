@@ -102,14 +102,6 @@ mean_active_sum.rename(columns={"N_typed":"N_typed_monthly_mean"}, inplace=True)
 # merge min_yearly_sum
 geography = geography.merge(mean_active_sum, on=f'{region}', how="left")
 
-sum = np.sum(mean_active_sum["N_typed_monthly_mean"])
-print(sum)
-
-print(mean_active_sum[mean_active_sum["N_typed_monthly_mean"]> 50])
-#or i in mean_active_sum["N_typed_monthly_mean"]:
-
-sys.exit()
-
 
 # Make biome covariate
 # >>>>>>>>>>>>>>>>>>>>
