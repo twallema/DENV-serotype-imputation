@@ -17,7 +17,7 @@ from scipy.spatial.distance import squareform
 # script settings
 # >>>>>>>>>>>>>>>
 
-n = 10 # number of max-p regionalization runs to average
+n = 20 # number of max-p regionalization runs to average
 threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
 region_filename = 'rgint' # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
 
@@ -139,7 +139,7 @@ if region:
 
 # Compute the mimimum sum of serotyped cases across all years (will have to be changed)
 # limit time window (before 1999 will likely be excluded because it's way too limited; from 2019 onwards all regions have good subtyping)
-denv = denv[((denv['date'] > datetime(1999,1,1)) & (denv['date'] < datetime(2019,1,1)))]
+denv = denv[((denv['date'] > datetime(2000,1,1)) & (denv['date'] < datetime(2010,1,1)))]
 # extract year
 denv["year"] = pd.to_datetime(denv["date"]).dt.year
 # compute total cases per month
@@ -232,29 +232,70 @@ model = MaxPHeuristic(
     verbose=False,
     policy='multiple',
     max_iterations_construction=1000,
-    max_iterations_sa=10,
+    max_iterations_sa=5,
 )
 
+
+num_clusters = []
 matrices = []
+clusters = pd.DataFrame(index=geography[region].values)
 for numRun in range(n):
     print(f"Starting clustering run {numRun+1} of {n}")
 
     # run model
     model.solve() 
 
+    # append the individual run to dataframes 
+    clusters[f'run_{numRun+1}'] = model.labels_
+    geography[f'run_{numRun+1}'] = model.labels_
+
+    # save number of clusters
+    num_clusters.append(len(np.unique(model.labels_)))
+
     # save a matrix of size (n_regions x n_regions) containing 1 if regions belong to the same cluster for every run
     matrices.append(build_co_association_matrix(geography[region], model.labels_))
 
-# average across runs
+# average co-association across runs
 prob_matrix = pd.DataFrame(0.0, index=geography[region], columns=geography[region])
 for association_matrix in matrices:
     prob_matrix += association_matrix
 prob_matrix /= numRun+1
 
-# save result
-prob_matrix.to_csv("../../data/interim/clusters/prob_matrix.csv")
+# save mean co-association matrix
+prob_matrix.to_csv(f"../../data/interim/clusters/prob_matrix_{region_filename}.csv")
 
+# save individual clustering runs & append them to geography
+clusters.to_csv(f"../../data/interim/clusters/clusters_{region_filename}.csv")
 
+# compute median number of clusters
+num_clusters = int(np.median(num_clusters))
+
+# Randomly select and visualize 12 runs on a 3x4 grid
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# 1. Get all run columns
+run_columns = [col for col in clusters.columns if col.startswith("run_")]
+# 2. Randomly pick 12 runs
+selected_runs = np.random.choice(run_columns, size=12, replace=False)
+# 3. Set up the 3x4 grid
+fig, axes = plt.subplots(3, 4, figsize=(15, 15))
+axes = axes.flatten()
+# 4. Plot each run
+for ax, run in zip(axes, selected_runs):
+    geography.plot(
+        column=geography[run],
+        categorical=True,
+        cmap="tab20",
+        linewidth=0.2,
+        edgecolor="grey",
+        legend=False,
+        ax=ax
+    )
+    ax.set_title(run, fontsize=10)
+    ax.axis("off")
+plt.tight_layout()
+plt.savefig(f'../../data/interim/clusters/clusters_{region_filename}.png', dpi=300)
+plt.close()
 
 # Recluster mean co-association matrix using hierarchical clustering
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -264,22 +305,20 @@ prob_matrix.to_csv("../../data/interim/clusters/prob_matrix.csv")
 Z = linkage(squareform(1 - prob_matrix, checks=False), method='average')
 
 # Choose number of clusters k
-k = 35
-geography['consensus_clusters_hierarchical'] = fcluster(Z, k, criterion='maxclust')
+geography['consensus_clusters_hierarchical'] = fcluster(Z, num_clusters, criterion='maxclust')
 
 
 
 # Recluster mean co-association matrix using hierarchical clustering
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-k = 35
-sc = SpectralClustering(n_clusters=k, affinity='precomputed', random_state=0)
+sc = SpectralClustering(n_clusters=num_clusters, affinity='precomputed', random_state=0)
 geography['consensus_clusters_spectral'] = sc.fit_predict(prob_matrix)+1
 
 
 
-# Save and visualise the clustering results
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# Save and visualise the mean clustering results
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # visualise clusters on a map
 fig, ax = plt.subplots(nrows=1, ncols=2)
@@ -311,8 +350,7 @@ ax[1].set_title(f"Spectral clustering", fontsize=14)
 ax[1].axis("off")
 fig.suptitle('Consensus clusters')
 plt.tight_layout()
-plt.savefig(f'../../data/interim/clusters/clusters_{region_filename}.png', dpi=200)
-plt.show()
+plt.savefig(f'../../data/interim/clusters/consensus_clusters_{region_filename}.png', dpi=300)
 plt.close()
 
 
