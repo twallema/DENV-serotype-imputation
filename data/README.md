@@ -4,6 +4,8 @@ Here we list a description of all datasets, raw datasets are unaltered original 
 
 ## Raw
 
++ `indexP_monthlyclimate_allmuni.csv`: Index-P at the municipality level, seasonal average (monthly). Obtained from Dr. Laura Alexander.
+
 ### BR_Municipios_2023
 
 Shapefiles of the Brazilian municipalities, including the area codes and names of the immediate regions (508), intermediate regions (133), federative units (27) and regions (5) of Brazil. Ommitted from Github due to file size limitations. Downloaded from IBGE: https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_municipais/municipio_2023/Brasil/BR_Municipios_2023.zip 
@@ -22,11 +24,17 @@ These data are partly confidential and can be found on the Bento lab box.
 
 ## Interim
 
-+ `indexP_monthlyclimate_allmuni.csv`: Index-P at the municipality level, seasonal average (monthly). Obtained from Dr. Laura Alexander.
-
 + `geographic-dataset.parquet`: Compressed (brotli compression) geographical dataset. Dataset containing geometries of Brazilian municipalities, along with variables relevant for clustering. Made using `data/conversion/build_geographic-dataset.py` from the data in `data/raw/BR_Municipios_2023`.
 
 + `spatial_units_mapping.csv`: Area codes and names of the municipalities, immediate regions, intermediate regions, federative units and regions. Also available in `geographic-dataset.parquet` but saved seperately to lower IO burden.
+
+### indexP
+
++ `indexP_mun.csv`: Index-P at the municipality level, seasonal average (monthly). Essentially a copy of the original data in the raw folder.
+
++ `indexP_rgint.csv`: Index-P at the intermediate region level, seasonal average (monthly). Computed from the municipality level by averaging with demographic weighing. 
+
++ `indexP_rgi.csv`: Index-P at the immediate region level, seasonal average (monthly). Computed from the municipality level by averaging with demographic weighing. 
 
 ### DENV_per_100k
 
@@ -63,4 +71,6 @@ This folder is not on GitHub but is automatically generated when users run the B
 
 + `build_geographic-dataset.py`: A script merging the Brazilian municipalities' geometries, population, population density and environmental characteristics.
 
-+ `build_dengue-incidence-100k.py`: A script to convert the formatted linelist data in `data/interim/datasus_DENV-linelist` to the total dengue incidence per 100K inhabitants at the municipality level.
++ `build_dengue-incidence-100k.py`: A script to convert the formatted linelist data in `data/interim/datasus_DENV-linelist` to the total dengue incidence per 100K inhabitants at the municipality/immediate/intermediate region level.
+
++ `build_indexP.py`: A script to aggregate the municipality level index P per month to the immediate and intermediate Brazilian regions.
