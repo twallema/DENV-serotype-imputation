@@ -77,8 +77,11 @@ denv_100k = pd.read_csv(f'../../data/interim/DENV_per_100K/DENV_per_100k_{region
 denv_100k['date'] = pd.to_datetime(denv_100k['date'])
 
 # Load DENV per 100K DTW-MDS embedding
-DTW_covariates = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/DTW-MDS-embedding_{region_filename}.csv')
-region = DTW_covariates.columns.to_list()[0]
+DTW_covariates_denv_100k = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-MDS-embedding_{region_filename}.csv')
+
+# Load indexP DTW-MDS embedding
+DTW_covariates_indexP = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/indexP/DTW-MDS-embedding_{region_filename}.csv')
+region = DTW_covariates_indexP.columns.to_list()[0]
 
 
 
@@ -217,13 +220,6 @@ geography['denv_100k_cumulative'] = denv_100k.values
 
 
 
-# Make index-p covariate
-# >>>>>>>>>>>>>>>>>>>>>>
-
-# ...
-
-
-
 # Make compactness covariate
 # >>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -244,19 +240,35 @@ geography[region+'_NORM'] = sc.fit_transform(geography[[region]])
 
 
 
-# Make DTW-MDS covariate
-# >>>>>>>>>>>>>>>>>>>>>>
+# Make DENV per 100k DTW-MDS covariate
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # Merge to the geography
 geography = geography.merge(
-    DTW_covariates, 
+    DTW_covariates_denv_100k, 
     on = f'{region}'
 )
 
 # Standardize DTW-MDS embedding
 sc = StandardScaler()
-DTW_covariates_names = [x for x in DTW_covariates.columns.to_list() if x != f'{region}']
-geography[DTW_covariates_names] = sc.fit_transform(geography[DTW_covariates_names])
+DTW_covariates_denv_100k_names = [x for x in DTW_covariates_denv_100k.columns.to_list() if x != f'{region}']
+geography[DTW_covariates_denv_100k_names] = sc.fit_transform(geography[DTW_covariates_denv_100k_names])
+
+
+
+# Make indexP DTW-MDS covariate
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# Merge to the geography
+geography = geography.merge(
+    DTW_covariates_indexP, 
+    on = f'{region}'
+)
+
+# Standardize DTW-MDS embedding
+sc = StandardScaler()
+DTW_covariates_indexP_names = [x for x in DTW_covariates_indexP.columns.to_list() if x != f'{region}']
+geography[DTW_covariates_indexP_names] = sc.fit_transform(geography[DTW_covariates_indexP_names])
 
 
 
@@ -264,7 +276,7 @@ geography[DTW_covariates_names] = sc.fit_transform(geography[DTW_covariates_name
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # my pick
-attrs = ['cx', 'cy']  + DTW_covariates_names + ['denv_100k_cumulative',] # koppen_dummies.columns.to_list() + biome_dummies.columns.to_list()
+attrs = ['cx', 'cy']  + DTW_covariates_denv_100k_names + DTW_covariates_indexP_names #+ ['denv_100k_cumulative',] + koppen_dummies.columns.to_list() + biome_dummies.columns.to_list()
 
 
 
