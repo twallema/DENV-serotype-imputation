@@ -11,8 +11,8 @@ from sklearn.manifold import MDS
 from sklearn.preprocessing import StandardScaler
 
 # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
-region_filename = 'rgint'
-region = 'CD_RGINT'
+region_filename = 'mun'
+region = 'CD_MUN'
 # number of dimensions to project the DTW matrix onto (bigger = better representation of DTW matrix BUT clustering becomes harder)
 n_mds_components = 3
 # sigma of gaussian filter used to smooth DENV incidence per 100K
@@ -81,12 +81,12 @@ plt.imshow(dtw_dist, cmap="viridis", aspect="auto")
 plt.colorbar(label="DTW distance")
 plt.title(f"DTW distance matrix")
 plt.axis("off")  # hide axis labels since 508 is too dense
-plt.savefig(f'../../data/interim/DTW-MDS-embeddings/DTW-mat-raw_{region_filename}.pdf')
+plt.savefig(f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-mat-raw_{region_filename}.pdf')
 plt.close()
 
 # visualise clustermap
 sns.clustermap(dtw_dist, cmap="viridis", figsize=(12, 12))
-plt.savefig(f'../../data/interim/DTW-MDS-embeddings/DTW-mat-clustermap_{region_filename}.pdf')
+plt.savefig(f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-mat-clustermap_{region_filename}.pdf')
 
 # --- Step 3: Cluster DTW matrix and visualise on a map ---
 
@@ -116,8 +116,8 @@ for i,n_clusters in enumerate(n_clusters_list):
         column=f"dtw_clusters_{n_clusters}",          # color regions by cluster label
         categorical=True,
         cmap="tab20",             # categorical colormap
-        linewidth=0.2,
-        edgecolor="grey",
+        linewidth=0,
+        edgecolor=None,
         legend=False,
         ax=ax[i],
         legend_kwds={'fontsize': 7, 'ncol': 2, 'loc': 'lower right'}
@@ -125,18 +125,18 @@ for i,n_clusters in enumerate(n_clusters_list):
     ax[i].axis("off")
     ax[i].set_title(f'{n_clusters} clusters')
 plt.tight_layout()
-plt.savefig(f'../../data/interim/DTW-MDS-embeddings/DTW-mat-clustered_{region_filename}.png', dpi=300)
+plt.savefig(f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-mat-clustered_{region_filename}.png', dpi=400)
 plt.close()
 
 
 # --- Step 4: Multidimensional Scaling (MDS) ---
 
 # perform MDS
-mds = MDS(n_components=n_mds_components, dissimilarity="precomputed", random_state=42, max_iter=1000, normalized_stress=True)
+mds = MDS(n_components=n_mds_components, dissimilarity="precomputed", random_state=42, max_iter=10000, normalized_stress=True)
 coords = mds.fit_transform(dtw_dist)
 # evaluate performance metric (0.025=excellent, 0.05=good, 0.10=fair, 0.20=poor)
 print(mds.stress_)
 # convert to dataframe
-embedding = pd.DataFrame(coords, index=ts.index, columns=[f"mds{i+1}" for i in range(n_mds_components)]).reset_index()
+embedding = pd.DataFrame(coords, index=ts.index, columns=[f"denv_100k_mds{i+1}" for i in range(n_mds_components)]).reset_index()
 # save dataframe
-embedding.to_csv(f'../../data/interim/DTW-MDS-embeddings/DTW-MDS-embedding_{region_filename}.csv', index=False)
+embedding.to_csv(f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-MDS-embedding_{region_filename}.csv', index=False)
