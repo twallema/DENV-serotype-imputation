@@ -16,12 +16,12 @@ region = 'CD_RGINT'
 # number of dimensions to project the DTW matrix onto (bigger = better representation of DTW matrix BUT clustering becomes harder)
 n_mds_components = 3
 # sigma of gaussian filter used to smooth DENV incidence per 100K
-sigma = 1
+sigma = 0.01
 # z-score the DENV incidence per 100K (doesn't work well; just here to let you know I tried this)
 z_score = False
 # use all data
-start_date = datetime(1900,1,1)
-end_date = datetime(2100,1,1)
+start_date = datetime(1000, 1, 1)
+end_date = datetime(3000, 1, 1)
 
 
 # --- Step 1: Prepare and smooth incidence time series ---
@@ -79,10 +79,14 @@ dtw_dist = cdist_dtw(X, sakoe_chiba_radius=1, n_jobs=-1, verbose=True)
 plt.figure(figsize=(10, 8))
 plt.imshow(dtw_dist, cmap="viridis", aspect="auto")
 plt.colorbar(label="DTW distance")
-plt.title("DTW distance matrix across 508 regions")
+plt.title(f"DTW distance matrix")
 plt.axis("off")  # hide axis labels since 508 is too dense
 plt.savefig(f'../../data/interim/DTW-MDS-embeddings/DTW-mat-raw_{region_filename}.pdf')
 plt.close()
+
+# visualise clustermap
+sns.clustermap(dtw_dist, cmap="viridis", figsize=(12, 12))
+plt.savefig(f'../../data/interim/DTW-MDS-embeddings/DTW-mat-clustermap_{region_filename}.pdf')
 
 # --- Step 3: Cluster DTW matrix and visualise on a map ---
 
@@ -95,14 +99,14 @@ geography = gpd.read_parquet("../../data/interim/geographic-dataset.parquet")
 # Dissolve to desired spatial level
 geography = geography.dissolve(by=f'{region}', aggfunc={'POP': 'sum'})
 # Perform hierarchical clustering (average linkage)
-n_clusters_list = [5, 10, 15, 20]
-for n_clusters in n_clusters_list:
+n_clusters_list = [5, 10, 15, 25, 50, 100]
+for n_clusters in n_clusters_list:  
     # Hierarchical clustering
-    #Z = linkage(squareform(dtw_dist, checks=False), method='average')
-    #geography[f'dtw_clusters_{n_clusters}'] = fcluster(Z, n_clusters, criterion='maxclust')
+    Z = linkage(squareform(dtw_dist), method='average')
+    geography[f'dtw_clusters_{n_clusters}'] = fcluster(Z, n_clusters, criterion='maxclust')
     # Spectral clustering
-    sc = SpectralClustering(n_clusters=n_clusters, affinity='precomputed', random_state=0)
-    geography[f'dtw_clusters_{n_clusters}'] = sc.fit_predict(dtw_dist)
+    #sc = SpectralClustering(n_clusters=n_clusters, affinity='precomputed', random_state=0)
+    #geography[f'dtw_clusters_{n_clusters}'] = sc.fit_predict(dtw_dist)
 
 # Visualise DTW clusters 
 fig,ax=plt.subplots(ncols=len(n_clusters_list))
