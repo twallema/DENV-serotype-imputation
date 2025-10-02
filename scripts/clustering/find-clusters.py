@@ -17,9 +17,9 @@ from scipy.spatial.distance import squareform
 # script settings
 # >>>>>>>>>>>>>>>
 
-n = 20 # number of max-p regionalization runs to average
+n = 50 # number of max-p regionalization runs to average
 threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
-region_filename = 'rgint' # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
+region_filename = 'rgi' # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
 
 
 
@@ -72,7 +72,11 @@ geography = gpd.read_parquet("../../data/interim/geographic-dataset.parquet")
 denv = pd.read_csv('../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv')
 denv['date'] = pd.to_datetime(denv['date'])
 
-# Load DTW-MDS embedding
+# Load cases per 100K data
+denv_100k = pd.read_csv(f'../../data/interim/DENV_per_100K/DENV_per_100k_{region_filename}.csv')
+denv_100k['date'] = pd.to_datetime(denv_100k['date'])
+
+# Load DENV per 100K DTW-MDS embedding
 DTW_covariates = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/DTW-MDS-embedding_{region_filename}.csv')
 region = DTW_covariates.columns.to_list()[0]
 
@@ -104,13 +108,28 @@ if region:
         .drop_duplicates(f'{region}')
         .set_index(f'{region}')['biome']
     )
-    # --- 2. Dissolve geometries by immediate region ---
+    # --- 2. Majority vote of Koppen climate per immediate region ---
+    # Count how many municipalities per koppen in each immediate region
+    koppen_majority = (
+        geography.groupby([f'{region}', 'koppen'])
+        .size()
+        .reset_index(name='count')
+    )
+    # For each immediate region, keep the koppen with max count
+    koppen_majority = (
+        koppen_majority
+        .sort_values([f'{region}', 'count'], ascending=[True, False])
+        .drop_duplicates(f'{region}')
+        .set_index(f'{region}')['koppen']
+    )
+    # --- 3. Dissolve geometries by immediate region ---
     gdf_regions = geography.dissolve(by=f'{region}', aggfunc={'POP': 'sum'})
-    # --- 3. Attach the majority biome back ---
+    # --- 4. Attach the majority biome and koppen back ---
     gdf_regions['biome'] = gdf_regions.index.map(biome_majority)
-    # --- 4. Retain only relevant columns ---
+    gdf_regions['koppen'] = gdf_regions.index.map(koppen_majority)
+    # --- 5. Retain only relevant columns ---
     gdf_regions = gdf_regions.reset_index()
-    geography = gdf_regions[[f'{region}', 'biome', 'POP', 'geometry']]
+    geography = gdf_regions[[f'{region}', 'biome', 'koppen', 'POP', 'geometry']]
 
     # Incidence
     # >>>>>>>>>
@@ -153,6 +172,7 @@ mean_active_sum.rename(columns={"N_typed":"N_typed_monthly_mean"}, inplace=True)
 geography = geography.merge(mean_active_sum, on=f'{region}', how="left")
 
 
+
 # Make biome covariate
 # >>>>>>>>>>>>>>>>>>>>
 
@@ -164,10 +184,43 @@ geography = geography.merge(
     right_index=True, 
     how="left"
 )
-
 # ensure biome dummies are int (0/1)
 for col in biome_dummies.columns:
     geography[col] = geography[col].astype(float)
+
+
+
+# Make Koppen climate covariate
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# Make dummies for the koppen climate
+koppen_dummies = pd.get_dummies(geography["koppen"], prefix="koppen")
+geography = geography.merge(
+    koppen_dummies, 
+    left_index=True, 
+    right_index=True, 
+    how="left"
+)
+# Ensure biome dummies are int (0/1)
+for col in koppen_dummies.columns:
+    geography[col] = geography[col].astype(float)
+
+
+
+# Make cumulative DENV per 100K covariate
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# compute cumulative totals
+denv_100k = denv_100k.groupby(by=f'{region}')['DENV_per_100k'].sum()
+# add to geography
+geography['denv_100k_cumulative'] = denv_100k.values
+
+
+
+# Make index-p covariate
+# >>>>>>>>>>>>>>>>>>>>>>
+
+# ...
 
 
 
@@ -202,8 +255,8 @@ geography = geography.merge(
 
 # Standardize DTW-MDS embedding
 sc = StandardScaler()
-DTW_covariates = [x for x in DTW_covariates.columns.to_list() if x != f'{region}']
-geography[DTW_covariates] = sc.fit_transform(geography[DTW_covariates])
+DTW_covariates_names = [x for x in DTW_covariates.columns.to_list() if x != f'{region}']
+geography[DTW_covariates_names] = sc.fit_transform(geography[DTW_covariates_names])
 
 
 
@@ -211,7 +264,7 @@ geography[DTW_covariates] = sc.fit_transform(geography[DTW_covariates])
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # my pick
-attrs = DTW_covariates + ['cx', 'cy']  #+ biome_dummies.columns.to_list() #+ [region+'_NORM'] 
+attrs = ['cx', 'cy']  + DTW_covariates_names + ['denv_100k_cumulative',] # koppen_dummies.columns.to_list() + biome_dummies.columns.to_list()
 
 
 
@@ -232,7 +285,7 @@ model = MaxPHeuristic(
     verbose=False,
     policy='multiple',
     max_iterations_construction=1000,
-    max_iterations_sa=5,
+    max_iterations_sa=20,
 )
 
 
