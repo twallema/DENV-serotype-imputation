@@ -8,9 +8,59 @@ from spopt.region import MaxPHeuristic
 from libpysal.weights import Rook, Queen
 from scipy.ndimage import gaussian_filter1d
 from sklearn.preprocessing import StandardScaler
+import numpy as np
 
-# spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
-region_filename = 'rgi'
+from sklearn.cluster import SpectralClustering
+from scipy.cluster.hierarchy import linkage, fcluster
+from scipy.spatial.distance import squareform
+
+# script settings
+# >>>>>>>>>>>>>>>
+
+n = 50 # number of max-p regionalization runs to average
+threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
+region_filename = 'rgi' # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
+
+
+
+# helper function
+# >>>>>>>>>>>>>>>
+
+def build_co_association_matrix(regions, clusters):
+    """
+    Build a co-association matrix containing 1 when BR regions belong to the same cluster and 0 if they don't
+
+    input
+    -----
+    - regions: list
+        - list containing unique BR region codes 
+
+    - clusters: list
+        - list containing the corresponding ID of the cluster the region belongs to
+        - must have the same length as regions
+
+    output
+    ------
+
+    - association_matrix: np.ndarray
+        - 2D (n x n) association matrix
+    """
+
+    # check input length
+    assert len(regions) == len(clusters), '`regions` and `clusters` must have the same length'
+
+    # Start with an  matrix of zeros
+    n = len(regions)
+    association_matrix = np.zeros((n,n),dtype=int) # Maybe rename; this could be confused with the adjacency matrices being created in find-clusters that show which clusters (1-36) are next to each other
+
+    # Loop through each pair of regions and check if they are in the same cluster. Set to 1 if two regions are in the same cluster, 0 if they are not (or the regions are the same)
+    for i in range(n):
+        for j in range(n):
+            if i != j and clusters[i] == clusters[j]:
+                association_matrix[i,j] = 1
+    return association_matrix
+
+
 
 # Load raw data
 # >>>>>>>>>>>>>
@@ -22,9 +72,17 @@ geography = gpd.read_parquet("../../data/interim/geographic-dataset.parquet")
 denv = pd.read_csv('../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv')
 denv['date'] = pd.to_datetime(denv['date'])
 
-# Load DTW-MDS embedding
-DTW_covariates = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/DTW-MDS-embedding_{region_filename}.csv')
-region = DTW_covariates.columns.to_list()[0]
+# Load cases per 100K data
+denv_100k = pd.read_csv(f'../../data/interim/DENV_per_100K/DENV_per_100k_{region_filename}.csv')
+denv_100k['date'] = pd.to_datetime(denv_100k['date'])
+
+# Load DENV per 100K DTW-MDS embedding
+DTW_covariates_denv_100k = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-MDS-embedding_{region_filename}.csv')
+
+# Load indexP DTW-MDS embedding
+DTW_covariates_indexP = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/indexP/DTW-MDS-embedding_{region_filename}.csv')
+region = DTW_covariates_indexP.columns.to_list()[0]
+
 
 
 # Aggregate incidence and geographical dataset to the intermediate/immediate regions
@@ -53,13 +111,28 @@ if region:
         .drop_duplicates(f'{region}')
         .set_index(f'{region}')['biome']
     )
-    # --- 2. Dissolve geometries by immediate region ---
+    # --- 2. Majority vote of Koppen climate per immediate region ---
+    # Count how many municipalities per koppen in each immediate region
+    koppen_majority = (
+        geography.groupby([f'{region}', 'koppen'])
+        .size()
+        .reset_index(name='count')
+    )
+    # For each immediate region, keep the koppen with max count
+    koppen_majority = (
+        koppen_majority
+        .sort_values([f'{region}', 'count'], ascending=[True, False])
+        .drop_duplicates(f'{region}')
+        .set_index(f'{region}')['koppen']
+    )
+    # --- 3. Dissolve geometries by immediate region ---
     gdf_regions = geography.dissolve(by=f'{region}', aggfunc={'POP': 'sum'})
-    # --- 3. Attach the majority biome back ---
+    # --- 4. Attach the majority biome and koppen back ---
     gdf_regions['biome'] = gdf_regions.index.map(biome_majority)
-    # --- 4. Retain only relevant columns ---
+    gdf_regions['koppen'] = gdf_regions.index.map(koppen_majority)
+    # --- 5. Retain only relevant columns ---
     gdf_regions = gdf_regions.reset_index()
-    geography = gdf_regions[[f'{region}', 'biome', 'POP', 'geometry']]
+    geography = gdf_regions[[f'{region}', 'biome', 'koppen', 'POP', 'geometry']]
 
     # Incidence
     # >>>>>>>>>
@@ -88,7 +161,7 @@ if region:
 
 # Compute the mimimum sum of serotyped cases across all years (will have to be changed)
 # limit time window (before 1999 will likely be excluded because it's way too limited; from 2019 onwards all regions have good subtyping)
-denv = denv[((denv['date'] > datetime(1999,1,1)) & (denv['date'] < datetime(2019,1,1)))]
+denv = denv[((denv['date'] > datetime(2000,1,1)) & (denv['date'] < datetime(2010,1,1)))]
 # extract year
 denv["year"] = pd.to_datetime(denv["date"]).dt.year
 # compute total cases per month
@@ -96,10 +169,11 @@ denv["N_typed"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
 # sum cases by year
 active_sum = denv.groupby([f'{region}',"year"])['N_typed'].sum().reset_index()
 # take mean across years
-mean_active_sum = active_sum.groupby(f'{region}')["N_typed"].mean().reset_index()
+mean_active_sum = active_sum.groupby(f'{region}')["N_typed"].mean().reset_index() # array for clustering
 mean_active_sum.rename(columns={"N_typed":"N_typed_monthly_mean"}, inplace=True)
 # merge min_yearly_sum
 geography = geography.merge(mean_active_sum, on=f'{region}', how="left")
+
 
 
 # Make biome covariate
@@ -113,10 +187,36 @@ geography = geography.merge(
     right_index=True, 
     how="left"
 )
-
 # ensure biome dummies are int (0/1)
 for col in biome_dummies.columns:
     geography[col] = geography[col].astype(float)
+
+
+
+# Make Koppen climate covariate
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# Make dummies for the koppen climate
+koppen_dummies = pd.get_dummies(geography["koppen"], prefix="koppen")
+geography = geography.merge(
+    koppen_dummies, 
+    left_index=True, 
+    right_index=True, 
+    how="left"
+)
+# Ensure biome dummies are int (0/1)
+for col in koppen_dummies.columns:
+    geography[col] = geography[col].astype(float)
+
+
+
+# Make cumulative DENV per 100K covariate
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# compute cumulative totals
+denv_100k = denv_100k.groupby(by=f'{region}')['DENV_per_100k'].sum()
+# add to geography
+geography['denv_100k_cumulative'] = denv_100k.values
 
 
 
@@ -140,19 +240,35 @@ geography[region+'_NORM'] = sc.fit_transform(geography[[region]])
 
 
 
-# Make DTW-MDS covariate
-# >>>>>>>>>>>>>>>>>>>>>>
+# Make DENV per 100k DTW-MDS covariate
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # Merge to the geography
 geography = geography.merge(
-    DTW_covariates, 
+    DTW_covariates_denv_100k, 
     on = f'{region}'
 )
 
 # Standardize DTW-MDS embedding
 sc = StandardScaler()
-DTW_covariates = [x for x in DTW_covariates.columns.to_list() if x != f'{region}']
-geography[DTW_covariates] = sc.fit_transform(geography[DTW_covariates])
+DTW_covariates_denv_100k_names = [x for x in DTW_covariates_denv_100k.columns.to_list() if x != f'{region}']
+geography[DTW_covariates_denv_100k_names] = sc.fit_transform(geography[DTW_covariates_denv_100k_names])
+
+
+
+# Make indexP DTW-MDS covariate
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# Merge to the geography
+geography = geography.merge(
+    DTW_covariates_indexP, 
+    on = f'{region}'
+)
+
+# Standardize DTW-MDS embedding
+sc = StandardScaler()
+DTW_covariates_indexP_names = [x for x in DTW_covariates_indexP.columns.to_list() if x != f'{region}']
+geography[DTW_covariates_indexP_names] = sc.fit_transform(geography[DTW_covariates_indexP_names])
 
 
 
@@ -160,22 +276,17 @@ geography[DTW_covariates] = sc.fit_transform(geography[DTW_covariates])
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # my pick
-attrs = DTW_covariates + ['cx', 'cy']  #+ biome_dummies.columns.to_list() #+ [region+'_NORM'] 
+attrs = ['cx', 'cy']  + DTW_covariates_denv_100k_names + DTW_covariates_indexP_names #+ ['denv_100k_cumulative',] + koppen_dummies.columns.to_list() + biome_dummies.columns.to_list()
 
 
 
-# Build weights matrix
-# >>>>>>>>>>>>>>>>>>>>>
+# Run max-p regionalization model `n` times and compute mean co-association matrix
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # Build contiguity weight map
-w = Rook.from_dataframe(geography)
+w = Rook.from_dataframe(geography, use_index=False)
 
-
-
-# Setup and run the max-p model
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
+# Setup max-p regionalization model
 model = MaxPHeuristic(
     geography,
     w, 
@@ -183,42 +294,129 @@ model = MaxPHeuristic(
     threshold_name='N_typed_monthly_mean',
     threshold=threshold,
     top_n=3,
-    verbose=True,
+    verbose=False,
     policy='multiple',
-    max_iterations_construction=10000,
-    max_iterations_sa=100,
+    max_iterations_construction=1000,
+    max_iterations_sa=20,
 )
-model.solve()
+
+
+num_clusters = []
+matrices = []
+clusters = pd.DataFrame(index=geography[region].values)
+for numRun in range(n):
+    print(f"Starting clustering run {numRun+1} of {n}")
+
+    # run model
+    model.solve() 
+
+    # append the individual run to dataframes 
+    clusters[f'run_{numRun+1}'] = model.labels_
+    geography[f'run_{numRun+1}'] = model.labels_
+
+    # save number of clusters
+    num_clusters.append(len(np.unique(model.labels_)))
+
+    # save a matrix of size (n_regions x n_regions) containing 1 if regions belong to the same cluster for every run
+    matrices.append(build_co_association_matrix(geography[region], model.labels_))
+
+# average co-association across runs
+prob_matrix = pd.DataFrame(0.0, index=geography[region], columns=geography[region])
+for association_matrix in matrices:
+    prob_matrix += association_matrix
+prob_matrix /= numRun+1
+
+# save mean co-association matrix
+prob_matrix.to_csv(f"../../data/interim/clusters/prob_matrix_{region_filename}.csv")
+
+# save individual clustering runs & append them to geography
+clusters.to_csv(f"../../data/interim/clusters/clusters_{region_filename}.csv")
+
+# compute median number of clusters
+num_clusters = int(np.median(num_clusters))
+
+# Randomly select and visualize 12 runs on a 3x4 grid
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# 1. Get all run columns
+run_columns = [col for col in clusters.columns if col.startswith("run_")]
+# 2. Randomly pick 12 runs
+selected_runs = np.random.choice(run_columns, size=12, replace=False)
+# 3. Set up the 3x4 grid
+fig, axes = plt.subplots(3, 4, figsize=(15, 15))
+axes = axes.flatten()
+# 4. Plot each run
+for ax, run in zip(axes, selected_runs):
+    geography.plot(
+        column=geography[run],
+        categorical=True,
+        cmap="tab20",
+        linewidth=0.2,
+        edgecolor="grey",
+        legend=False,
+        ax=ax
+    )
+    ax.set_title(run, fontsize=10)
+    ax.axis("off")
+plt.tight_layout()
+plt.savefig(f'../../data/interim/clusters/clusters_{region_filename}.png', dpi=300)
+plt.close()
+
+# Recluster mean co-association matrix using hierarchical clustering
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+
+# Perform hierarchical clustering (average linkage)
+Z = linkage(squareform(1 - prob_matrix, checks=False), method='average')
+
+# Choose number of clusters k
+geography['consensus_clusters_hierarchical'] = fcluster(Z, num_clusters, criterion='maxclust')
 
 
 
-# Save and visualise the clustering results
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# Recluster mean co-association matrix using hierarchical clustering
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-# add cluster labels to GeoDataFrame
-geography["cluster"] = model.labels_
+sc = SpectralClustering(n_clusters=num_clusters, affinity='precomputed', random_state=0)
+geography['consensus_clusters_spectral'] = sc.fit_predict(prob_matrix)+1
+
+
+
+# Save and visualise the mean clustering results
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # visualise clusters on a map
-fig, ax = plt.subplots(figsize=(8.3, 11.7/3*2))
+fig, ax = plt.subplots(nrows=1, ncols=2)
+# hierarchical (left)
 geography.plot(
-    column="cluster",          # color regions by cluster label
+    column="consensus_clusters_hierarchical",          # color regions by cluster label
     categorical=True,
     cmap="tab20",             # categorical colormap
     linewidth=0.2,
     edgecolor="grey",
-    legend=True,
-    ax=ax,
+    legend=False,
+    ax=ax[0],
     legend_kwds={'fontsize': 7, 'ncol': 2, 'loc': 'lower right'}
 )
-ax.set_title("Max-p Regionalization of Brazilian Municipalities", fontsize=14)
-ax.axis("off")
-plt.savefig(f'../../data/interim/clusters/clusters_{region_filename}.png', dpi=200)
-plt.show()
+ax[0].set_title(f"Hierarchical clustering", fontsize=14)
+ax[0].axis("off")
+# spectral (right)
+geography.plot(
+    column="consensus_clusters_spectral",          # color regions by cluster label
+    categorical=True,
+    cmap="tab20",             # categorical colormap
+    linewidth=0.2,
+    edgecolor="grey",
+    legend=False,
+    ax=ax[1],
+    legend_kwds={'fontsize': 7, 'ncol': 2, 'loc': 'lower right'}
+)
+ax[1].set_title(f"Spectral clustering", fontsize=14)
+ax[1].axis("off")
+fig.suptitle('Consensus clusters')
+plt.tight_layout()
+plt.savefig(f'../../data/interim/clusters/consensus_clusters_{region_filename}.png', dpi=300)
 plt.close()
-
-# save the result
-geography[[f'{region}', 'cluster']].to_csv(f'../../data/interim/clusters/clusters_{region_filename}.csv', index=False)
-
 
 
 # Build the clusters' adjacency matrix needed for the Bayesian imputation model
@@ -226,12 +424,12 @@ geography[[f'{region}', 'cluster']].to_csv(f'../../data/interim/clusters/cluster
 
 
 # Step 1: Dissolve municipalities to state-level geometries
-clusters_geography = geography.dissolve(by='cluster', as_index=False)
+clusters_geography = geography.dissolve(by='consensus_clusters_hierarchical', as_index=False)
 clusters_geography = clusters_geography.reset_index(drop=True)
 
 # Step 2: Ensure 'cluster' column is sorted
-clusters_geography = clusters_geography.sort_values('cluster').reset_index(drop=True)
-cluster_list = clusters_geography['cluster'].tolist()
+clusters_geography = clusters_geography.sort_values('consensus_clusters_hierarchical').reset_index(drop=True)
+cluster_list = clusters_geography['consensus_clusters_hierarchical'].tolist()
 
 # Step 4: Build spatial index and adjacency dictionary
 sindex = clusters_geography.sindex
@@ -239,14 +437,14 @@ adjacency = {idx: set() for idx in cluster_list}
 
 for i, row in clusters_geography.iterrows():
     geom_i = row.geometry
-    uf_i = row['cluster']
+    uf_i = row['consensus_clusters_hierarchical']
     possible_matches_index = list(sindex.intersection(geom_i.bounds))
     
     for j in possible_matches_index:
         if i == j:
             continue
         geom_j = clusters_geography.loc[j, "geometry"]
-        uf_j = clusters_geography.loc[j, 'cluster']
+        uf_j = clusters_geography.loc[j, 'consensus_clusters_hierarchical']
         
         # Use intersects instead of touches for robustness
         if geom_i.intersects(geom_j):
@@ -286,8 +484,8 @@ def weighted_centroid(group):
     return Point(x_bar, y_bar)
 
 # Group by f'{region}' and calculate weighted centroids
-weighted_centroids = geography.groupby('cluster').apply(weighted_centroid).reset_index()
-weighted_centroids.columns = ['cluster', 'geometry']
+weighted_centroids = geography.groupby('consensus_clusters_hierarchical').apply(weighted_centroid).reset_index()
+weighted_centroids.columns = ['consensus_clusters_hierarchical', 'geometry']
 centroids_gdf = gpd.GeoDataFrame(weighted_centroids, geometry='geometry', crs=geography.crs)
 
 # Create empty DataFrame
@@ -297,7 +495,10 @@ dist_matrix = pd.DataFrame(index=cluster_list, columns=cluster_list, dtype=float
 for i, row_i in centroids_gdf.iterrows():
     for j, row_j in centroids_gdf.iterrows():
         dist = row_i.geometry.distance(row_j.geometry) / 1000  # meters to km
-        dist_matrix.loc[row_i['cluster'], row_j['cluster']] = dist
+        dist_matrix.loc[row_i['consensus_clusters_hierarchical'], row_j['consensus_clusters_hierarchical']] = dist
 
 # Save the distance matrix to a csv file
 dist_matrix.to_csv(f'../../data/interim/clusters/distance_matrix_{region_filename}.csv')
+
+
+
