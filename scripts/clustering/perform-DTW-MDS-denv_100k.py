@@ -14,9 +14,9 @@ from sklearn.preprocessing import StandardScaler
 region_filename = 'mun'
 region = 'CD_MUN'
 # number of dimensions to project the DTW matrix onto (bigger = better representation of DTW matrix BUT clustering becomes harder)
-n_mds_components = 3
+n_mds_components = 4
 # sigma of gaussian filter used to smooth DENV incidence per 100K
-sigma = 0.01
+sigma = 1
 # z-score the DENV incidence per 100K (doesn't work well; just here to let you know I tried this)
 z_score = False
 # use all data
@@ -64,16 +64,65 @@ if z_score:
 # plt.close()
 
 
-# --- Step 2: Compute DTW distance matrix ---
+# --- Step 2: Attach a 'season' label
 
-# pivot to wide format
-ts = denv.pivot(index=f'{region}', columns='date', values='DENV_per_100k_smooth')
+def assign_season(df, split_month=7):
+    """
+    Assigns a season label to each row of a dataframe based on a split month.
+    
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        Dataframe containing a 'date' column (datetime64 dtype).
+    split_month : int
+        Month (1–12) where the seasonal split occurs. 
+        Example: 7 means July -> season runs from July to next June.
+    
+    Returns:
+    --------
+    pd.Series
+        A column of season labels in the format 'YYYY-YYYY'.
+    """
+    year = df['date'].dt.year
+    month = df['date'].dt.month
 
-# tslearn expects 3D array: (n_ts, n_timesteps, 1)
-X = ts.fillna(0).to_numpy()[:, :, np.newaxis]
+    # If before the split month, assign season as (year-1)-(year)
+    # If on/after split month, assign season as (year)-(year+1)
+    season_start = (year - 1).where(month < split_month, year)
+    season_end = season_start + 1
+    
+    return season_start.astype(str) + "-" + season_end.astype(str)
 
-# compute pairwise DTW distances
-dtw_dist = cdist_dtw(X, sakoe_chiba_radius=1, n_jobs=-1, verbose=True)
+
+# Append seasons
+denv['season'] = assign_season(denv, split_month=7)
+
+
+# --- Step 3: Loop over seasons & Compute DTW distance matrix ---
+
+dtw_dist_save = []
+for season in denv['season'].unique():
+
+    print(f"DTW on season '{season}'")
+
+    # slice data
+    denv_season = denv[denv['season'] == season]
+
+    # pivot to wide format
+    ts = denv_season.pivot(index=f'{region}', columns='date', values='DENV_per_100k_smooth')
+
+    # tslearn expects 3D array: (n_ts, n_timesteps, 1)
+    X = ts.fillna(0).to_numpy()[:, :, np.newaxis]
+
+    # compute pairwise DTW distances
+    dtw_dist = cdist_dtw(X, sakoe_chiba_radius=1, n_jobs=-1, verbose=False)
+
+    # append to output
+    dtw_dist_save.append(dtw_dist)
+
+# make a tensor & average out season axis
+dtw_dist = np.mean(np.stack(dtw_dist_save, axis=-1), axis=-1)
+
 
 # visualise raw matrx
 plt.figure(figsize=(10, 8))
@@ -88,7 +137,8 @@ plt.close()
 sns.clustermap(dtw_dist, cmap="viridis", figsize=(12, 12))
 plt.savefig(f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-mat-clustermap_{region_filename}.pdf')
 
-# --- Step 3: Cluster DTW matrix and visualise on a map ---
+
+# --- Step 4: Cluster DTW matrix and visualise on a map ---
 
 from sklearn.cluster import SpectralClustering
 from scipy.cluster.hierarchy import linkage, fcluster
@@ -129,7 +179,7 @@ plt.savefig(f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-mat-clustered_
 plt.close()
 
 
-# --- Step 4: Multidimensional Scaling (MDS) ---
+# --- Step 5: Multidimensional Scaling (MDS) ---
 
 # perform MDS
 mds = MDS(n_components=n_mds_components, dissimilarity="precomputed", random_state=42, max_iter=10000, normalized_stress=True)
