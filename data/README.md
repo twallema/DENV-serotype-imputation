@@ -4,7 +4,11 @@ Here we list a description of all datasets, raw datasets are unaltered original 
 
 ## Raw
 
-+ `indexP_monthlyclimate_allmuni.csv`: Index-P at the municipality level, seasonal average (monthly). Obtained from Dr. Laura Alexander.
++ `indexP_monthlyclimate_allmuni.csv`: Index-P at the municipality level, seasonal average (monthly). Obtained from Dr. Laura Alexander. Papers supporting a correlation between index P and DENV transmission: https://pmc.ncbi.nlm.nih.gov/articles/PMC9610358/
+
+### Skinner et al. 2023
+
++ `full_dataset.csv`: Dataset used in Skinner et al. (2023) Human footprint is associated with shifts in the assemblages of major vector-borne diseases. Nature Sustainability. Downloaded from https://github.com/ckglidden/human-footprint-index-VBD/blob/main/data/full_dataset.csv.
 
 ### BR_Municipios_2023
 
@@ -27,6 +31,14 @@ These data are partly confidential and can be found on the Bento lab box.
 + `geographic-dataset.parquet`: Compressed (brotli compression) geographical dataset. Dataset containing geometries of Brazilian municipalities, along with variables relevant for clustering. Made using `data/conversion/build_geographic-dataset.py` from the data in `data/raw/BR_Municipios_2023`.
 
 + `spatial_units_mapping.csv`: Area codes and names of the municipalities, immediate regions, intermediate regions, federative units and regions. Also available in `geographic-dataset.parquet` but saved seperately to lower IO burden.
+
+### Human footprint
+
++ `human-footprint_mun.csv`:
+
++ `human-footprint_rgint.csv`:
+
++ `human-footprint_rgi.csv`:
 
 ### indexP
 
