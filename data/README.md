@@ -8,7 +8,7 @@ Here we list a description of all datasets, raw datasets are unaltered original 
 
 ### Skinner et al. 2023
 
-+ `full_dataset.csv`: Dataset used in Skinner et al. (2023) Human footprint is associated with shifts in the assemblages of major vector-borne diseases. Nature Sustainability. Downloaded from https://github.com/ckglidden/human-footprint-index-VBD/blob/main/data/full_dataset.csv.
++ `full_dataset.csv`: Dataset used in Skinner et al. (2023) Human footprint is associated with shifts in the assemblages of major vector-borne diseases. Nature Sustainability. Contains the human footprint for all except one Brazilian municipality (Lucena; 2508604) from 2013-2019. Downloaded from https://github.com/ckglidden/human-footprint-index-VBD/blob/main/data/full_dataset.csv.
 
 ### BR_Municipios_2023
 
@@ -34,11 +34,7 @@ These data are partly confidential and can be found on the Bento lab box.
 
 ### Human footprint
 
-+ `human-footprint_mun.csv`:
-
-+ `human-footprint_rgint.csv`:
-
-+ `human-footprint_rgi.csv`:
++ `human-footprint_mun/rgi/rgint.csv`: Human footprint (averaged 2013-2019) per municipality, immediate region or intermediate region.
 
 ### indexP
 
@@ -78,6 +74,8 @@ These data are partly confidential and can be found on the Bento lab box.
 This folder is not on GitHub but is automatically generated when users run the Bayesian serotype imputation model `~/scripts/bayesian-imputation-model/fit-imputation-model.py`. It will contain diagnostics of the model runs, as well as the final result (latent serotype distribution).
 
 ## Conversion scripts
+
++ `build_human-footprint.py`: Averages the raw human footprint data over the years 2013-2019 and spatially aggregates from the municipality to the immediate region and intermediate regions by computing the demographically weighted average over constitutent municipalities. One missing municipality's human footprint was set to 25.
 
 + `datasus_DENV-linelist_conversion.py`: Script used to convert the (partly confidential) raw linelisted datasus DENV data (`~/data/raw/datasus_DENV-linelist/composite_dataset`) into a more pleasant interim format.
 
