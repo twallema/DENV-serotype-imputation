@@ -21,7 +21,7 @@ from scipy.spatial.distance import squareform
 # script settings
 # >>>>>>>>>>>>>>>
 
-n = 20 # number of max-p regionalization runs to average
+n = 30 # number of max-p regionalization runs to average
 threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
 region_filename = 'rgint' # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
 
@@ -292,7 +292,7 @@ geography[DTW_covariates_indexP_names] = sc.fit_transform(geography[DTW_covariat
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # my pick
-attrs = ['cx', 'cy'] + DTW_covariates_indexP_names + ['human_footprint'] #+ DTW_covariates_denv_100k_names + ['denv_100k_cumulative',] + koppen_dummies.columns.to_list() + biome_dummies.columns.to_list()
+attrs = ['cx', 'cy'] + DTW_covariates_indexP_names + ['human_footprint'] + DTW_covariates_denv_100k_names #+ ['denv_100k_cumulative',] + koppen_dummies.columns.to_list() + biome_dummies.columns.to_list()
 
 
 
@@ -313,7 +313,7 @@ model = MaxPHeuristic(
     verbose=False,
     policy='multiple',
     max_iterations_construction=1000,
-    max_iterations_sa=20,
+    max_iterations_sa=30,
 )
 
 
