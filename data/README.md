@@ -4,7 +4,11 @@ Here we list a description of all datasets, raw datasets are unaltered original 
 
 ## Raw
 
-+ `indexP_monthlyclimate_allmuni.csv`: Index-P at the municipality level, seasonal average (monthly). Obtained from Dr. Laura Alexander.
++ `indexP_monthlyclimate_allmuni.csv`: Index-P at the municipality level, seasonal average (monthly). Obtained from Dr. Laura Alexander. Papers supporting a correlation between index P and DENV transmission: https://pmc.ncbi.nlm.nih.gov/articles/PMC9610358/
+
+### Skinner et al. 2023
+
++ `full_dataset.csv`: Dataset used in Skinner et al. (2023) Human footprint is associated with shifts in the assemblages of major vector-borne diseases. Nature Sustainability. Contains the human footprint for all except one Brazilian municipality (Lucena; 2508604) from 2013-2019. Downloaded from https://github.com/ckglidden/human-footprint-index-VBD/blob/main/data/full_dataset.csv.
 
 ### BR_Municipios_2023
 
@@ -27,6 +31,10 @@ These data are partly confidential and can be found on the Bento lab box.
 + `geographic-dataset.parquet`: Compressed (brotli compression) geographical dataset. Dataset containing geometries of Brazilian municipalities, along with variables relevant for clustering. Made using `data/conversion/build_geographic-dataset.py` from the data in `data/raw/BR_Municipios_2023`.
 
 + `spatial_units_mapping.csv`: Area codes and names of the municipalities, immediate regions, intermediate regions, federative units and regions. Also available in `geographic-dataset.parquet` but saved seperately to lower IO burden.
+
+### Human footprint
+
++ `human-footprint_mun/rgi/rgint.csv`: Human footprint (averaged 2013-2019) per municipality, immediate region or intermediate region.
 
 ### indexP
 
@@ -66,6 +74,8 @@ These data are partly confidential and can be found on the Bento lab box.
 This folder is not on GitHub but is automatically generated when users run the Bayesian serotype imputation model `~/scripts/bayesian-imputation-model/fit-imputation-model.py`. It will contain diagnostics of the model runs, as well as the final result (latent serotype distribution).
 
 ## Conversion scripts
+
++ `build_human-footprint.py`: Averages the raw human footprint data over the years 2013-2019 and spatially aggregates from the municipality to the immediate region and intermediate regions by computing the demographically weighted average over constitutent municipalities. One missing municipality's human footprint was set to 25.
 
 + `datasus_DENV-linelist_conversion.py`: Script used to convert the (partly confidential) raw linelisted datasus DENV data (`~/data/raw/datasus_DENV-linelist/composite_dataset`) into a more pleasant interim format.
 

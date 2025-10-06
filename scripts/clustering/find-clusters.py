@@ -21,7 +21,7 @@ from scipy.spatial.distance import squareform
 # script settings
 # >>>>>>>>>>>>>>>
 
-n = 15 # number of max-p regionalization runs to average
+n = 30 # number of max-p regionalization runs to average
 threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
 region_filename = 'rgint' # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
 
@@ -78,6 +78,9 @@ denv['date'] = pd.to_datetime(denv['date'])
 # Load cases per 100K data
 denv_100k = pd.read_csv(f'../../data/interim/DENV_per_100K/DENV_per_100k_{region_filename}.csv')
 denv_100k['date'] = pd.to_datetime(denv_100k['date'])
+
+# Load human footprint 
+human_footprint = pd.read_csv(f'../../data/interim/human-footprint/human-footprint_{region_filename}.csv')
 
 # Load DENV per 100K DTW-MDS embedding
 DTW_covariates_denv_100k = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-MDS-embedding_{region_filename}.csv')
@@ -218,8 +221,18 @@ for col in koppen_dummies.columns:
 
 # compute cumulative totals
 denv_100k = denv_100k.groupby(by=f'{region}')['DENV_per_100k'].sum()
-# add to geography
-geography['denv_100k_cumulative'] = denv_100k.values
+# standardize
+sc = StandardScaler()
+geography['denv_100k_cumulative'] = sc.fit_transform(denv_100k.values.reshape(-1,1))
+
+
+
+# Make human footprint covariate
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# standardize
+sc = StandardScaler()
+geography['human_footprint'] = sc.fit_transform(human_footprint[["human_footprint"]])
 
 
 
@@ -279,7 +292,7 @@ geography[DTW_covariates_indexP_names] = sc.fit_transform(geography[DTW_covariat
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # my pick
-attrs = ['cx', 'cy']  + DTW_covariates_denv_100k_names #+ DTW_covariates_indexP_names #+ ['denv_100k_cumulative',] + koppen_dummies.columns.to_list() + biome_dummies.columns.to_list()
+attrs = ['cx', 'cy'] + DTW_covariates_indexP_names + ['human_footprint'] + DTW_covariates_denv_100k_names #+ ['denv_100k_cumulative',] + koppen_dummies.columns.to_list() + biome_dummies.columns.to_list()
 
 
 
@@ -300,7 +313,7 @@ model = MaxPHeuristic(
     verbose=False,
     policy='multiple',
     max_iterations_construction=1000,
-    max_iterations_sa=10,
+    max_iterations_sa=30,
 )
 
 
