@@ -10,6 +10,11 @@ from tslearn.metrics import cdist_dtw
 from sklearn.manifold import MDS
 from sklearn.preprocessing import StandardScaler
 
+# glasbey color map
+from glasbey import create_palette
+from matplotlib.colors import ListedColormap
+
+
 # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
 region_filename = 'mun'
 region = 'CD_MUN'
@@ -94,10 +99,11 @@ for n_clusters in n_clusters_list:
 fig,ax=plt.subplots(ncols=len(n_clusters_list))
 
 for i,n_clusters in enumerate(n_clusters_list):
+    glasbey_cmap = ListedColormap(create_palette(palette_size=n_clusters))
     geography.plot(
         column=f"dtw_clusters_{n_clusters}",          # color regions by cluster label
         categorical=True,
-        cmap="tab20",             # categorical colormap
+        cmap=glasbey_cmap,             # categorical colormap
         linewidth=0,
         edgecolor=None,
         legend=False,
