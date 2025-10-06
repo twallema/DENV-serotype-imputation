@@ -10,6 +10,10 @@ from scipy.ndimage import gaussian_filter1d
 from sklearn.preprocessing import StandardScaler
 import numpy as np
 
+# glasbey color map
+from glasbey import create_palette
+from matplotlib.colors import ListedColormap
+
 from sklearn.cluster import SpectralClustering
 from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform
@@ -17,10 +21,9 @@ from scipy.spatial.distance import squareform
 # script settings
 # >>>>>>>>>>>>>>>
 
-n = 50 # number of max-p regionalization runs to average
+n = 15 # number of max-p regionalization runs to average
 threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
-region_filename = 'rgi' # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
-
+region_filename = 'rgint' # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
 
 
 # helper function
@@ -276,7 +279,7 @@ geography[DTW_covariates_indexP_names] = sc.fit_transform(geography[DTW_covariat
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # my pick
-attrs = ['cx', 'cy']  + DTW_covariates_denv_100k_names + DTW_covariates_indexP_names #+ ['denv_100k_cumulative',] + koppen_dummies.columns.to_list() + biome_dummies.columns.to_list()
+attrs = ['cx', 'cy']  + DTW_covariates_denv_100k_names #+ DTW_covariates_indexP_names #+ ['denv_100k_cumulative',] + koppen_dummies.columns.to_list() + biome_dummies.columns.to_list()
 
 
 
@@ -297,11 +300,11 @@ model = MaxPHeuristic(
     verbose=False,
     policy='multiple',
     max_iterations_construction=1000,
-    max_iterations_sa=20,
+    max_iterations_sa=10,
 )
 
 
-num_clusters = []
+n_clusters = []
 matrices = []
 clusters = pd.DataFrame(index=geography[region].values)
 for numRun in range(n):
@@ -315,7 +318,7 @@ for numRun in range(n):
     geography[f'run_{numRun+1}'] = model.labels_
 
     # save number of clusters
-    num_clusters.append(len(np.unique(model.labels_)))
+    n_clusters.append(len(np.unique(model.labels_)))
 
     # save a matrix of size (n_regions x n_regions) containing 1 if regions belong to the same cluster for every run
     matrices.append(build_co_association_matrix(geography[region], model.labels_))
@@ -333,7 +336,10 @@ prob_matrix.to_csv(f"../../data/interim/clusters/prob_matrix_{region_filename}.c
 clusters.to_csv(f"../../data/interim/clusters/clusters_{region_filename}.csv")
 
 # compute median number of clusters
-num_clusters = int(np.median(num_clusters))
+n_clusters = int(np.median(n_clusters))
+
+# make a categorical color palette with n_clusters distinct colors
+glasbey_cmap = ListedColormap(create_palette(palette_size=n_clusters))
 
 # Randomly select and visualize 12 runs on a 3x4 grid
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -350,7 +356,7 @@ for ax, run in zip(axes, selected_runs):
     geography.plot(
         column=geography[run],
         categorical=True,
-        cmap="tab20",
+        cmap=glasbey_cmap,
         linewidth=0.2,
         edgecolor="grey",
         legend=False,
@@ -370,14 +376,14 @@ plt.close()
 Z = linkage(squareform(1 - prob_matrix, checks=False), method='average')
 
 # Choose number of clusters k
-geography['consensus_clusters_hierarchical'] = fcluster(Z, num_clusters, criterion='maxclust')
+geography['consensus_clusters_hierarchical'] = fcluster(Z, n_clusters, criterion='maxclust')
 
 
 
 # Recluster mean co-association matrix using hierarchical clustering
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-sc = SpectralClustering(n_clusters=num_clusters, affinity='precomputed', random_state=0)
+sc = SpectralClustering(n_clusters=n_clusters, affinity='precomputed', random_state=0)
 geography['consensus_clusters_spectral'] = sc.fit_predict(prob_matrix)+1
 
 
@@ -391,7 +397,7 @@ fig, ax = plt.subplots(nrows=1, ncols=2)
 geography.plot(
     column="consensus_clusters_hierarchical",          # color regions by cluster label
     categorical=True,
-    cmap="tab20",             # categorical colormap
+    cmap=glasbey_cmap,             # categorical colormap
     linewidth=0.2,
     edgecolor="grey",
     legend=False,
@@ -404,7 +410,7 @@ ax[0].axis("off")
 geography.plot(
     column="consensus_clusters_spectral",          # color regions by cluster label
     categorical=True,
-    cmap="tab20",             # categorical colormap
+    cmap=glasbey_cmap,             # categorical colormap
     linewidth=0.2,
     edgecolor="grey",
     legend=False,
