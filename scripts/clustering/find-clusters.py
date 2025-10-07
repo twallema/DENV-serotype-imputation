@@ -21,7 +21,7 @@ from scipy.spatial.distance import squareform
 # script settings
 # >>>>>>>>>>>>>>>
 
-n = 30 # number of max-p regionalization runs to average
+n = 50 # number of max-p regionalization runs to average
 threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
 region_filename = 'rgint' # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
 
@@ -84,6 +84,9 @@ human_footprint = pd.read_csv(f'../../data/interim/human-footprint/human-footpri
 
 # Load DENV per 100K DTW-MDS embedding
 DTW_covariates_denv_100k = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-MDS-embedding_{region_filename}.csv')
+
+# Load serotypes DTW-MDS embedding
+DTW_covariates_serotypes = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/serotypes/DTW-MDS-embedding_{region_filename}.csv')
 
 # Load indexP DTW-MDS embedding
 DTW_covariates_indexP = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/indexP/DTW-MDS-embedding_{region_filename}.csv')
@@ -288,11 +291,27 @@ geography[DTW_covariates_indexP_names] = sc.fit_transform(geography[DTW_covariat
 
 
 
+# Make indexP DTW-MDS covariate
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# Merge to the geography
+geography = geography.merge(
+    DTW_covariates_serotypes, 
+    on = f'{region}'
+)
+
+# Standardize DTW-MDS embedding
+sc = StandardScaler()
+DTW_covariates_serotypes_names = [x for x in DTW_covariates_serotypes.columns.to_list() if x != f'{region}']
+geography[DTW_covariates_serotypes_names] = sc.fit_transform(geography[DTW_covariates_serotypes_names])
+
+
+
 # Decide on attributes to use
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # my pick
-attrs = ['cx', 'cy'] + DTW_covariates_indexP_names + ['human_footprint'] + DTW_covariates_denv_100k_names #+ ['denv_100k_cumulative',] + koppen_dummies.columns.to_list() + biome_dummies.columns.to_list()
+attrs = ['cx', 'cy'] + DTW_covariates_indexP_names + ['human_footprint'] + DTW_covariates_denv_100k_names + DTW_covariates_serotypes_names #+ ['denv_100k_cumulative',] + koppen_dummies.columns.to_list() + biome_dummies.columns.to_list()
 
 
 
