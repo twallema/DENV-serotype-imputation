@@ -431,9 +431,9 @@ geography.plot(
     cmap=glasbey_cmap,             # categorical colormap
     linewidth=0.2,
     edgecolor="grey",
-    legend=False,
+    legend=True,
     ax=ax[0],
-    legend_kwds={'fontsize': 7, 'ncol': 2, 'loc': 'lower right'}
+    legend_kwds={'fontsize': 4, 'ncol': 4, 'loc': 'lower right', 'markerscale': 0.4}
 )
 ax[0].set_title(f"Hierarchical clustering", fontsize=14)
 ax[0].axis("off")
@@ -446,7 +446,7 @@ geography.plot(
     edgecolor="grey",
     legend=False,
     ax=ax[1],
-    legend_kwds={'fontsize': 7, 'ncol': 2, 'loc': 'lower right'}
+    legend_kwds={'fontsize': 4, 'ncol': 4, 'loc': 'lower right', 'markerscale': 0.4}
 )
 ax[1].set_title(f"Spectral clustering", fontsize=14)
 ax[1].axis("off")
