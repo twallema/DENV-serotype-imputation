@@ -23,7 +23,7 @@ def str_to_bool(value):
 # arguments determine the model + data combo used to forecast
 # How to run: python fit-model.py -ID test -p 2 -distance_matrix False -CAR_per_lag False
 parser = argparse.ArgumentParser()
-parser.add_argument("-region_filename", type=str, help="Spatial aggregation clustering was performed on.", default='rgi')
+parser.add_argument("-region_filename", type=str, help="Spatial aggregation clustering was performed on.", default='rgint')
 parser.add_argument("-chains", type=int, help="Number of parallel chains.", default=4)
 parser.add_argument("-ID", type=str, help="Sampler output name.")
 parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
@@ -179,8 +179,8 @@ if CAR_per_lag:
 
         # Try to combine an AR(p) with a CAR prior on every timestep in the past
         ## Regularisation of the overall noise & split between spatially structured and unstructured noise
-        total_sigma = pm.HalfNormal("total_sigma", sigma=0.0002)
-        proportion_uncorr = pm.Beta("proportion_uncorr", alpha=1, beta=5)  # proportion of noise that is unstructured (encourages structured noise)
+        total_sigma = pm.HalfNormal("total_sigma", sigma=0.1)
+        proportion_uncorr = pm.Beta("proportion_uncorr", alpha=1, beta=2)  # proportion of noise that is unstructured (encourages structured noise)
         uncorr_sigma = pm.Deterministic("uncorr_sigma", proportion_uncorr * total_sigma) * pt.ones(n_serotypes)
         corr_sigma = pm.Deterministic("corr_sigma", (1 - proportion_uncorr) * total_sigma) * pt.ones(n_serotypes)
 
@@ -280,13 +280,25 @@ if CAR_per_lag:
 
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     
-        # Dirichlet prior for subtype fractions
+        # Softmax transform for subtype fractions
         p = pm.Deterministic("p", pm.math.softmax(theta_log, axis=1))
 
-        # --- Observed subtyped incidences ---
-        # Y_{i,s,t} ~ Multinomial(N^*_{s,t}, p_{i,s,t})
+        # Compute concentration parameter
+        ## hierarchical concentration parameter per cluster
+        mu_logphi = pm.Normal("mu_logphi", mu=0, sigma=1)
+        sigma_logphi = pm.HalfNormal("sigma_logphi", sigma=1)
+        z_logphi = pm.Normal("z_logphi", mu=0.0, sigma=1.0, shape=n_clusters)
+        logphi_cluster = pm.Deterministic("logphi_cluster", mu_logphi + z_logphi * sigma_logphi)
+        phi_cluster = pm.Deterministic("phi_cluster", pm.math.exp(logphi_cluster))
+        ## expand to number of observations
+        phi_obs = phi_cluster[cluster_idx]
+        ## expand over serotypes
+        alpha = phi_obs[:,None] * p
 
-        Y_obs = pm.Multinomial("Y_obs", n=N_typed, p=p, observed=Y_multinomial)
+        # --- Observed subtyped incidences ---
+        # Y_{i,s,t} ~ DirichletMultinomial(N^*_{s,t}, alpha_{i,s,t})
+
+        Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
 
 else:
 
@@ -303,7 +315,7 @@ else:
         # \kappa{i,s,t}^{uncorr} ~ Normal(0, (1-f_{corr}) * \sigma^2)                                                       # spatially uncorrelated noise
 
         ## Regularisation of the overall noise & split between spatially structured and unstructured noise
-        total_sigma = pm.HalfNormal("total_sigma", sigma=0.0002)
+        total_sigma = pm.HalfNormal("total_sigma", sigma=0.1)
         proportion_uncorr = pm.Beta("proportion_uncorr", alpha=1, beta=2)  # proportion of noise that is unstructured (encourages spatially structured noise)
         uncorr_sigma = pm.Deterministic("uncorr_sigma", proportion_uncorr * total_sigma) * pt.ones(n_serotypes)
         corr_sigma = pm.Deterministic("corr_sigma", (1 - proportion_uncorr) * total_sigma) * pt.ones(n_serotypes)
@@ -395,24 +407,41 @@ else:
         # Step 4: convert to flat format
         theta_log= theta_log_final.reshape((len(df), n_serotypes))
 
+
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     
-        # Softmax on subtype fractions
-        # p_{i,s,t} = softmax(\theta_{i,s,t})
+        # Softmax transform for subtype fractions
         p = pm.Deterministic("p", pm.math.softmax(theta_log, axis=1))
 
+        # Compute concentration parameter
+        ## hierarchical concentration parameter per cluster
+        mu_logphi = pm.Normal("mu_logphi", mu=0, sigma=1)
+        sigma_logphi = pm.HalfNormal("sigma_logphi", sigma=1)
+        z_logphi = pm.Normal("z_logphi", mu=0.0, sigma=1.0, shape=n_clusters)
+        logphi_cluster = pm.Deterministic("logphi_cluster", mu_logphi + z_logphi * sigma_logphi)
+        phi_cluster = pm.Deterministic("phi_cluster", pm.math.exp(logphi_cluster))
+        ## expand to number of observations
+        phi_obs = phi_cluster[cluster_idx]
+        ## expand over serotypes
+        alpha = phi_obs[:,None] * p
+
         # --- Observed subtyped incidences ---
-        # Y_{i,s,t} ~ Multinomial(N^*_{s,t}, p_{i,s,t})
+        # Y_{i,s,t} ~ DirichletMultinomial(N^*_{s,t}, alpha_{i,s,t})
 
-        Y_obs = pm.Multinomial("Y_obs", n=N_typed, p=p, observed=Y_multinomial)
+        Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
 
-########################
-## Running the model  ##
-########################
+#######################
+## Running the model ##
+#######################
 
 # NUTS
 with model:
-    trace = pm.sample(50, tune=50, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True)
+    trace = pm.sample(100, tune=200, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+
+
+#######################
+## Running the model ##
+#######################
 
 # Plot posterior predictive checks
 with model:
@@ -421,7 +450,6 @@ arviz.plot_ppc(ppc)
 plt.savefig(f'{output_folder}/ppc.pdf')
 plt.close()
 
-
 # Assume `trace` is the result of pm.sample()
 arviz.to_netcdf(trace, f"{output_folder}/trace.nc")
 arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
@@ -429,13 +457,13 @@ arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
 # Traceplot
 if CAR_per_lag:
     variables2plot = [
-                    'total_sigma', 'proportion_uncorr', 'AR_init',
+                    'total_sigma', 'proportion_uncorr', 'mu_logphi', 'sigma_logphi', 'phi_cluster',
                     ]
     if distance_matrix:
         variables2plot += ['zeta_intercept', 'zeta_slope']
 else:
     variables2plot = [
-                      'total_sigma', 'proportion_uncorr', 'AR_init',
+                      'total_sigma', 'proportion_uncorr', 'mu_logphi', 'sigma_logphi', 'phi_cluster',
                     ]
     if distance_matrix:
         variables2plot += ['zeta',]
@@ -451,9 +479,81 @@ summary_df = arviz.summary(trace, round_to=3)
 print(summary_df)
 
 
+###############################
+## Diagnostics of dispersion ##
+###############################
 
 
+import numpy as np
+import arviz as az
+from scipy.stats import gmean
 
+# ---- helpers ----
+def clr(proportions, pseudocount=1e-8):
+    X = np.asarray(proportions) + pseudocount
+    logX = np.log(X)
+    gm = logX.mean(axis=1, keepdims=True)
+    return logX - gm
+
+def aitchison_dist_rows(P, Q):
+    C1 = clr(P)
+    C2 = clr(Q)
+    return np.linalg.norm(C1 - C2, axis=1)
+
+# ---- extract posterior predictive mean proportions ----
+# ppc.posterior_predictive["Y_obs"] shape: (chains, draws, n_obs, K) OR (samples, n_obs, K)
+pp = ppc.posterior_predictive["Y_obs"].values
+pp = pp.reshape(-1, pp.shape[-2], pp.shape[-1])  # (n_pp_samples, n_obs, K)
+pp_props = pp / pp.sum(axis=2, keepdims=True)    # proportions per pp draw
+pp_mean_props = pp_props.mean(axis=0)            # (n_obs, K) posterior predictive mean proportions
+
+# observed proportions
+Y = Y_multinomial  # shape (n_obs, K)
+obs_props = Y / Y.sum(axis=1, keepdims=True)
+valid_idx = Y.sum(axis=1) > 0
+obs_props_valid = obs_props[valid_idx]
+pp_mean_props_valid = pp_mean_props[valid_idx]
+d_obs_to_mean = aitchison_dist_rows(obs_props_valid, pp_mean_props_valid)
+RMSAD = np.sqrt(np.mean(d_obs_to_mean**2))
+MSAD = np.mean(d_obs_to_mean**2)
+
+# ---- phi summaries ----
+# posterior phi_cluster samples: ppc.posterior["logphi_cluster"] shape (chains, draws, n_clusters)
+logphi_samples = trace.posterior["logphi_cluster"].values  # (chains, draws, n_clusters)
+logphi_flat = logphi_samples.reshape(-1, logphi_samples.shape[-1])  # (n_samps, n_clusters)
+phi_cluster_samples = np.exp(logphi_flat)  # (n_samps, n_clusters)
+phi_cluster_median = np.median(phi_cluster_samples, axis=0)
+phi_cluster_hdi = az.hdi(phi_cluster_samples, hdi_prob=0.95)  # array (n_clusters, 2)
+
+# aggregated phi statistic (median across clusters)
+phi_median_over_clusters = np.median(phi_cluster_median)
+phi_geo_mean = gmean(np.maximum(phi_cluster_median, 1e-8))
+
+# ---- VIF for representative n_med ----
+N_typed_arr = np.array(N_typed)
+n_med = int(np.median(N_typed_arr))
+VIF_samples = (n_med + phi_cluster_samples) / (1.0 + phi_cluster_samples)  # (n_samples, n_clusters)
+VIF_per_cluster = np.median(VIF_samples, axis=0)
+VIF_median = np.median(VIF_per_cluster)
+
+# ---- ELPD (loo) ----
+# compute elpd_loo via arviz (be mindful: needs pointwise log_likelihood in the ppc or compute from model)
+try:
+    loo_res = az.loo(trace, pointwise=True)
+    elpd = loo_res["loo"]  # scalar elpd
+    # optionally, pointwise elpd: loo_res["loo_i"]
+except Exception as e:
+    print("LOO failed:", e)
+    elpd = None
+
+# ---- print summary ----
+print("RMS Aitchison distance (global):", RMSAD)
+print("MSAD:", MSAD)
+print("phi median across clusters:", phi_median_over_clusters)
+print("phi geometric mean across clusters:", phi_geo_mean)
+print("Representative VIF for n_med=%d: %.3f" % (n_med, VIF_median))
+if elpd is not None:
+    print("ELPD (loo):", elpd)
 
 
 

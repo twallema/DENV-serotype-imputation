@@ -21,7 +21,7 @@ from scipy.spatial.distance import squareform
 # script settings
 # >>>>>>>>>>>>>>>
 
-n = 50 # number of max-p regionalization runs to average
+n = 100 # number of max-p regionalization runs to average
 threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
 region_filename = 'rgint' # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
 
@@ -170,7 +170,7 @@ if region:
 
 # Compute the mimimum sum of serotyped cases across all years (will have to be changed)
 # limit time window (before 1999 will likely be excluded because it's way too limited; from 2019 onwards all regions have good subtyping)
-denv = denv[((denv['date'] > datetime(2000,1,1)) & (denv['date'] < datetime(2010,1,1)))]
+denv = denv[((denv['date'] > datetime(2000,1,1)) & (denv['date'] < datetime(2008,1,1)))]
 # extract year
 denv["year"] = pd.to_datetime(denv["date"]).dt.year
 # compute total cases per month
@@ -311,7 +311,7 @@ geography[DTW_covariates_serotypes_names] = sc.fit_transform(geography[DTW_covar
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # my pick
-attrs = ['cx', 'cy'] + DTW_covariates_indexP_names + ['human_footprint'] + koppen_dummies.columns.to_list() # DTW_covariates_denv_100k_names + DTW_covariates_serotypes_names + ['denv_100k_cumulative',] + biome_dummies.columns.to_list()
+attrs = ['cx', 'cy'] + DTW_covariates_indexP_names + ['human_footprint'] #+ koppen_dummies.columns.to_list() # DTW_covariates_denv_100k_names + DTW_covariates_serotypes_names + ['denv_100k_cumulative',] + biome_dummies.columns.to_list()
 
 
 
@@ -332,7 +332,7 @@ model = MaxPHeuristic(
     verbose=False,
     policy='multiple',
     max_iterations_construction=1000,
-    max_iterations_sa=10,
+    max_iterations_sa=50,
 )
 
 
@@ -456,9 +456,9 @@ plt.savefig(f'../../data/interim/clusters/consensus_clusters_{region_filename}.p
 plt.close()
 
 # Save the consensus clusters (hierarchical)
-save = geography[[f'{region}', 'consensus_clusters_hierarchical']]
-save = save.rename(columns={'consensus_clusters_hierarchical': 'cluster'})
-save.to_csv(f"../../data/interim/clusters/clusters_{region_filename}.csv", index=False)
+clusters = geography[[f'{region}', 'consensus_clusters_hierarchical']]
+clusters = clusters.rename(columns={'consensus_clusters_hierarchical': 'cluster'})
+clusters.to_csv(f"../../data/interim/clusters/clusters_{region_filename}.csv", index=False)
 
 
 # Build the clusters' adjacency matrix needed for the Bayesian imputation model
@@ -541,6 +541,3 @@ for i, row_i in centroids_gdf.iterrows():
 
 # Save the distance matrix to a csv file
 dist_matrix.to_csv(f'../../data/interim/clusters/distance_matrix_{region_filename}.csv')
-
-
-

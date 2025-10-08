@@ -17,7 +17,7 @@ def str_to_bool(value):
 # arguments are used to find the result
 # How to run: python visualise-fit.py -date 2025-08-27 -ID test -p 2 -distance_matrix False -CAR_per_lag False
 parser = argparse.ArgumentParser()
-parser.add_argument("-region_filename", type=str, help="Spatial aggregation clustering was performed on.", default='rgi')
+parser.add_argument("-region_filename", type=str, help="Spatial aggregation clustering was performed on.", default='rgint')
 parser.add_argument("-date", type=str, help="Date experiment was run.")
 parser.add_argument("-ID", type=str, help="Sampler output name.")
 parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
@@ -219,21 +219,25 @@ for cluster in df['cluster'].unique().tolist():
     ax[1].plot(time, p_mean.loc[cluster, 'DENV_1']*100, color='red')
     ax[1].fill_between(time, p_lower.loc[cluster, 'DENV_1']*100, p_upper.loc[cluster, 'DENV_1']*100, alpha=0.2, color='red')
     ax[1].set_ylabel('DENV 1 (%)')
+    ax[1].set_ylim([-3,103])
     ## DENV 2
     ax[2].plot(time, Y_obs.loc[(cluster, slice(None)), 'p_2'].values*100, marker='o', markersize=2, linewidth=1, color='black')
     ax[2].plot(time, p_mean.loc[cluster, 'DENV_2']*100, color='red')
     ax[2].fill_between(time, p_lower.loc[cluster, 'DENV_2']*100, p_upper.loc[cluster, 'DENV_2']*100, alpha=0.2, color='red')
     ax[2].set_ylabel('DENV 2 (%)')
+    ax[2].set_ylim([-3,103])
     ## DENV 3
     ax[3].plot(time, Y_obs.loc[(cluster, slice(None)), 'p_3'].values*100, marker='o', markersize=2, linewidth=1, color='black')
     ax[3].plot(time, p_mean.loc[cluster, 'DENV_3']*100, color='red')
     ax[3].fill_between(time, p_lower.loc[cluster, 'DENV_3']*100, p_upper.loc[cluster, 'DENV_3']*100, alpha=0.2, color='red')
     ax[3].set_ylabel('DENV 3 (%)')
+    ax[3].set_ylim([-3,103])
     ## DENV 4
     ax[4].plot(time, Y_obs.loc[(cluster, slice(None)), 'p_4'].values*100, marker='o', markersize=2, linewidth=1, color='black', label='data')
     ax[4].plot(time, p_mean.loc[cluster, 'DENV_4']*100, color='red', label='model')
     ax[4].fill_between(time, p_lower.loc[cluster, 'DENV_4']*100, p_upper.loc[cluster, 'DENV_4']*100, alpha=0.2, color='red')
     ax[4].set_ylabel('DENV 4 (%)')
+    ax[4].set_ylim([-3,103])
     ax[4].legend(framealpha=1)
 
     # Step 3: modeled serotype fractions
