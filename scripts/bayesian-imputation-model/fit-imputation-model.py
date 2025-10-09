@@ -315,7 +315,7 @@ else:
         # \kappa{i,s,t}^{uncorr} ~ Normal(0, (1-f_{corr}) * \sigma^2)                                                       # spatially uncorrelated noise
 
         ## Regularisation of the overall noise & split between spatially structured and unstructured noise
-        total_sigma = pm.HalfNormal("total_sigma", sigma=1)
+        total_sigma = pm.HalfNormal("total_sigma", sigma=0.01)
         proportion_uncorr = pm.Beta("proportion_uncorr", alpha=1, beta=2)  # proportion of noise that is unstructured (encourages spatially structured noise)
         uncorr_sigma = pm.Deterministic("uncorr_sigma", proportion_uncorr * total_sigma) * pt.ones(n_serotypes)
         corr_sigma = pm.Deterministic("corr_sigma", (1 - proportion_uncorr) * total_sigma) * pt.ones(n_serotypes)
@@ -405,7 +405,7 @@ else:
         # Step 3: slice lag zero (p=0) over full time axis
         theta_log_final = theta_log_final[:, 0, :, :]  # shape (n_months, n_serotypes, n_clusters)
         # Step 4: convert to flat format
-        theta_log= theta_log_final.reshape((len(df), n_serotypes))
+        theta_log = theta_log_final.reshape((len(df), n_serotypes))
 
 
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -414,16 +414,11 @@ else:
         p = pm.Deterministic("p", pm.math.softmax(theta_log, axis=1))
 
         # Compute concentration parameter
-        ## hierarchical concentration parameter per cluster
-        mu_logphi = pm.Normal("mu_logphi", mu=0, sigma=2)
-        sigma_logphi = pm.HalfNormal("sigma_logphi", sigma=2)
-        z_logphi = pm.Normal("z_logphi", mu=0.0, sigma=1.0, shape=n_clusters)
-        logphi_cluster = pm.Deterministic("logphi_cluster", mu_logphi + z_logphi * sigma_logphi)
-        phi_cluster = pm.Deterministic("phi_cluster", pm.math.exp(logphi_cluster))
-        ## expand to number of observations
-        phi_obs = phi_cluster[cluster_idx]
-        ## expand over serotypes
-        alpha = phi_obs[:,None] * p
+        ## RW per cluster
+        sigma_rw = pm.HalfNormal("sigma_rw", sigma=0.1)          # RW step sd on log scale
+        logphi_rw = pm.GaussianRandomWalk("logphi_rw", sigma=sigma_rw, init_dist=pm.Normal.dist(mu=5, sigma=1, shape=n_clusters), shape=(n_clusters, n_months))
+        phi_obs = pm.Deterministic("phi_obs", pm.math.exp(logphi_rw.flatten()))     
+        alpha = phi_obs[:, None] * p   # p already computed from theta_log
 
         # --- Observed subtyped incidences ---
         # Y_{i,s,t} ~ DirichletMultinomial(N^*_{s,t}, alpha_{i,s,t})
@@ -436,7 +431,7 @@ else:
 
 # NUTS
 with model:
-    trace = pm.sample(100, tune=200, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(100, tune=100, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 
 #######################
@@ -457,13 +452,13 @@ arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
 # Traceplot
 if CAR_per_lag:
     variables2plot = [
-                    'total_sigma', 'proportion_uncorr', 'mu_logphi', 'sigma_logphi', 'phi_cluster',
+                    'total_sigma', 'proportion_uncorr', 'sigma_rw', # 'mu_logphi', 'sigma_logphi', 'phi_cluster',
                     ]
     if distance_matrix:
         variables2plot += ['zeta_intercept', 'zeta_slope']
 else:
     variables2plot = [
-                      'total_sigma', 'proportion_uncorr', 'mu_logphi', 'sigma_logphi', 'phi_cluster',
+                      'total_sigma', 'proportion_uncorr', 'sigma_rw', # 'mu_logphi', 'sigma_logphi', 'phi_cluster',
                     ]
     if distance_matrix:
         variables2plot += ['zeta',]
@@ -475,8 +470,8 @@ for var in variables2plot:
     plt.close()
 
 # Print summary
-summary_df = arviz.summary(trace, round_to=3)
-print(summary_df)
+#summary_df = arviz.summary(trace, round_to=3)
+#print(summary_df)
 
 
 ###############################
@@ -518,21 +513,16 @@ RMSAD = np.sqrt(np.mean(d_obs_to_mean**2))
 MSAD = np.mean(d_obs_to_mean**2)
 
 # ---- phi summaries ----
-# posterior phi_cluster samples: ppc.posterior["logphi_cluster"] shape (chains, draws, n_clusters)
-logphi_samples = trace.posterior["logphi_cluster"].values  # (chains, draws, n_clusters)
-logphi_flat = logphi_samples.reshape(-1, logphi_samples.shape[-1])  # (n_samps, n_clusters)
-phi_cluster_samples = np.exp(logphi_flat)  # (n_samps, n_clusters)
-phi_cluster_median = np.median(phi_cluster_samples, axis=0)
-phi_cluster_hdi = az.hdi(phi_cluster_samples, hdi_prob=0.95)  # array (n_clusters, 2)
+phi_samples = trace.posterior["phi_obs"].values.flatten()  # (chains, draws, n_clusters)
+phi_median = np.median(phi_samples)
+phi_geo_mean = gmean(phi_samples)
+phi_hdi = az.hdi(phi_samples, hdi_prob=0.95)  # array (n_clusters, 2)
 
-# aggregated phi statistic (median across clusters)
-phi_median_over_clusters = np.median(phi_cluster_median)
-phi_geo_mean = gmean(np.maximum(phi_cluster_median, 1e-8))
 
 # ---- VIF for representative n_med ----
 N_typed_arr = np.array(N_typed)
 n_med = int(np.median(N_typed_arr))
-VIF_samples = (n_med + phi_cluster_samples) / (1.0 + phi_cluster_samples)  # (n_samples, n_clusters)
+VIF_samples = (n_med + phi_samples) / (1.0 + phi_samples)  # (n_samples, n_clusters)
 VIF_per_cluster = np.median(VIF_samples, axis=0)
 VIF_median = np.median(VIF_per_cluster)
 
@@ -549,7 +539,7 @@ except Exception as e:
 # ---- print summary ----
 print("RMS Aitchison distance (global):", RMSAD)
 print("MSAD:", MSAD)
-print("phi median across clusters:", phi_median_over_clusters)
+print("phi median across clusters:", phi_median)
 print("phi geometric mean across clusters:", phi_geo_mean)
 print("Representative VIF for n_med=%d: %.3f" % (n_med, VIF_median))
 if elpd is not None:
