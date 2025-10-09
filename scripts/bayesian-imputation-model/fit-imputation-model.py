@@ -315,7 +315,7 @@ else:
         # \kappa{i,s,t}^{uncorr} ~ Normal(0, (1-f_{corr}) * \sigma^2)                                                       # spatially uncorrelated noise
 
         ## Regularisation of the overall noise & split between spatially structured and unstructured noise
-        total_sigma = pm.HalfNormal("total_sigma", sigma=0.1)
+        total_sigma = pm.HalfNormal("total_sigma", sigma=1)
         proportion_uncorr = pm.Beta("proportion_uncorr", alpha=1, beta=2)  # proportion of noise that is unstructured (encourages spatially structured noise)
         uncorr_sigma = pm.Deterministic("uncorr_sigma", proportion_uncorr * total_sigma) * pt.ones(n_serotypes)
         corr_sigma = pm.Deterministic("corr_sigma", (1 - proportion_uncorr) * total_sigma) * pt.ones(n_serotypes)
@@ -415,8 +415,8 @@ else:
 
         # Compute concentration parameter
         ## hierarchical concentration parameter per cluster
-        mu_logphi = pm.Normal("mu_logphi", mu=0, sigma=1)
-        sigma_logphi = pm.HalfNormal("sigma_logphi", sigma=1)
+        mu_logphi = pm.Normal("mu_logphi", mu=0, sigma=2)
+        sigma_logphi = pm.HalfNormal("sigma_logphi", sigma=2)
         z_logphi = pm.Normal("z_logphi", mu=0.0, sigma=1.0, shape=n_clusters)
         logphi_cluster = pm.Deterministic("logphi_cluster", mu_logphi + z_logphi * sigma_logphi)
         phi_cluster = pm.Deterministic("phi_cluster", pm.math.exp(logphi_cluster))
