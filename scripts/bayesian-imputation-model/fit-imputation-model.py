@@ -315,9 +315,12 @@ else:
         # \kappa{i,s,t}^{uncorr} ~ Normal(0, (1-f_{corr}) * \sigma^2)                                                       # spatially uncorrelated noise
 
 
-        corr_sigma = pm.HalfNormal("corr_sigma", sigma=0.001) * pt.ones(n_serotypes)
-        uncorr_sigma = pm.HalfNormal("uncorr_sigma", sigma=0.00001) * pt.ones(n_serotypes)
-
+        # Try to combine an AR(p) with a CAR prior on every timestep in the past
+        ## Regularisation of the overall noise & split between spatially structured and unstructured noise
+        total_sigma = pm.HalfNormal("total_sigma", sigma=0.1)
+        proportion_uncorr = pm.Beta("proportion_uncorr", alpha=1, beta=20)  # proportion of noise that is unstructured (encourages structured noise)
+        uncorr_sigma = pm.Deterministic("uncorr_sigma", proportion_uncorr * total_sigma) * pt.ones(n_serotypes)
+        corr_sigma = pm.Deterministic("corr_sigma", (1 - proportion_uncorr) * total_sigma) * pt.ones(n_serotypes)
 
         ## Temporal correlation structure: Harmonically decaying weights summing to one (guarantees non-stationarity).
         gamma = pt.ones(n_serotypes)
@@ -360,7 +363,29 @@ else:
         AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(p, n_serotypes, n_clusters))
 
         # Initialise spatial innovation noise (one per lag)
-        epsilon_corr = pm.Normal("epsilon_corr", 0, 1, shape=(n_months - p, n_serotypes, n_clusters))
+        #epsilon_corr = pm.Normal("epsilon_corr", 0, 1, shape=(n_months - p, n_serotypes, n_clusters))
+
+        # --- temporally-smoothed spatial innovations (replace epsilon_corr) ---
+        # We construct a GaussianRandomWalk for each (serotype, cluster) entity,
+        # then reshape it into the time-first ordering your arp_step expects.
+
+        # sigma for the per-entity random walks (choose sensible scale; chol already scales spatial amplitude)
+        sigma_eps = pm.HalfNormal("sigma_eps", sigma=1.0)  # tune as needed
+
+        # init distribution for each entity (non-centered style is handled by GaussianRandomWalk internally)
+        eps_init = pm.Normal.dist(mu=0.0, sigma=1.0, shape=(n_serotypes * n_clusters,))
+
+        # eps_rw shape: (n_entities (= n_serotypes*n_clusters), n_months - p)
+        eps_rw = pm.GaussianRandomWalk(
+            "eps_rw",
+            sigma=sigma_eps,
+            init_dist=eps_init,
+            shape=(n_serotypes * n_clusters, n_months - p),
+        )
+
+        # reshape to (n_serotypes, n_clusters, n_months - p) and then dimshuffle to (n_months - p, n_serotypes, n_clusters)
+        epsilon_corr = eps_rw.reshape((n_serotypes, n_clusters, n_months - p)).dimshuffle(2, 0, 1)
+        # epsilon_corr now has the same shape as your original (n_months - p, n_serotypes, n_clusters)
 
         # Initialise random noise
         epsilon_uncorr = pm.Normal("epsilon_uncorr", mu=0, sigma=1, shape=(n_months - p, n_serotypes, n_clusters))
@@ -413,8 +438,7 @@ else:
         p = pm.Deterministic("p", pm.math.softmax(theta_log, axis=1))
 
         # Hierarchical prior for RW step size per cluster
-        mu_sigma_rw = pm.HalfNormal("mu_sigma_rw", sigma=0.1)
-        sigma_sigma_rw = pm.HalfNormal("sigma_sigma_rw", sigma=0.1)
+        mu_sigma_rw = pm.HalfNormal("mu_sigma_rw", sigma=1)
         sigma_rw_cluster = pm.HalfNormal("sigma_rw_cluster", sigma=mu_sigma_rw, shape=n_clusters)
 
         # Cluster-specific Gaussian random walks for log(phi)
@@ -438,7 +462,7 @@ else:
 
 # NUTS
 with model:
-    trace = pm.sample(30, tune=30, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(50, tune=50, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 
 #######################
@@ -469,13 +493,13 @@ arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
 # Traceplot
 if CAR_per_lag:
     variables2plot = [
-                        'corr_sigma', 'uncorr_sigma', 'mu_sigma_rw', 'sigma_sigma_rw', 'sigma_rw_cluster',
+                        'total_sigma', 'proportion_uncorr', 'corr_sigma', 'uncorr_sigma', 'mu_sigma_rw', 'sigma_rw_cluster',
                     ]
     if distance_matrix:
         variables2plot += ['zeta_intercept', 'zeta_slope']
 else:
     variables2plot = [
-                        'corr_sigma', 'uncorr_sigma', 'mu_sigma_rw', 'sigma_sigma_rw', 'sigma_rw_cluster',
+                        'total_sigma', 'proportion_uncorr', 'corr_sigma', 'uncorr_sigma', 'mu_sigma_rw', 'sigma_rw_cluster',
                     ]
     if distance_matrix:
         variables2plot += ['zeta',]
