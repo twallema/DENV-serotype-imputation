@@ -314,11 +314,10 @@ else:
         # \kappa_{i,s,t}^{corr} ~ Normal(0, f_{corr} * \sigma^2  * chol(Q))                                                 # spatially correlated noise
         # \kappa{i,s,t}^{uncorr} ~ Normal(0, (1-f_{corr}) * \sigma^2)                                                       # spatially uncorrelated noise
 
-        ## Regularisation of the overall noise & split between spatially structured and unstructured noise
-        total_sigma = pm.HalfNormal("total_sigma", sigma=0.01)
-        proportion_uncorr = pm.Beta("proportion_uncorr", alpha=1, beta=2)  # proportion of noise that is unstructured (encourages spatially structured noise)
-        uncorr_sigma = pm.Deterministic("uncorr_sigma", proportion_uncorr * total_sigma) * pt.ones(n_serotypes)
-        corr_sigma = pm.Deterministic("corr_sigma", (1 - proportion_uncorr) * total_sigma) * pt.ones(n_serotypes)
+
+        corr_sigma = pm.HalfNormal("corr_sigma", sigma=0.001) * pt.ones(n_serotypes)
+        uncorr_sigma = pm.HalfNormal("uncorr_sigma", sigma=0.00001) * pt.ones(n_serotypes)
+
 
         ## Temporal correlation structure: Harmonically decaying weights summing to one (guarantees non-stationarity).
         gamma = pt.ones(n_serotypes)
@@ -408,21 +407,29 @@ else:
         theta_log = theta_log_final.reshape((len(df), n_serotypes))
 
 
-        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        # OPTION 1: DirichletMultinomial >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     
-        # Softmax transform for subtype fractions
+        # Softmax transform AR+CAR model
         p = pm.Deterministic("p", pm.math.softmax(theta_log, axis=1))
 
-        # Compute concentration parameter
-        ## RW per cluster
-        sigma_rw = pm.HalfNormal("sigma_rw", sigma=0.1)          # RW step sd on log scale
-        logphi_rw = pm.GaussianRandomWalk("logphi_rw", sigma=sigma_rw, init_dist=pm.Normal.dist(mu=5, sigma=1, shape=n_clusters), shape=(n_clusters, n_months))
-        phi_obs = pm.Deterministic("phi_obs", pm.math.exp(logphi_rw.flatten()))     
+        # Hierarchical prior for RW step size per cluster
+        mu_sigma_rw = pm.HalfNormal("mu_sigma_rw", sigma=0.1)
+        sigma_sigma_rw = pm.HalfNormal("sigma_sigma_rw", sigma=0.1)
+        sigma_rw_cluster = pm.HalfNormal("sigma_rw_cluster", sigma=mu_sigma_rw, shape=n_clusters)
+
+        # Cluster-specific Gaussian random walks for log(phi)
+        logphi_rw = pm.GaussianRandomWalk(
+            "logphi_rw",
+            sigma=pt.transpose(pt.repeat(sigma_rw_cluster[:, None], n_months-1, axis=1)),
+            init_dist=pm.Normal.dist(mu=5, sigma=1, shape=n_clusters),
+            shape=(n_clusters, n_months),
+        )
+        phi_obs = pm.Deterministic("phi_obs", pm.math.exp(logphi_rw.flatten()))
+
+        # Compute Dirichlet concentration parameter
         alpha = phi_obs[:, None] * p   # p already computed from theta_log
 
         # --- Observed subtyped incidences ---
-        # Y_{i,s,t} ~ DirichletMultinomial(N^*_{s,t}, alpha_{i,s,t})
-
         Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
 
 #######################
@@ -431,7 +438,7 @@ else:
 
 # NUTS
 with model:
-    trace = pm.sample(100, tune=100, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(30, tune=30, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 
 #######################
@@ -443,7 +450,17 @@ with model:
     ppc = pm.sample_posterior_predictive(trace)
 arviz.plot_ppc(ppc)
 plt.savefig(f'{output_folder}/ppc.pdf')
-plt.close()
+plt.close()    
+
+# Expand data & take 10x as much samples
+expanded_idata = trace.copy()
+expanded_idata.posterior = trace.posterior.expand_dims(pred_id=5)
+with model:
+    ppc = pm.sample_posterior_predictive(
+        expanded_idata,
+        sample_dims=["chain", "draw", "pred_id"],
+        extend_inferencedata=True,
+    )
 
 # Assume `trace` is the result of pm.sample()
 arviz.to_netcdf(trace, f"{output_folder}/trace.nc")
@@ -452,13 +469,13 @@ arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
 # Traceplot
 if CAR_per_lag:
     variables2plot = [
-                    'total_sigma', 'proportion_uncorr', 'sigma_rw', # 'mu_logphi', 'sigma_logphi', 'phi_cluster',
+                        'corr_sigma', 'uncorr_sigma', 'mu_sigma_rw', 'sigma_sigma_rw', 'sigma_rw_cluster',
                     ]
     if distance_matrix:
         variables2plot += ['zeta_intercept', 'zeta_slope']
 else:
     variables2plot = [
-                      'total_sigma', 'proportion_uncorr', 'sigma_rw', # 'mu_logphi', 'sigma_logphi', 'phi_cluster',
+                        'corr_sigma', 'uncorr_sigma', 'mu_sigma_rw', 'sigma_sigma_rw', 'sigma_rw_cluster',
                     ]
     if distance_matrix:
         variables2plot += ['zeta',]
