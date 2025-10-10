@@ -318,7 +318,7 @@ else:
         # Try to combine an AR(p) with a CAR prior on every timestep in the past
         ## Regularisation of the overall noise & split between spatially structured and unstructured noise
         total_sigma = pm.HalfNormal("total_sigma", sigma=0.1)
-        proportion_uncorr = pm.Beta("proportion_uncorr", alpha=1, beta=20)  # proportion of noise that is unstructured (encourages structured noise)
+        proportion_uncorr = pm.Beta("proportion_uncorr", alpha=1, beta=10)  # proportion of noise that is unstructured (encourages structured noise)
         uncorr_sigma = pm.Deterministic("uncorr_sigma", proportion_uncorr * total_sigma) * pt.ones(n_serotypes)
         corr_sigma = pm.Deterministic("corr_sigma", (1 - proportion_uncorr) * total_sigma) * pt.ones(n_serotypes)
 
@@ -351,13 +351,12 @@ else:
         jitter = 1e-6 * pt.diag(pt.ones(n_clusters))
         jitter = jitter[None, :, :]
         Q = D - a_car * W + jitter
-        # Q shape == (n_serotypes, p, n_clusters, n_clusters)
 
         # Compute the Cholesky of Q
         chol = pt.slinalg.cholesky(Q)
 
         # Scale with the noise
-        chol = chol * corr_sigma[:, None, None]  # broadcast over p and states
+        chol = chol * corr_sigma[:, None, None]  # (n_serotypes, n_clusters, n_clusters)
 
         # Initialise AR(p) initial condition
         AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(p, n_serotypes, n_clusters))
@@ -462,7 +461,7 @@ else:
 
 # NUTS
 with model:
-    trace = pm.sample(50, tune=50, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(30, tune=20, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 
 #######################
