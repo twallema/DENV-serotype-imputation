@@ -15,14 +15,13 @@ def str_to_bool(value):
     return value.lower() in ["true", "1", "yes"]
 
 # arguments are used to find the result
-# How to run: python visualise-fit.py -date 2025-08-27 -ID test -p 2 -distance_matrix False -CAR_per_lag False
+# How to run: python visualise-fit.py -date 2025-08-27 -ID test -p 2 -distance_matrix False
 parser = argparse.ArgumentParser()
 parser.add_argument("-region_filename", type=str, help="Spatial aggregation clustering was performed on.", default='rgint')
 parser.add_argument("-date", type=str, help="Date experiment was run.")
 parser.add_argument("-ID", type=str, help="Sampler output name.")
 parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
 parser.add_argument("-distance_matrix", type=str_to_bool, help="Use distance matrix versus adjacency matrix.", default=False)
-parser.add_argument("-CAR_per_lag", type=str_to_bool, help="Use one spatial innovation process per AR lag versus one spatial innovation overall.", default=False)
 args = parser.parse_args()
 
 # assign to desired variables
@@ -31,10 +30,9 @@ date = args.date
 ID = args.ID
 p = args.p
 distance_matrix = args.distance_matrix
-CAR_per_lag = args.CAR_per_lag
 
 # Make folder structure
-output_folder=f'../../data/interim/bayesian-imputation-model_output/AR({p})/distance_matrix-{distance_matrix}/CARperlag-{CAR_per_lag}/{ID}_{date}' # Path to backend
+output_folder=f'../../data/interim/bayesian-imputation-model_output/AR({p})/distance_matrix-{distance_matrix}/{ID}_{date}' # Path to backend
 # check if samples folder exists, if not, make it
 if not os.path.exists(output_folder):
     raise ValueError('result not found.')
