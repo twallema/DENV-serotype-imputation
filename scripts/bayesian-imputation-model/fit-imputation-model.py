@@ -176,8 +176,8 @@ with pm.Model() as model:
 
     # Try to combine an AR(p) with a CAR prior on every timestep in the past
     ## Regularisation of the overall noise & split between spatially structured and unstructured noise
-    total_sigma = pm.HalfNormal("total_sigma", sigma=0.1)
-    proportion_uncorr = pm.Beta("proportion_uncorr", alpha=1, beta=25)  # proportion of noise that is unstructured (encourages structured noise)
+    total_sigma = pm.HalfNormal("total_sigma", sigma=0.005)
+    proportion_uncorr = 0 #pm.HalfNormal("proportion_uncorr", sigma=0.01) #pm.Beta("proportion_uncorr", alpha=1, beta=100)  # proportion of noise that is unstructured (encourages structured noise)
     uncorr_sigma = pm.Deterministic("uncorr_sigma", proportion_uncorr * total_sigma) * pt.ones(n_serotypes)
     corr_sigma = pm.Deterministic("corr_sigma", (1 - proportion_uncorr) * total_sigma) * pt.ones(n_serotypes)
 
@@ -230,14 +230,11 @@ with pm.Model() as model:
     # sigma for the per-entity random walks (choose sensible scale; chol already scales spatial amplitude)
     sigma_eps = pm.HalfNormal("sigma_eps", sigma=1.0)  # tune as needed
 
-    # init distribution for each entity (non-centered style is handled by GaussianRandomWalk internally)
-    eps_init = pm.Normal.dist(mu=0.0, sigma=1.0, shape=(n_serotypes * n_clusters,))
-
     # eps_rw shape: (n_entities (= n_serotypes*n_clusters), n_months - p)
     eps_rw = pm.GaussianRandomWalk(
         "eps_rw",
         sigma=sigma_eps,
-        init_dist=eps_init,
+        init_dist=pm.Normal.dist(mu=0.0, sigma=1.0, shape=(n_serotypes * n_clusters,)),
         shape=(n_serotypes * n_clusters, n_months - p),
     )
 
@@ -314,14 +311,16 @@ with pm.Model() as model:
     # --- Observed subtyped incidences ---
     Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
 
-
+    # Compute variance inflation of dirichlet multinomial compared to multinomial
+    VIF = pm.Deterministic("VIF", (N_typed + phi_obs) / (1 + phi_obs))
+                           
 #######################
 ## Running the model ##
 #######################
 
 # NUTS
 with model:
-    trace = pm.sample(50, tune=50, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(500, tune=1500, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 
 #######################
@@ -351,7 +350,7 @@ arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
 
 # Traceplot
 variables2plot = [
-                    'total_sigma', 'proportion_uncorr', 'corr_sigma', 'uncorr_sigma', 'mu_sigma_rw', 'sigma_rw_cluster',
+                    'total_sigma', 'corr_sigma', 'uncorr_sigma', 'sigma_eps', 'mu_sigma_rw', 'sigma_rw_cluster',
                 ]
 if distance_matrix:
     variables2plot += ['zeta',]
@@ -407,16 +406,18 @@ MSAD = np.mean(d_obs_to_mean**2)
 
 # ---- phi summaries ----
 phi_samples = trace.posterior["phi_obs"].values.flatten()  # (chains, draws, n_clusters)
-phi_median = np.median(phi_samples)
 phi_geo_mean = gmean(phi_samples)
 phi_hdi = az.hdi(phi_samples, hdi_prob=0.95)  # array (n_clusters, 2)
+
+# ---- VIF summaries ----
+VIF_samples = trace.posterior["VIF"].values.flatten()  # (chains, draws, n_clusters)
+VIF_geo_mean = gmean(VIF_samples)
 
 # ---- print summary ----
 print("RMS Aitchison distance (global):", RMSAD)
 print("MSAD:", MSAD)
-print("phi median across clusters:", phi_median)
 print("phi geometric mean across clusters:", phi_geo_mean)
-
+print("VIF geometric mean across clusters:", VIF_geo_mean)
 
 
 
