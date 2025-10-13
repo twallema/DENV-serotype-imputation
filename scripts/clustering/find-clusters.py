@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -9,6 +10,8 @@ from libpysal.weights import Rook, Queen
 from scipy.ndimage import gaussian_filter1d
 from sklearn.preprocessing import StandardScaler
 import numpy as np
+from contextlib import redirect_stdout
+from scipy.special import softmax
 
 # glasbey color map
 from glasbey import create_palette
@@ -291,7 +294,7 @@ geography[DTW_covariates_indexP_names] = sc.fit_transform(geography[DTW_covariat
 
 
 
-# Make indexP DTW-MDS covariate
+# Make serotypes DTW-MDS covariate
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # Merge to the geography
@@ -315,8 +318,8 @@ attrs = ['cx', 'cy'] + DTW_covariates_indexP_names + ['human_footprint'] #+ kopp
 
 
 
-# Run max-p regionalization model `n` times and compute mean co-association matrix
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# Run max-p regionalization model `n` times 
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # Build contiguity weight map
 w = Rook.from_dataframe(geography, use_index=False)
@@ -329,7 +332,7 @@ model = MaxPHeuristic(
     threshold_name='N_typed_monthly_mean',
     threshold=threshold,
     top_n=3,
-    verbose=False,
+    verbose=True,
     policy='multiple',
     max_iterations_construction=1000,
     max_iterations_sa=50,
@@ -339,27 +342,48 @@ model = MaxPHeuristic(
 n_clusters = []
 matrices = []
 clusters = pd.DataFrame(index=geography[region].values)
-for numRun in range(n):
-    print(f"Starting clustering run {numRun+1} of {n}")
 
-    # run model
-    model.solve() 
+with open("maxp_stdout.txt", "w") as f, redirect_stdout(f): # temporarily sends all output to f
+    for numRun in range(n):
+        print(f"Starting clustering run {numRun+1} of {n}")
 
-    # append the individual run to dataframes 
-    clusters[f'run_{numRun+1}'] = model.labels_
-    geography[f'run_{numRun+1}'] = model.labels_
+        # run model
+        model.solve() 
 
-    # save number of clusters
-    n_clusters.append(len(np.unique(model.labels_)))
+        # append the individual run to dataframes 
+        clusters[f'run_{numRun+1}'] = model.labels_
+        geography[f'run_{numRun+1}'] = model.labels_
 
-    # save a matrix of size (n_regions x n_regions) containing 1 if regions belong to the same cluster for every run
-    matrices.append(build_co_association_matrix(geography[region], model.labels_))
+        # save number of clusters
+        n_clusters.append(len(np.unique(model.labels_)))
 
-# average co-association across runs
+        # save a matrix of size (n_regions x n_regions) containing 1 if regions belong to the same cluster for every run
+        matrices.append(build_co_association_matrix(geography[region], model.labels_))
+
+
+
+# Extract best_obj_values from f and softmax them
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+best_obj_vals = []
+with open ("maxp_stdout.txt") as f:
+    lines = f.readlines()
+for i, line in enumerate(lines):
+    if "best objective value:" in line.lower():
+        val = float(lines[i+1].strip())
+        best_obj_vals.append(val)
+# Softmax with temperature
+weights = softmax(-np.asarray(best_obj_vals))
+os.remove("maxp_stdout.txt")
+
+
+# Average co-association matrices across runs
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# compute softmax-weighted mean co-association matrix
 prob_matrix = pd.DataFrame(0.0, index=geography[region], columns=geography[region])
-for association_matrix in matrices:
-    prob_matrix += association_matrix
-prob_matrix /= numRun+1
+for association_matrix, weight in zip(matrices, weights):
+   prob_matrix += weight * association_matrix
 
 # save mean co-association matrix
 prob_matrix.to_csv(f"../../data/interim/clusters/prob_matrix_{region_filename}.csv")
@@ -369,6 +393,8 @@ n_clusters = int(np.median(n_clusters))
 
 # make a categorical color palette with n_clusters distinct colors
 glasbey_cmap = ListedColormap(create_palette(palette_size=n_clusters))
+
+
 
 # Randomly select and visualize 12 runs on a 3x4 grid
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -411,8 +437,8 @@ geography['consensus_clusters_hierarchical'] = fcluster(Z, n_clusters, criterion
 
 
 
-# Recluster mean co-association matrix using hierarchical clustering
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# Recluster mean co-association matrix using spectral clustering
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 sc = SpectralClustering(n_clusters=n_clusters, affinity='precomputed', random_state=0)
 geography['consensus_clusters_spectral'] = sc.fit_predict(prob_matrix)+1
