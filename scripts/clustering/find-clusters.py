@@ -373,7 +373,7 @@ for i, line in enumerate(lines):
         val = float(lines[i+1].strip())
         best_obj_vals.append(val)
 # Softmax with temperature
-weights = softmax(- np.asarray(best_obj_vals))
+weights = softmax(-np.asarray(best_obj_vals))
 os.remove("maxp_stdout.txt")
 
 
