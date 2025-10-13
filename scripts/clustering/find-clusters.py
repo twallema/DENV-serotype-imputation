@@ -372,7 +372,8 @@ for i, line in enumerate(lines):
     if "best objective value:" in line.lower():
         val = float(lines[i+1].strip())
         best_obj_vals.append(val)
-weights = softmax(-np.array(best_obj_vals))
+# Softmax with temperature
+weights = softmax(- np.asarray(best_obj_vals))
 os.remove("maxp_stdout.txt")
 
 
@@ -436,8 +437,8 @@ geography['consensus_clusters_hierarchical'] = fcluster(Z, n_clusters, criterion
 
 
 
-# Recluster mean co-association matrix using hierarchical clustering
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# Recluster mean co-association matrix using spectral clustering
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 sc = SpectralClustering(n_clusters=n_clusters, affinity='precomputed', random_state=0)
 geography['consensus_clusters_spectral'] = sc.fit_predict(prob_matrix)+1
