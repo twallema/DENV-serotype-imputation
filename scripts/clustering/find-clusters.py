@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -23,7 +24,7 @@ from scipy.spatial.distance import squareform
 # script settings
 # >>>>>>>>>>>>>>>
 
-n = 50 # number of max-p regionalization runs to average
+n = 20 # number of max-p regionalization runs to average
 threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
 region_filename = 'rgint' # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
 
@@ -331,7 +332,7 @@ model = MaxPHeuristic(
     threshold_name='N_typed_monthly_mean',
     threshold=threshold,
     top_n=3,
-    verbose=False,
+    verbose=True,
     policy='multiple',
     max_iterations_construction=100,
     max_iterations_sa=5,
@@ -342,7 +343,7 @@ n_clusters = []
 matrices = []
 clusters = pd.DataFrame(index=geography[region].values)
 
-with open("maxp_terminal_log", "w") as f, redirect_stdout(f): # temporarily sends all output to f
+with open("maxp_stdout.txt", "w") as f, redirect_stdout(f): # temporarily sends all output to f
     for numRun in range(n):
         print(f"Starting clustering run {numRun+1} of {n}")
 
@@ -365,20 +366,21 @@ with open("maxp_terminal_log", "w") as f, redirect_stdout(f): # temporarily send
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 best_obj_vals = []
-with open ("maxp_terminal_log") as f:
+with open ("maxp_stdout.txt") as f:
     lines = f.readlines()
 for i, line in enumerate(lines):
     if "best objective value:" in line.lower():
         val = float(lines[i+1].strip())
         best_obj_vals.append(val)
 weights = softmax(-np.array(best_obj_vals))
-
+os.remove("maxp_stdout.txt")
 
 
 # Average co-association matrices across runs
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # compute softmax-weighted mean co-association matrix
+prob_matrix = pd.DataFrame(0.0, index=geography[region], columns=geography[region])
 for association_matrix, weight in zip(matrices, weights):
    prob_matrix += weight * association_matrix
 
