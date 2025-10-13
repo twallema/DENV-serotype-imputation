@@ -24,7 +24,7 @@ from scipy.spatial.distance import squareform
 # script settings
 # >>>>>>>>>>>>>>>
 
-n = 20 # number of max-p regionalization runs to average
+n = 100 # number of max-p regionalization runs to average
 threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
 region_filename = 'rgint' # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
 
@@ -334,8 +334,8 @@ model = MaxPHeuristic(
     top_n=3,
     verbose=True,
     policy='multiple',
-    max_iterations_construction=100,
-    max_iterations_sa=5,
+    max_iterations_construction=1000,
+    max_iterations_sa=50,
 )
 
 
