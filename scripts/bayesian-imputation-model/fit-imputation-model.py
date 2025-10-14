@@ -179,7 +179,7 @@ with pm.Model() as model:
     # Try to combine an AR(p) with innovations driven by a RW(1) CAR prior
     ## Regularisation of the overall noise
     total_sigma = 1 #pm.HalfNormal("total_sigma", sigma=1)
-    a_CAR = pm.Beta("a_CAR", alpha=2, beta=1)
+    a_CAR = pm.Beta("a_CAR", alpha=2, beta=2)
     a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.85)
 
     ## Temporal correlation structure: Harmonically decaying weights (gamma=1) summing to one to guarantee non-stationarity
@@ -214,12 +214,12 @@ with pm.Model() as model:
 
             # prev_vals: (n_serotypes, n_clusters)
             # draw innovation for this time step (spatially correlated)
-            kappa_total = pm.MvNormal.dist(mu=pt.zeros(n_clusters), cov=chol_cov_scaled, shape=(n_serotypes, n_clusters))
+            kappa_t = pm.MvNormal.dist(mu=pt.zeros(n_clusters), cov=chol_cov_scaled, shape=(n_serotypes, n_clusters))
 
             # compute total new state
-            new_state = rho * prev_vals + kappa_total  # (n_serotypes, n_clusters)
+            new_vals = rho * prev_vals + kappa_t  # (n_serotypes, n_clusters)
 
-            return new_state, collect_default_updates([new_state,])
+            return new_vals, collect_default_updates([new_vals,])
 
         # run the scan to generate the sequence of new_state for n_steps
         sequence, update = pytensor.scan(
@@ -307,7 +307,7 @@ arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
 
 # Traceplot
 variables2plot = [
-                 'a_CAR', 'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
+                 'a_CAR_trunc', 'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
                 ]
 if distance_matrix:
     variables2plot += ['zeta',]
