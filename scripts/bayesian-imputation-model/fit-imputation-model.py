@@ -167,6 +167,29 @@ def critical_rho1(p, gamma):
 
 from pymc.pytensorf import collect_default_updates
 
+# coords = {'time': pd.date_range(start='2000-01-01', end='2024-08-01', freq='MS')}
+# with pm.Model(coords=coords) as ar1_model:
+#     # Define prior -- stationary only
+#     rho = pm.Beta('rho', alpha=1, beta=1)
+#     sigma = pm.Exponential('sigma', lam=1)
+#     x0 = pm.Normal('x0')
+#     # Make a wrapper function for pm.CustomDist that returns a random vector
+#     def ar1_dist(x0, rho, sigma, shape=None): 
+#         # Define a recursive relationship mapping x_{t-1} to x_t
+#         def step(x_tm1, rho, sigma):
+#             x_t = rho * x_tm1 + pm.Normal.dist(0, sigma)
+#             return x_t, collect_default_updates(x_t)
+        
+#         sequence, update = pytensor.scan(step, outputs_info=[x0], non_sequences=[rho,sigma], n_steps = 100, strict=True)
+        
+#         return sequence
+    
+#     obs = pm.CustomDist('obs', x0, rho, sigma, dist=ar1_dist, dims=['time'])
+#     prior = pm.sample_prior_predictive(random_seed=42)
+
+# import sys
+# sys.exit()
+
 with pm.Model() as model:
 
     # --- Subtype Composition Model ---
@@ -206,16 +229,17 @@ with pm.Model() as model:
     jitter = 1e-6 * pt.diag(pt.ones(n_clusters))
     jitter = jitter[None, :, :]
     Q = D - a * W + jitter
-    chol = pt.slinalg.cholesky(Q) # shape (n_serotypes, n_cluster, n_clusters)
+    chol = pt.slinalg.cholesky(Q).squeeze() # shape (n_cluster, n_clusters)
+    L_cov = pt.slinalg.solve_triangular(chol, pt.eye(n_clusters), lower=True).T  # shape: (n_clusters, n_clusters)
 
     ## Initialise AR(p) initial condition
-    AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(p, n_serotypes, n_clusters))
+    AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(n_serotypes, n_clusters))
 
     # ---------------------------------------------------------------------------
     # Construct a CustomDist that returns the entire AR(p) trajectory as a vector
     # --------------------------------------------------------------------------
 
-    def ar_p_dist(AR_init, rho, total_sigma, chol, shape=None):
+    def ar_1_dist(AR_init, rho, total_sigma, chol, shape=None):
         """
         This function is called by pm.CustomDist; it must return a sequence of random
         variables built with .dist(...) inside the step so each time point is a true RV.
@@ -223,42 +247,27 @@ with pm.Model() as model:
 
         # helper: the single-step function for scan
         def step(prev_vals, rho, total_sigma, chol):
-            # prev_vals: (p, n_serotypes, n_clusters)
 
-            # draw innovation for this time step (uncorrelated)
-            eps_uncorr = pm.Normal.dist(mu=0.0, sigma=total_sigma, shape=(n_serotypes, n_clusters))
-            # apply cholesky (spatial precision) to get correlated increment
-            kappa_corr = pt.batched_dot(eps_uncorr, chol)  # (n_serotypes, n_clusters)
-
-            # compute AR(p) deterministic mean from previous p lags
-            AR_mean_terms = []
-            for lag in range(p):
-                AR_mean_terms.append(rho[:, lag][:, None] * prev_vals[lag])
-            ar_part = sum(AR_mean_terms)  # (n_serotypes, n_clusters)
+            # prev_vals: (n_serotypes, n_clusters)
+            # draw innovation for this time step (spatially correlated)
+            kappa_corr = total_sigma * pm.MvNormal.dist(mu=pt.zeros(n_clusters), chol=L_cov, shape=(n_serotypes, n_clusters))
 
             # compute total new state
-            new_state = ar_part + kappa_corr  # (n_serotypes, n_clusters)
+            rho = 1
+            new_state = rho * prev_vals + kappa_corr  # (n_serotypes, n_clusters)
 
-            # update lags: push new_state in front (index 0), drop oldest
-            updated_lags = pt.concatenate([new_state[None, :, :], prev_vals[:-1]], axis=0)
-
-            return updated_lags, collect_default_updates(updated_lags)
+            return new_state, collect_default_updates([new_state,])
 
         # run the scan to generate the sequence of new_state for n_steps
         sequence, update = pytensor.scan(
             fn=step,
             outputs_info=[AR_init],  # not used as we use full prev_vals; see below
             non_sequences=[rho, total_sigma, chol],
-            n_steps=n_months-p,
+            n_steps=n_months,
             strict=True,
         )
 
-        ## Concatenate initial condition 'AR_init': (p, n_serotypes, n_clusters) to output of 'sequences': (n_months - p, p, n_serotypes, n_clusters) --> (n_months, p, n_serotypes, n_clusters)
-        full_sequence = pt.concatenate([pt.repeat(AR_init[None, :, :, :], p, axis=0), sequence], axis=0)
-        ## Slice only lag zero (p=0) over full time axis (n_months, n_serotypes, n_clusters)
-        full_sequence = full_sequence[:, 0, :, :]
-
-        return full_sequence
+        return sequence
 
 
     # Create the CustomDist node representing the whole series of new states (n_steps, n_serotypes, n_clusters)
@@ -268,10 +277,9 @@ with pm.Model() as model:
         rho,
         total_sigma,
         chol,
-        dist=ar_p_dist,
+        dist=ar_1_dist,
         shape=(n_months, n_serotypes, n_clusters) # maybe size
     )
-
     theta_log = theta_sequence.reshape((len(df), n_serotypes))
 
     # Softmax transform AR(p)+RW(1, CAR) model
@@ -303,10 +311,11 @@ with pm.Model() as model:
 ## Running the model ##
 #######################
 
+
 # NUTS
-draws=100
+draws=10
 with model:
-    trace = pm.sample(draws, tune=100, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(draws, tune=10, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, random_seed=42)
 
 
 #######################
