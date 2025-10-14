@@ -178,8 +178,8 @@ with pm.Model() as model:
 
     # Try to combine an AR(p) with innovations driven by a RW(1) CAR prior
     ## Regularisation of the overall noise
-    total_sigma = 1 #pm.HalfNormal("total_sigma", sigma=1)
-    a_CAR = pm.Beta("a_CAR", alpha=2, beta=2)
+    total_sigma = pm.HalfNormal("total_sigma", sigma=0.1)
+    a_CAR = pm.Beta("a_CAR", alpha=2, beta=1)
     a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.85)
 
     ## Temporal correlation structure: Harmonically decaying weights (gamma=1) summing to one to guarantee non-stationarity
@@ -198,46 +198,52 @@ with pm.Model() as model:
 
     ## Initialise AR(p) initial condition
     AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(n_serotypes, n_clusters))
+    kappa_init = pm.Normal("kappa_init", mu=0, sigma=1, shape=(n_serotypes, n_clusters))
 
-    # ---------------------------------------------------------------------------
-    # Construct a CustomDist that returns the entire AR(p) trajectory as a vector
-    # ---------------------------------------------------------------------------
+    # -------------------
+    # log_phi ~ ARMA(1,1)
+    # -------------------
 
-    def arma_11_dist(AR_init, rho, psi, chol_cov_scaled, shape=None):
+    # https://www.youtube.com/watch?v=G9VWXZdbtKQ
+    # https://pytensor.readthedocs.io/en/latest/library/scan.html 
+    # https://gist.github.com/ricardoV94/a49b2cc1cf0f32a5f6dc31d6856ccb63#file-pymc_timeseries_ma-ipynb
+    # https://becarioprecario.bitbucket.io/spde-gitbook/ch-intro.html
+
+    # ---- Step 1: Construct a CustomDist that returns the innovations of the ARMA(1,1) trajectory ---- 
+
+    def arma_11_dist(kappa_init, AR_init, rho, psi, chol_cov_scaled, shape=None):
         """
         This function is called by pm.CustomDist; it must return a sequence of random
         variables built with .dist(...) inside the step so each time point is a true RV.
+        In the example below 'new_vals' -- which is the variable whose trajectory we are interested in -- cannot be returned 
         """
 
         # helper: the single-step function for scan
-        def step(prev_vals, prev_kappa, rho, psi, chol_cov_scaled):
+        def arma_11_step(prev_kappa, prev_vals, rho, psi, chol_cov_scaled):
 
-            # prev_vals: (n_serotypes, n_clusters)
-            # draw innovation for this time step (spatially correlated)
-            kappa_t = pm.MvNormal.dist(mu=pt.zeros(n_clusters), cov=chol_cov_scaled, shape=(n_serotypes, n_clusters))
+            # draw a spatially correlated innovation for the current time step
+            new_kappa = pm.MvNormal.dist(mu=pt.zeros(n_clusters), cov=chol_cov_scaled, shape=(n_serotypes, n_clusters))
 
             # compute total new state
-            new_vals = rho * prev_vals + psi * prev_kappa + kappa_t  # (n_serotypes, n_clusters)
+            new_vals = rho * prev_vals + psi * prev_kappa + new_kappa  # (n_serotypes, n_clusters)
 
-            return [new_vals, kappa_t], collect_default_updates([new_vals, kappa_t])
+            return (new_kappa, new_vals), collect_default_updates([new_kappa, new_vals])
 
-        # Initialise eps_{t-1} = 0
-        eps0 = pt.zeros_like(AR_init)
-
-        # run the scan to generate the sequence of new_state for n_steps
-        sequence, update = pytensor.scan(
-            fn=step,
-            outputs_info=[AR_init, eps0],  # not used as we use full prev_vals; see below
+        # run the scan function to generate the sequence of innovations
+        [sequence_kappa, _], _ = pytensor.scan(
+            fn=arma_11_step,
+            outputs_info=[kappa_init, AR_init],  # not used as we use full prev_vals; see below
             non_sequences=[rho, psi, chol_cov_scaled],
             n_steps=n_months,
             strict=True,
         )
+        # cannot return the prev_vals directly :'(
+        return sequence_kappa
 
-        return sequence[0]
-
-    # Create the CustomDist node representing the whole series of new states (n_steps, n_serotypes, n_clusters)
+    # Create the CustomDist node representing the distribution of innovations (n_steps, n_serotypes, n_clusters) --> these are fit to the data
     theta_sequence = pm.CustomDist(
         "theta_sequence",
+        kappa_init,
         AR_init,
         1,
         1,
@@ -245,11 +251,39 @@ with pm.Model() as model:
         dist=arma_11_dist,
         shape=(n_months, n_serotypes, n_clusters) # maybe size
     )
-    print(theta_sequence.eval().shape)
 
-    theta_log = theta_sequence.reshape((len(df), n_serotypes))
+    # ---- Step 2: Deterministically reconstruct the ARMA(1,1) sequence using the innovations ----
+    def reconstruct_arma(kappa_init, AR_init, theta_sequence, rho, psi):
+        """
+        Reconstruct the ARMA(1,1) sequence deterministically from innovations
+        """
 
-    # Softmax transform AR(p)+RW(1, CAR) model
+        # Actually we need to carry prev_kappa too:
+        def step_full(kappa_t, prev_kappa, prev_vals, rho, psi):
+            new_val = rho * prev_vals + psi * prev_kappa + kappa_t
+            return kappa_t, new_val  # carry (prev_val, prev_kappa), output new_val
+
+        # Scan
+        outputs, _ = pytensor.scan(
+            fn=step_full,
+            outputs_info=[kappa_init, AR_init],  # (prev_val, prev_kappa)
+            sequences=theta_sequence,
+            non_sequences=[rho, psi],
+        )
+
+        arma_sequence = outputs[1]  # deterministic ARMA trajectory
+        return arma_sequence
+
+    # Wrap into a pm.Deterministic variable
+    theta_log = pm.Deterministic(
+        "theta_log",
+        reconstruct_arma(kappa_init, AR_init, theta_sequence, 1, 1)
+    )
+
+    # Flatten
+    theta_log = theta_log.reshape((len(df), n_serotypes))
+
+    # Softmax transform ARMA(1,1) model
     p = pm.Deterministic("p", pm.math.softmax(theta_log, axis=1))
 
     # Hierarchical prior for RW step size per cluster
@@ -282,7 +316,7 @@ with pm.Model() as model:
 # NUTS
 draws=10
 with model:
-    trace = pm.sample(draws, tune=10, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, random_seed=42)
+    trace = pm.sample(draws, tune=20, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, random_seed=42)
 
 
 #######################
@@ -312,7 +346,7 @@ arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
 
 # Traceplot
 variables2plot = [
-                 'a_CAR_trunc', 'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
+                 'total_sigma', 'a_CAR_trunc', 'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
                 ]
 if distance_matrix:
     variables2plot += ['zeta',]
