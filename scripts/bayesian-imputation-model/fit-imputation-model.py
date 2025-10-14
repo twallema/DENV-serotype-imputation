@@ -63,10 +63,10 @@ mapping = pd.read_csv(f'../../data/interim/spatial_units_mapping.csv')
 
 if distance_matrix == False:
     # Load adjacency matrix
-    D = pd.read_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}.csv', index_col=0).values
+    W = pd.read_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}.csv', index_col=0).values
 else:
     # Load distance matrix
-    D = pd.read_csv(f'../../data/interim/clusters/distance_matrix_{region_filename}.csv', index_col=0).values
+    W = pd.read_csv(f'../../data/interim/clusters/distance_matrix_{region_filename}.csv', index_col=0).values
 
 
 # Incidence data
@@ -178,37 +178,23 @@ with pm.Model() as model:
 
     # Try to combine an AR(p) with innovations driven by a RW(1) CAR prior
     ## Regularisation of the overall noise
-    total_sigma = 1 #pm.HalfNormal("total_sigma", sigma=100)
-    proportion_uncorr = 0 #pm.Beta("proportion_uncorr", alpha=1, beta=2)  # proportion of noise that is unstructured (encourages structured noise)
+    total_sigma = 1 #pm.HalfNormal("total_sigma", sigma=1)
+    a_CAR = pm.Beta("a_CAR", alpha=2, beta=1)
+    a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.85)
 
     ## Temporal correlation structure: Harmonically decaying weights (gamma=1) summing to one to guarantee non-stationarity
     gamma = pt.ones(n_serotypes)
     first_lag = pm.Deterministic("first_lag", critical_rho1(p, gamma))
     rho = pm.Deterministic("rho", first_lag[:, None] / ((np.arange(1, p + 1)[None,:])**gamma[:, None]))
 
-    ## Priors for spatial correlation radius (zeta)
-    if distance_matrix: 
-        zeta = pm.HalfNormal("zeta", sigma=100)
-    else:
-        zeta = -1
-        pass
-
-    ## Compute cholesky decomposition of the precision matrix Q
-    # D_shared: (n_clusters, n_clusters)
-    # zeta_car: (n_serotypes, p)
-    # We need to broadcast D against zeta
-    W = pt.exp(-D[None, :, :] / zeta)
-    # Construct degree tensor (matrix equivalent: row sums of weighted distance matrix on diagonal of eye(n_clusters))
-    degree = pt.sum(W, axis=-1)[:, :, None]
-    I = pt.eye(n_clusters)[None, :, :]
-    D = I * degree
-    # Q = D - a * W + jitter
-    a = 1
-    jitter = 1e-6 * pt.diag(pt.ones(n_clusters))
-    jitter = jitter[None, :, :]
-    Q = D - a * W + jitter
-    chol = pt.slinalg.cholesky(Q).squeeze() # shape (n_cluster, n_clusters)
-    L_cov = pt.slinalg.solve_triangular(chol, pt.eye(n_clusters), lower=True).T  # shape: (n_clusters, n_clusters)
+    ## Priors for spatial correlation
+    W = pt.constant(W)                                  # fixed adjacency matrix in graph
+    D = pt.diag(pt.sum(W, axis=1))                      # degree matrix
+    jitter = 1e-3 * pt.eye(n_clusters)                  # small jitter
+    Q = D - a_CAR_trunc * W + jitter                    # build precision matrix Q = D - a * W + jitter  (shape: n_clusters x n_clusters)
+    L_Q = pt.slinalg.cholesky(Q)                        # Cholesky of precision: Q = L_Q @ L_Q.T  (lower-triangular)
+    L_cov = pt.slinalg.solve(L_Q, pt.eye(n_clusters))   # Compute L_cov = L_Q^{-1} such that Sigma = L_cov @ L_cov.T = Q^{-1}
+    chol_cov_scaled = total_sigma * L_cov               # scale covariance cholesky by total_sigma (put scale inside chol)
 
     ## Initialise AR(p) initial condition
     AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(n_serotypes, n_clusters))
@@ -217,23 +203,18 @@ with pm.Model() as model:
     # Construct a CustomDist that returns the entire AR(p) trajectory as a vector
     # ---------------------------------------------------------------------------
 
-    def ar_1_dist(AR_init, rho, total_sigma, proportion_uncorr, L_cov, shape=None):
+    def ar_1_dist(AR_init, rho, chol_cov_scaled, shape=None):
         """
         This function is called by pm.CustomDist; it must return a sequence of random
         variables built with .dist(...) inside the step so each time point is a true RV.
         """
 
         # helper: the single-step function for scan
-        def step(prev_vals, rho, total_sigma, proportion_uncorr, L_cov):
+        def step(prev_vals, rho, chol_cov_scaled):
 
             # prev_vals: (n_serotypes, n_clusters)
             # draw innovation for this time step (spatially correlated)
-            #kappa_uncorr = total_sigma * proportion_uncorr * pm.Normal.dist(mu=0, sigma=1, shape=(n_serotypes, n_clusters))
-            #kappa_corr = total_sigma * (1-proportion_uncorr) * pm.MvNormal.dist(mu=pt.zeros(n_clusters), chol=L_cov, shape=(n_serotypes, n_clusters))
-
-            cov_total = (total_sigma * proportion_uncorr)**2 * pt.eye(n_clusters) + \
-                        (total_sigma * (1 - proportion_uncorr))**2 * pt.dot(L_cov, L_cov.T)
-            kappa_total = pm.MvNormal.dist(mu=pt.zeros(n_clusters), cov=cov_total, shape=(n_serotypes, n_clusters))
+            kappa_total = pm.MvNormal.dist(mu=pt.zeros(n_clusters), cov=chol_cov_scaled, shape=(n_serotypes, n_clusters))
 
             # compute total new state
             rho = 1
@@ -245,7 +226,7 @@ with pm.Model() as model:
         sequence, update = pytensor.scan(
             fn=step,
             outputs_info=[AR_init],  # not used as we use full prev_vals; see below
-            non_sequences=[rho, total_sigma, proportion_uncorr, L_cov],
+            non_sequences=[rho, chol_cov_scaled],
             n_steps=n_months,
             strict=True,
         )
@@ -258,9 +239,7 @@ with pm.Model() as model:
         "theta_sequence",
         AR_init,
         rho,
-        total_sigma,
-        proportion_uncorr,
-        L_cov,
+        chol_cov_scaled,
         dist=ar_1_dist,
         shape=(n_months, n_serotypes, n_clusters) # maybe size
     )
@@ -329,7 +308,7 @@ arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
 
 # Traceplot
 variables2plot = [
-                    'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
+                 'a_CAR', 'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
                 ]
 if distance_matrix:
     variables2plot += ['zeta',]
