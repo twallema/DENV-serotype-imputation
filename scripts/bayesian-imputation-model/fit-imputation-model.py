@@ -178,9 +178,9 @@ with pm.Model() as model:
 
     # Try to combine an AR(p) with innovations driven by a RW(1) CAR prior
     ## Regularisation of the overall noise
-    total_sigma = pm.HalfNormal("total_sigma", sigma=0.1)
-    a_CAR = pm.Beta("a_CAR", alpha=2, beta=1)
-    a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.85)
+    total_sigma = pm.HalfNormal("total_sigma", sigma=0.01)
+    a_CAR = pm.Beta("a_CAR", alpha=10, beta=1)
+    a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.90)
 
     ## Temporal correlation structure: Harmonically decaying weights (gamma=1) summing to one to guarantee non-stationarity
     gamma = pt.ones(n_serotypes)
@@ -314,9 +314,9 @@ with pm.Model() as model:
 
 
 # NUTS
-draws=10
+draws=20
 with model:
-    trace = pm.sample(draws, tune=20, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, random_seed=42)
+    trace = pm.sample(draws, tune=30, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, random_seed=42)
 
 
 #######################
