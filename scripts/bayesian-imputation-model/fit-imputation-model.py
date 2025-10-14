@@ -165,6 +165,8 @@ def critical_rho1(p, gamma):
 ## Bayesian imputation model ##
 ###############################
 
+from pymc.pytensorf import collect_default_updates
+
 with pm.Model() as model:
 
     # --- Subtype Composition Model ---
@@ -209,56 +211,68 @@ with pm.Model() as model:
     ## Initialise AR(p) initial condition
     AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(p, n_serotypes, n_clusters))
 
-    ## Precompute the spatial innovation noise as RW(1)
-    # epsilon_corr shape: (n_entities (= n_serotypes*n_clusters), n_months - p)
-    epsilon_corr_rw = pm.GaussianRandomWalk(
-        "epsilon_corr_rw",
-        sigma=total_sigma,
-        init_dist=pm.Normal.dist(mu=0.0, sigma=1.0, shape=(n_serotypes * n_clusters,)),
-        shape=(n_serotypes * n_clusters, n_months - p),
-    )
-    # reshape to (n_serotypes, n_clusters, n_months - p) and then dimshuffle to (n_months - p, n_serotypes, n_clusters)
-    epsilon_corr_rw = epsilon_corr_rw.reshape((n_serotypes, n_clusters, n_months - p)).dimshuffle(2, 0, 1)
+    # ---------------------------------------------------------------------------
+    # Construct a CustomDist that returns the entire AR(p) trajectory as a vector
+    # --------------------------------------------------------------------------
 
-    ## AR(p) function
-    def arp_step(epsilon_corr_t, previous_vals, rho, chol):
+    def ar_p_dist(AR_init, rho, total_sigma, chol, shape=None):
         """
-        previous_vals: (p, n_serotypes, n_clusters)
-        epsilon_t: (n_serotypes, n_clusters)
-        epsilon_uncorr_t: (n_serotypes, n_clusters)
+        This function is called by pm.CustomDist; it must return a sequence of random
+        variables built with .dist(...) inside the step so each time point is a true RV.
         """
 
-        # Scale the spatial innovation with the cholesky of the precision matrix
-        kappa_corr = pt.batched_dot(epsilon_corr_t, chol)
+        # helper: the single-step function for scan
+        def step(prev_vals, rho, total_sigma, chol):
+            # prev_vals: (p, n_serotypes, n_clusters)
 
-        # Compute AR(p) process
-        AR_mean = []
-        for lag in range(p):
-            # Apply temporal weight rho_k (serotype-specific)
-            AR_mean.append(rho[:, lag][:, None] * previous_vals[lag])
+            # draw innovation for this time step (uncorrelated)
+            eps_uncorr = pm.Normal.dist(mu=0.0, sigma=total_sigma, shape=(n_serotypes, n_clusters))
+            # apply cholesky (spatial precision) to get correlated increment
+            kappa_corr = pt.batched_dot(eps_uncorr, chol)  # (n_serotypes, n_clusters)
 
-        # Sum weighted AR and spatial noise over lags
-        new_vals = sum(AR_mean) + kappa_corr  # (n_serotypes, n_clusters)
+            # compute AR(p) deterministic mean from previous p lags
+            AR_mean_terms = []
+            for lag in range(p):
+                AR_mean_terms.append(rho[:, lag][:, None] * prev_vals[lag])
+            ar_part = sum(AR_mean_terms)  # (n_serotypes, n_clusters)
 
-        # Shift lag window: insert new_vals at position 0
-        updated_vals = pt.concatenate(
-            [new_vals[None, :, :], previous_vals[:-1]], axis=0
+            # compute total new state
+            new_state = ar_part + kappa_corr  # (n_serotypes, n_clusters)
+
+            # update lags: push new_state in front (index 0), drop oldest
+            updated_lags = pt.concatenate([new_state[None, :, :], prev_vals[:-1]], axis=0)
+
+            return updated_lags, collect_default_updates(updated_lags)
+
+        # run the scan to generate the sequence of new_state for n_steps
+        sequence, update = pytensor.scan(
+            fn=step,
+            outputs_info=[AR_init],  # not used as we use full prev_vals; see below
+            non_sequences=[rho, total_sigma, chol],
+            n_steps=n_months-p,
+            strict=True,
         )
 
-        return updated_vals
-    
-    # Compute AR(p) function
-    sequences, _ = pytensor.scan(
-        fn=arp_step,
-        sequences=[epsilon_corr_rw,],
-        outputs_info=AR_init,
-        non_sequences=[rho, chol],
+        ## Concatenate initial condition 'AR_init': (p, n_serotypes, n_clusters) to output of 'sequences': (n_months - p, p, n_serotypes, n_clusters) --> (n_months, p, n_serotypes, n_clusters)
+        full_sequence = pt.concatenate([pt.repeat(AR_init[None, :, :, :], p, axis=0), sequence], axis=0)
+        ## Slice only lag zero (p=0) over full time axis (n_months, n_serotypes, n_clusters)
+        full_sequence = full_sequence[:, 0, :, :]
+
+        return full_sequence
+
+
+    # Create the CustomDist node representing the whole series of new states (n_steps, n_serotypes, n_clusters)
+    theta_sequence = pm.CustomDist(
+        "theta_sequence",
+        AR_init,
+        rho,
+        total_sigma,
+        chol,
+        dist=ar_p_dist,
+        shape=(n_months, n_serotypes, n_clusters) # maybe size
     )
-    
-    ## Concatenate initial condition 'AR_init': (p, n_serotypes, n_clusters) to output of 'sequences': (n_months - p, p, n_serotypes, n_clusters)
-    theta_log_final = pt.concatenate([pt.repeat(AR_init[None, :, :, :], p, axis=0), sequences], axis=0)
-    ## Slice lag zero (p=0) over full time axis (n_months, n_serotypes, n_clusters) and convert to flat format
-    theta_log = theta_log_final[:, 0, :, :].reshape((len(df), n_serotypes))
+
+    theta_log = theta_sequence.reshape((len(df), n_serotypes))
 
     # Softmax transform AR(p)+RW(1, CAR) model
     p = pm.Deterministic("p", pm.math.softmax(theta_log, axis=1))
@@ -284,7 +298,6 @@ with pm.Model() as model:
 
     # --- Observed subtyped incidences ---
     Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
-
 
 #######################
 ## Running the model ##
