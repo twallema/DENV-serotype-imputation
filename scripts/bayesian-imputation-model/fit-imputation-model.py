@@ -203,45 +203,50 @@ with pm.Model() as model:
     # Construct a CustomDist that returns the entire AR(p) trajectory as a vector
     # ---------------------------------------------------------------------------
 
-    def ar_1_dist(AR_init, rho, chol_cov_scaled, shape=None):
+    def arma_11_dist(AR_init, rho, psi, chol_cov_scaled, shape=None):
         """
         This function is called by pm.CustomDist; it must return a sequence of random
         variables built with .dist(...) inside the step so each time point is a true RV.
         """
 
         # helper: the single-step function for scan
-        def step(prev_vals, rho, chol_cov_scaled):
+        def step(prev_vals, prev_kappa, rho, psi, chol_cov_scaled):
 
             # prev_vals: (n_serotypes, n_clusters)
             # draw innovation for this time step (spatially correlated)
             kappa_t = pm.MvNormal.dist(mu=pt.zeros(n_clusters), cov=chol_cov_scaled, shape=(n_serotypes, n_clusters))
 
             # compute total new state
-            new_vals = rho * prev_vals + kappa_t  # (n_serotypes, n_clusters)
+            new_vals = rho * prev_vals + psi * prev_kappa + kappa_t  # (n_serotypes, n_clusters)
 
-            return new_vals, collect_default_updates([new_vals,])
+            return [new_vals, kappa_t], collect_default_updates([new_vals, kappa_t])
+
+        # Initialise eps_{t-1} = 0
+        eps0 = pt.zeros_like(AR_init)
 
         # run the scan to generate the sequence of new_state for n_steps
         sequence, update = pytensor.scan(
             fn=step,
-            outputs_info=[AR_init],  # not used as we use full prev_vals; see below
-            non_sequences=[rho, chol_cov_scaled],
+            outputs_info=[AR_init, eps0],  # not used as we use full prev_vals; see below
+            non_sequences=[rho, psi, chol_cov_scaled],
             n_steps=n_months,
             strict=True,
         )
 
-        return sequence
-
+        return sequence[0]
 
     # Create the CustomDist node representing the whole series of new states (n_steps, n_serotypes, n_clusters)
     theta_sequence = pm.CustomDist(
         "theta_sequence",
         AR_init,
         1,
+        1,
         chol_cov_scaled,
-        dist=ar_1_dist,
+        dist=arma_11_dist,
         shape=(n_months, n_serotypes, n_clusters) # maybe size
     )
+    print(theta_sequence.eval().shape)
+
     theta_log = theta_sequence.reshape((len(df), n_serotypes))
 
     # Softmax transform AR(p)+RW(1, CAR) model
