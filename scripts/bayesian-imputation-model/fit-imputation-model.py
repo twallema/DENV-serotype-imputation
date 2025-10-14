@@ -179,7 +179,7 @@ with pm.Model() as model:
     # Try to combine an AR(p) with innovations driven by a RW(1) CAR prior
     ## Regularisation of the overall noise
     total_sigma = pm.HalfNormal("total_sigma", sigma=0.01)
-    a_CAR = pm.Beta("a_CAR", alpha=10, beta=1)
+    a_CAR = pm.Beta("a_CAR", alpha=3, beta=1)
     a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.90)
 
     ## Temporal correlation structure: Harmonically decaying weights (gamma=1) summing to one to guarantee non-stationarity
@@ -294,7 +294,7 @@ with pm.Model() as model:
     logphi_rw = pm.GaussianRandomWalk(
         "logphi_rw",
         sigma=pt.transpose(pt.repeat(logphi_rw_sigma_cluster[:, None], n_months-1, axis=1)),
-        init_dist=pm.Normal.dist(mu=5, sigma=1, shape=n_clusters),
+        init_dist=pm.Normal.dist(mu=3, sigma=1, shape=n_clusters),
         shape=(n_clusters, n_months),
     )
     phi_obs_t = pm.Deterministic("phi_obs_t", pm.math.exp(logphi_rw.flatten()))
@@ -314,9 +314,9 @@ with pm.Model() as model:
 
 
 # NUTS
-draws=20
+draws=500
 with model:
-    trace = pm.sample(draws, tune=30, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, random_seed=42)
+    trace = pm.sample(draws, tune=1500, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, random_seed=42)
 
 
 #######################
@@ -330,9 +330,9 @@ arviz.plot_ppc(ppc)
 plt.savefig(f'{output_folder}/ppc.pdf')
 plt.close()    
 
-# Expand data & take 10x as much samples
+# Expand data & take 2x as much samples
 expanded_idata = trace.copy()
-expanded_idata.posterior = trace.posterior.expand_dims(pred_id=5)
+expanded_idata.posterior = trace.posterior.expand_dims(pred_id=2)
 with model:
     ppc = pm.sample_posterior_predictive(
         expanded_idata,
