@@ -201,7 +201,8 @@ with pm.Model() as model:
 
     # Try to combine an AR(p) with innovations driven by a RW(1) CAR prior
     ## Regularisation of the overall noise
-    total_sigma = pm.HalfNormal("total_sigma", sigma=0.01)
+    total_sigma = pm.HalfNormal("total_sigma", sigma=100)
+    proportion_uncorr = pm.Beta("proportion_uncorr", alpha=1, beta=2)  # proportion of noise that is unstructured (encourages structured noise)
 
     ## Temporal correlation structure: Harmonically decaying weights (gamma=1) summing to one to guarantee non-stationarity
     gamma = pt.ones(n_serotypes)
@@ -237,24 +238,29 @@ with pm.Model() as model:
 
     # ---------------------------------------------------------------------------
     # Construct a CustomDist that returns the entire AR(p) trajectory as a vector
-    # --------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
 
-    def ar_1_dist(AR_init, rho, total_sigma, chol, shape=None):
+    def ar_1_dist(AR_init, rho, total_sigma, proportion_uncorr, L_cov, shape=None):
         """
         This function is called by pm.CustomDist; it must return a sequence of random
         variables built with .dist(...) inside the step so each time point is a true RV.
         """
 
         # helper: the single-step function for scan
-        def step(prev_vals, rho, total_sigma, chol):
+        def step(prev_vals, rho, total_sigma, proportion_uncorr, L_cov):
 
             # prev_vals: (n_serotypes, n_clusters)
             # draw innovation for this time step (spatially correlated)
-            kappa_corr = total_sigma * pm.MvNormal.dist(mu=pt.zeros(n_clusters), chol=L_cov, shape=(n_serotypes, n_clusters))
+            #kappa_uncorr = total_sigma * proportion_uncorr * pm.Normal.dist(mu=0, sigma=1, shape=(n_serotypes, n_clusters))
+            #kappa_corr = total_sigma * (1-proportion_uncorr) * pm.MvNormal.dist(mu=pt.zeros(n_clusters), chol=L_cov, shape=(n_serotypes, n_clusters))
+
+            cov_total = (total_sigma * proportion_uncorr)**2 * pt.eye(n_clusters) + \
+                        (total_sigma * (1 - proportion_uncorr))**2 * pt.dot(L_cov, L_cov.T)
+            kappa_total = pm.MvNormal.dist(mu=pt.zeros(n_clusters), cov=cov_total, shape=(n_serotypes, n_clusters))
 
             # compute total new state
             rho = 1
-            new_state = rho * prev_vals + kappa_corr  # (n_serotypes, n_clusters)
+            new_state = rho * prev_vals + kappa_total  # (n_serotypes, n_clusters)
 
             return new_state, collect_default_updates([new_state,])
 
@@ -262,7 +268,7 @@ with pm.Model() as model:
         sequence, update = pytensor.scan(
             fn=step,
             outputs_info=[AR_init],  # not used as we use full prev_vals; see below
-            non_sequences=[rho, total_sigma, chol],
+            non_sequences=[rho, total_sigma, proportion_uncorr, L_cov],
             n_steps=n_months,
             strict=True,
         )
@@ -276,7 +282,8 @@ with pm.Model() as model:
         AR_init,
         rho,
         total_sigma,
-        chol,
+        proportion_uncorr,
+        L_cov,
         dist=ar_1_dist,
         shape=(n_months, n_serotypes, n_clusters) # maybe size
     )
@@ -313,9 +320,9 @@ with pm.Model() as model:
 
 
 # NUTS
-draws=10
+draws=20
 with model:
-    trace = pm.sample(draws, tune=10, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, random_seed=42)
+    trace = pm.sample(draws, tune=20, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, random_seed=42)
 
 
 #######################
@@ -345,7 +352,7 @@ arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
 
 # Traceplot
 variables2plot = [
-                    'total_sigma', 'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
+                    'total_sigma', 'proportion_uncorr', 'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
                 ]
 if distance_matrix:
     variables2plot += ['zeta',]
