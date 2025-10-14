@@ -167,29 +167,6 @@ def critical_rho1(p, gamma):
 
 from pymc.pytensorf import collect_default_updates
 
-# coords = {'time': pd.date_range(start='2000-01-01', end='2024-08-01', freq='MS')}
-# with pm.Model(coords=coords) as ar1_model:
-#     # Define prior -- stationary only
-#     rho = pm.Beta('rho', alpha=1, beta=1)
-#     sigma = pm.Exponential('sigma', lam=1)
-#     x0 = pm.Normal('x0')
-#     # Make a wrapper function for pm.CustomDist that returns a random vector
-#     def ar1_dist(x0, rho, sigma, shape=None): 
-#         # Define a recursive relationship mapping x_{t-1} to x_t
-#         def step(x_tm1, rho, sigma):
-#             x_t = rho * x_tm1 + pm.Normal.dist(0, sigma)
-#             return x_t, collect_default_updates(x_t)
-        
-#         sequence, update = pytensor.scan(step, outputs_info=[x0], non_sequences=[rho,sigma], n_steps = 100, strict=True)
-        
-#         return sequence
-    
-#     obs = pm.CustomDist('obs', x0, rho, sigma, dist=ar1_dist, dims=['time'])
-#     prior = pm.sample_prior_predictive(random_seed=42)
-
-# import sys
-# sys.exit()
-
 with pm.Model() as model:
 
     # --- Subtype Composition Model ---
