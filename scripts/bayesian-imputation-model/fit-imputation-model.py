@@ -217,7 +217,6 @@ with pm.Model() as model:
             kappa_total = pm.MvNormal.dist(mu=pt.zeros(n_clusters), cov=chol_cov_scaled, shape=(n_serotypes, n_clusters))
 
             # compute total new state
-            rho = 1
             new_state = rho * prev_vals + kappa_total  # (n_serotypes, n_clusters)
 
             return new_state, collect_default_updates([new_state,])
@@ -238,7 +237,7 @@ with pm.Model() as model:
     theta_sequence = pm.CustomDist(
         "theta_sequence",
         AR_init,
-        rho,
+        1,
         chol_cov_scaled,
         dist=ar_1_dist,
         shape=(n_months, n_serotypes, n_clusters) # maybe size
