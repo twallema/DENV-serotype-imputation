@@ -166,19 +166,16 @@ from pymc.pytensorf import collect_default_updates
 with pm.Model() as model:
 
     # --- Subtype Composition Model ---
-    # p_{i,s,t} ~ Softmax(\theta_{i,s,t})
-    # \theta_{i,s,t} = \sum_{k=1}^p \rho_k \alpha_{i,s,t-k} +  \kappa_{i,s,t}^{corr}                                    # AR(p) process with RW(1) CAR innovation noise
-    # \kappa_{i,s,t}^{corr} =  \epsilon_{i,s,t}^{corr}  * chol(Q))                                                      # spatially correlated noise
-    # \epislon_{i,s,t}^{corr} ~ \epislon_{i,s,t-1}^{corr} + N(0, \sigma^2)
+    # p_{i,s,t} ~ Softmax(log \theta_{i,s,t})
+    # log \theta_{i,s,t} = \sum_{k=1}^p \rho_k \theta_{i,s,t-k} + \sum_{k=1}^q \psi_k \kappa_{i,s,t-k} + \kappa_{i,s,t}^{corr}      # ARMA(p,q) with                              # AR(p) process with RW(1) CAR innovation noise
+    # \kappa_{i,s,t}^{corr} ~ Normal(0, Q^{-1})                                                                                     # spatially correlated noise
 
-
-    # Try to combine an AR(p) with innovations driven by a RW(1) CAR prior
     ## Regularisation of the overall noise
     total_sigma = pm.HalfNormal("total_sigma", sigma=1)
     a_CAR = pm.Beta("a_CAR", alpha=5, beta=1)
     a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.99)
 
-    ## Temporal correlation structure: Harmonically decaying weights (gamma=1) summing to one to guarantee non-stationarity
+    ## Temporal correlation structure: Quadratically decaying weights (gamma=1) summing to one to guarantee non-stationarity
     gamma = 2
     first_lag_p = pm.Deterministic("first_lag_p", critical_rho1(p, gamma))
     first_lag_q = pm.Deterministic("first_lag_q", critical_rho1(q, gamma))
@@ -284,9 +281,9 @@ with pm.Model() as model:
 
 
 # NUTS
-draws=30
+draws=500
 with model:
-    trace = pm.sample(draws, tune=30, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, random_seed=42)
+    trace = pm.sample(draws, tune=1500, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, random_seed=42)
 
 
 #######################
