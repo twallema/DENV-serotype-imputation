@@ -27,7 +27,7 @@ parser.add_argument("-region_filename", type=str, help="Spatial aggregation clus
 parser.add_argument("-chains", type=int, help="Number of parallel chains.", default=4)
 parser.add_argument("-ID", type=str, help="Sampler output name.")
 parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
-parser.add_argument("-distance_matrix", type=str_to_bool, help="Use distance matrix versus adjacency matrix.", default=False)
+parser.add_argument("-q", type=int, help="Order of MA(q) process.", default=1)
 args = parser.parse_args()
 
 # assign to desired variables
@@ -35,10 +35,10 @@ region_filename = args.region_filename
 chains = args.chains
 ID = args.ID
 p = args.p
-distance_matrix = args.distance_matrix
+q = args.q
 
 # Make folder structure
-output_folder=f'../../data/interim/bayesian-imputation-model_output/AR({p})/distance_matrix-{distance_matrix}/{ID}_{datetime.today().strftime("%Y-%m-%d")}' # Path to backend
+output_folder=f'../../data/interim/bayesian-imputation-model_output/ARMA({p},{q})/{ID}_{datetime.today().strftime("%Y-%m-%d")}' # Path to backend
 # check if samples folder exists, if not, make it
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
@@ -58,15 +58,11 @@ region = clusters.columns.to_list()[0]
 
 mapping = pd.read_csv(f'../../data/interim/spatial_units_mapping.csv')
 
-# Distance matrix
-# ~~~~~~~~~~~~~~~
+# Adjacency matrix
+# ~~~~~~~~~~~~~~~~
 
-if distance_matrix == False:
-    # Load adjacency matrix
-    D = pd.read_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}.csv', index_col=0).values
-else:
-    # Load distance matrix
-    D = pd.read_csv(f'../../data/interim/clusters/distance_matrix_{region_filename}.csv', index_col=0).values
+# Load adjacency matrix
+W = pd.read_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}.csv', index_col=0).values
 
 
 # Incidence data
@@ -159,108 +155,102 @@ n_serotypes = len(sero_cols)
 
 def critical_rho1(p, gamma):
     """Compute the coefficient of the first lag so that the sum of `p` AR coefficients: rho_k = 1/k**gamma sum to zero; resulting in a non-stationary process"""
-    return 1 / pt.sum(1 / np.arange(1, p + 1)[None,:]**gamma[:,None], axis=1)
+    return 1 / pt.sum(1 / np.arange(1, p + 1)[None,:]**gamma, axis=1)
 
 ###############################
 ## Bayesian imputation model ##
 ###############################
 
+from pymc.pytensorf import collect_default_updates
+
 with pm.Model() as model:
 
     # --- Subtype Composition Model ---
-    # p_{i,s,t} ~ Softmax(\theta_{i,s,t})
-    # \theta_{i,s,t} = \sum_{k=1}^p \rho_k \alpha_{i,s,t-k} +  \kappa_{i,s,t}^{corr}                                    # AR(p) process with RW(1) CAR innovation noise
-    # \kappa_{i,s,t}^{corr} =  \epsilon_{i,s,t}^{corr}  * chol(Q))                                                      # spatially correlated noise
-    # \epislon_{i,s,t}^{corr} ~ \epislon_{i,s,t-1}^{corr} + N(0, \sigma^2)
+    # p_{i,s,t} ~ Softmax(log \theta_{i,s,t})
+    # log \theta_{i,s,t} = \sum_{k=1}^p \rho_k \theta_{i,s,t-k} + \sum_{k=1}^q \psi_k \kappa_{i,s,t-k} + \kappa_{i,s,t}^{corr}      # ARMA(p,q) with                              # AR(p) process with RW(1) CAR innovation noise
+    # \kappa_{i,s,t}^{corr} ~ Normal(0, Q^{-1})                                                                                     # spatially correlated noise
 
-
-    # Try to combine an AR(p) with innovations driven by a RW(1) CAR prior
     ## Regularisation of the overall noise
-    total_sigma = pm.HalfNormal("total_sigma", sigma=0.01)
+    total_sigma = pm.HalfNormal("total_sigma", sigma=1)
+    a_CAR = pm.Beta("a_CAR", alpha=5, beta=1)
+    a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.99)
 
-    ## Temporal correlation structure: Harmonically decaying weights (gamma=1) summing to one to guarantee non-stationarity
-    gamma = pt.ones(n_serotypes)
-    first_lag = pm.Deterministic("first_lag", critical_rho1(p, gamma))
-    rho = pm.Deterministic("rho", first_lag[:, None] / ((np.arange(1, p + 1)[None,:])**gamma[:, None]))
+    ## Temporal correlation structure: Quadratically decaying weights (gamma=1) summing to one to guarantee non-stationarity
+    gamma = 2
+    first_lag_p = pm.Deterministic("first_lag_p", critical_rho1(p, gamma))
+    first_lag_q = pm.Deterministic("first_lag_q", critical_rho1(q, gamma))
+    rho = pm.Deterministic("rho", first_lag_p / ((np.arange(1, p + 1))**gamma))
+    psi = pm.Deterministic("psi", first_lag_q / ((np.arange(1, q + 1))**gamma))
 
-    ## Priors for spatial correlation radius (zeta)
-    if distance_matrix: 
-        zeta = pm.HalfNormal("zeta", sigma=100)
-    else:
-        zeta = -1
-        pass
-
-    ## Compute cholesky decomposition of the precision matrix Q
-    # D_shared: (n_clusters, n_clusters)
-    # zeta_car: (n_serotypes, p)
-    # We need to broadcast D against zeta
-    W = pt.exp(-D[None, :, :] / zeta)
-    # Construct degree tensor (matrix equivalent: row sums of weighted distance matrix on diagonal of eye(n_clusters))
-    degree = pt.sum(W, axis=-1)[:, :, None]
-    I = pt.eye(n_clusters)[None, :, :]
-    D = I * degree
-    # Q = D - a * W + jitter
-    a = 1
-    jitter = 1e-6 * pt.diag(pt.ones(n_clusters))
-    jitter = jitter[None, :, :]
-    Q = D - a * W + jitter
-    chol = pt.slinalg.cholesky(Q) # shape (n_serotypes, n_cluster, n_clusters)
+    ## Priors for spatial correlation
+    W = pt.constant(W)                                  # fixed adjacency matrix in graph
+    D = pt.diag(pt.sum(W, axis=1))                      # degree matrix
+    jitter = 1e-5 * pt.eye(n_clusters)                  # small jitter
+    Q = D - a_CAR_trunc * W + jitter                    # build precision matrix Q = D - a * W + jitter  (shape: n_clusters x n_clusters)
+    L_Q = pt.slinalg.cholesky(Q)                        # Cholesky of precision: Q = L_Q @ L_Q.T  (lower-triangular)
+    L_cov = pt.slinalg.solve(L_Q, pt.eye(n_clusters))   # Compute L_cov = L_Q^{-1} such that Sigma = L_cov @ L_cov.T = Q^{-1}
+    chol_cov_scaled = total_sigma * L_cov               # scale covariance cholesky by total_sigma (put scale inside chol)
 
     ## Initialise AR(p) initial condition
     AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(p, n_serotypes, n_clusters))
+    kappa_init = pm.Normal("kappa_init", mu=0, sigma=1, shape=(q, n_serotypes, n_clusters))
 
-    ## Precompute the spatial innovation noise as RW(1)
-    # epsilon_corr shape: (n_entities (= n_serotypes*n_clusters), n_months - p)
-    epsilon_corr_rw = pm.GaussianRandomWalk(
-        "epsilon_corr_rw",
-        sigma=total_sigma,
-        init_dist=pm.Normal.dist(mu=0.0, sigma=1.0, shape=(n_serotypes * n_clusters,)),
-        shape=(n_serotypes * n_clusters, n_months - p),
+    # -------------------------------------------------
+    # log_phi = ARMA(p,q) + \epsilon_t
+    # \epsilon_t ~ MvNormal(0, total_sigma**2 * Q^{-1})
+    # -------------------------------------------------
+
+    # https://www.youtube.com/watch?v=G9VWXZdbtKQ
+    # https://pytensor.readthedocs.io/en/latest/library/scan.html 
+    # https://gist.github.com/ricardoV94/a49b2cc1cf0f32a5f6dc31d6856ccb63#file-pymc_timeseries_ma-ipynb
+    # https://becarioprecario.bitbucket.io/spde-gitbook/ch-intro.html
+
+    # ---- Step 1: Generate a sequence of spatially correlated innovations ----
+    kappa_sequence = pm.MvNormal(
+        "kappa_sequence",
+        mu=pt.zeros((n_serotypes, n_clusters)),
+        chol=chol_cov_scaled,
+        shape=(n_months, n_serotypes, n_clusters)
     )
-    # reshape to (n_serotypes, n_clusters, n_months - p) and then dimshuffle to (n_months - p, n_serotypes, n_clusters)
-    epsilon_corr_rw = epsilon_corr_rw.reshape((n_serotypes, n_clusters, n_months - p)).dimshuffle(2, 0, 1)
 
-    ## AR(p) function
-    def arp_step(epsilon_corr_t, previous_vals, rho, chol):
+    # ---- Step 2: Deterministically reconstruct the ARMA(p,q) sequence using the sequence of innovations ----
+    def reconstruct_arma_pq(kappa_init, AR_init, kappa_sequence, rho, psi):
         """
-        previous_vals: (p, n_serotypes, n_clusters)
-        epsilon_t: (n_serotypes, n_clusters)
-        epsilon_uncorr_t: (n_serotypes, n_clusters)
+        Reconstruct the ARMA(p,q) sequence deterministically from innovations
         """
 
-        # Scale the spatial innovation with the cholesky of the precision matrix
-        kappa_corr = pt.batched_dot(epsilon_corr_t, chol)
-
-        # Compute AR(p) process
-        AR_mean = []
-        for lag in range(p):
-            # Apply temporal weight rho_k (serotype-specific)
-            AR_mean.append(rho[:, lag][:, None] * previous_vals[lag])
-
-        # Sum weighted AR and spatial noise over lags
-        new_vals = sum(AR_mean) + kappa_corr  # (n_serotypes, n_clusters)
-
-        # Shift lag window: insert new_vals at position 0
-        updated_vals = pt.concatenate(
-            [new_vals[None, :, :], previous_vals[:-1]], axis=0
+        # define update function
+        def step(kappa_t, prev_kappa, prev_vals, rho, psi):
+            # update the states
+            ARp = pt.tensordot(rho, prev_vals, axes=[0,0])
+            MAq = pt.tensordot(psi, prev_kappa, axes=[0,0])
+            new_vals = ARp + MAq + kappa_t
+            # shift the lag windows
+            new_prev_kappa = pt.roll(prev_kappa, shift=1, axis=0)
+            new_prev_kappa = pt.set_subtensor(new_prev_kappa[0], kappa_t)
+            new_prev_vals = pt.roll(prev_vals, shift=1, axis=0)
+            new_prev_vals = pt.set_subtensor(new_prev_vals[0], new_vals)
+            return new_prev_kappa, new_prev_vals
+        
+        # perform scanning
+        [_, sequence_vals], _ = pytensor.scan(
+            fn=step,
+            sequences=kappa_sequence,
+            outputs_info=[kappa_init, AR_init],
+            non_sequences=[rho, psi],
         )
+        return sequence_vals[:, 0, :, :] # return states
 
-        return updated_vals
-    
-    # Compute AR(p) function
-    sequences, _ = pytensor.scan(
-        fn=arp_step,
-        sequences=[epsilon_corr_rw,],
-        outputs_info=AR_init,
-        non_sequences=[rho, chol],
+    # Wrap into a pm.Deterministic variable
+    theta_log = pm.Deterministic(
+        "theta_log",
+        reconstruct_arma_pq(kappa_init, AR_init, kappa_sequence, rho, psi)
     )
-    
-    ## Concatenate initial condition 'AR_init': (p, n_serotypes, n_clusters) to output of 'sequences': (n_months - p, p, n_serotypes, n_clusters)
-    theta_log_final = pt.concatenate([pt.repeat(AR_init[None, :, :, :], p, axis=0), sequences], axis=0)
-    ## Slice lag zero (p=0) over full time axis (n_months, n_serotypes, n_clusters) and convert to flat format
-    theta_log = theta_log_final[:, 0, :, :].reshape((len(df), n_serotypes))
 
-    # Softmax transform AR(p)+RW(1, CAR) model
+    # Flatten
+    theta_log = theta_log.reshape((len(df), n_serotypes))
+
+    # Softmax transform ARMA(p,q) model output
     p = pm.Deterministic("p", pm.math.softmax(theta_log, axis=1))
 
     # Hierarchical prior for RW step size per cluster
@@ -271,7 +261,7 @@ with pm.Model() as model:
     logphi_rw = pm.GaussianRandomWalk(
         "logphi_rw",
         sigma=pt.transpose(pt.repeat(logphi_rw_sigma_cluster[:, None], n_months-1, axis=1)),
-        init_dist=pm.Normal.dist(mu=5, sigma=1, shape=n_clusters),
+        init_dist=pm.Normal.dist(mu=3, sigma=1, shape=n_clusters),
         shape=(n_clusters, n_months),
     )
     phi_obs_t = pm.Deterministic("phi_obs_t", pm.math.exp(logphi_rw.flatten()))
@@ -285,15 +275,15 @@ with pm.Model() as model:
     # --- Observed subtyped incidences ---
     Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
 
-
 #######################
 ## Running the model ##
 #######################
 
+
 # NUTS
-draws=100
+draws=500
 with model:
-    trace = pm.sample(draws, tune=100, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(draws, tune=1500, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, random_seed=42)
 
 
 #######################
@@ -307,9 +297,9 @@ arviz.plot_ppc(ppc)
 plt.savefig(f'{output_folder}/ppc.pdf')
 plt.close()    
 
-# Expand data & take 10x as much samples
+# Expand data & take 2x as much samples
 expanded_idata = trace.copy()
-expanded_idata.posterior = trace.posterior.expand_dims(pred_id=5)
+expanded_idata.posterior = trace.posterior.expand_dims(pred_id=2)
 with model:
     ppc = pm.sample_posterior_predictive(
         expanded_idata,
@@ -323,11 +313,8 @@ arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
 
 # Traceplot
 variables2plot = [
-                    'total_sigma', 'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
+                 'total_sigma', 'a_CAR_trunc', 'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
                 ]
-if distance_matrix:
-    variables2plot += ['zeta',]
-
 
 for var in variables2plot:
     arviz.plot_trace(trace, var_names=[var]) 

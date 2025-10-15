@@ -21,7 +21,7 @@ parser.add_argument("-region_filename", type=str, help="Spatial aggregation clus
 parser.add_argument("-date", type=str, help="Date experiment was run.")
 parser.add_argument("-ID", type=str, help="Sampler output name.")
 parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
-parser.add_argument("-distance_matrix", type=str_to_bool, help="Use distance matrix versus adjacency matrix.", default=False)
+parser.add_argument("-q", type=int, help="Order of MA(q) process.", default=1)
 args = parser.parse_args()
 
 # assign to desired variables
@@ -29,10 +29,10 @@ region_filename = args.region_filename
 date = args.date
 ID = args.ID
 p = args.p
-distance_matrix = args.distance_matrix
+q = args.q
 
 # Make folder structure
-output_folder=f'../../data/interim/bayesian-imputation-model_output/AR({p})/distance_matrix-{distance_matrix}/{ID}_{date}' # Path to backend
+output_folder=f'../../data/interim/bayesian-imputation-model_output/ARMA({p},{q})/{ID}_{date}' # Path to backend
 # check if samples folder exists, if not, make it
 if not os.path.exists(output_folder):
     raise ValueError('result not found.')
