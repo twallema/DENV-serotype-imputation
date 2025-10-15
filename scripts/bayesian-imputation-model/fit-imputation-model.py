@@ -28,7 +28,6 @@ parser.add_argument("-chains", type=int, help="Number of parallel chains.", defa
 parser.add_argument("-ID", type=str, help="Sampler output name.")
 parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
 parser.add_argument("-q", type=int, help="Order of MA(q) process.", default=1)
-parser.add_argument("-distance_matrix", type=str_to_bool, help="Use distance matrix versus adjacency matrix.", default=False)
 args = parser.parse_args()
 
 # assign to desired variables
@@ -37,10 +36,9 @@ chains = args.chains
 ID = args.ID
 p = args.p
 q = args.q
-distance_matrix = args.distance_matrix
 
 # Make folder structure
-output_folder=f'../../data/interim/bayesian-imputation-model_output/AR({p})/distance_matrix-{distance_matrix}/{ID}_{datetime.today().strftime("%Y-%m-%d")}' # Path to backend
+output_folder=f'../../data/interim/bayesian-imputation-model_output/ARMA({p},{q})/{ID}_{datetime.today().strftime("%Y-%m-%d")}' # Path to backend
 # check if samples folder exists, if not, make it
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
@@ -60,15 +58,11 @@ region = clusters.columns.to_list()[0]
 
 mapping = pd.read_csv(f'../../data/interim/spatial_units_mapping.csv')
 
-# Distance matrix
-# ~~~~~~~~~~~~~~~
+# Adjacency matrix
+# ~~~~~~~~~~~~~~~~
 
-if distance_matrix == False:
-    # Load adjacency matrix
-    W = pd.read_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}.csv', index_col=0).values
-else:
-    # Load distance matrix
-    W = pd.read_csv(f'../../data/interim/clusters/distance_matrix_{region_filename}.csv', index_col=0).values
+# Load adjacency matrix
+W = pd.read_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}.csv', index_col=0).values
 
 
 # Incidence data
@@ -180,12 +174,12 @@ with pm.Model() as model:
 
     # Try to combine an AR(p) with innovations driven by a RW(1) CAR prior
     ## Regularisation of the overall noise
-    total_sigma = pm.HalfNormal("total_sigma", sigma=0.1)
+    total_sigma = pm.HalfNormal("total_sigma", sigma=1)
     a_CAR = pm.Beta("a_CAR", alpha=5, beta=1)
     a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.99)
 
     ## Temporal correlation structure: Harmonically decaying weights (gamma=1) summing to one to guarantee non-stationarity
-    gamma = 1
+    gamma = 2
     first_lag_p = pm.Deterministic("first_lag_p", critical_rho1(p, gamma))
     first_lag_q = pm.Deterministic("first_lag_q", critical_rho1(q, gamma))
     rho = pm.Deterministic("rho", first_lag_p / ((np.arange(1, p + 1))**gamma))
@@ -206,8 +200,7 @@ with pm.Model() as model:
 
     # -------------------------------------------------
     # log_phi = ARMA(p,q) + \epsilon_t
-    # Variant 1: \epsilon_t ~ MvNormal(0, total_sigma**2 * Q^{-1})
-    # Variant 2: \epsilon_t ~ \epsilon_{t-1} + Normal(0,1) MvNormal(0, total_sigma**2 * Q^{-1})
+    # \epsilon_t ~ MvNormal(0, total_sigma**2 * Q^{-1})
     # -------------------------------------------------
 
     # https://www.youtube.com/watch?v=G9VWXZdbtKQ
@@ -291,9 +284,9 @@ with pm.Model() as model:
 
 
 # NUTS
-draws=20
+draws=30
 with model:
-    trace = pm.sample(draws, tune=20, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, random_seed=42)
+    trace = pm.sample(draws, tune=30, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, random_seed=42)
 
 
 #######################
@@ -325,9 +318,6 @@ arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
 variables2plot = [
                  'total_sigma', 'a_CAR_trunc', 'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
                 ]
-if distance_matrix:
-    variables2plot += ['zeta',]
-
 
 for var in variables2plot:
     arviz.plot_trace(trace, var_names=[var]) 
