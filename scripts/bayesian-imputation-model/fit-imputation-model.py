@@ -24,21 +24,17 @@ def str_to_bool(value):
 # How to run: python fit-model.py -ID test -p 2 -distance_matrix False
 parser = argparse.ArgumentParser()
 parser.add_argument("-region_filename", type=str, help="Spatial aggregation clustering was performed on.", default='rgint')
-parser.add_argument("-chains", type=int, help="Number of parallel chains.", default=4)
+parser.add_argument("-chains", type=int, help="Number of parallel chains.", default=1)
 parser.add_argument("-ID", type=str, help="Sampler output name.")
-parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
-parser.add_argument("-distance_matrix", type=str_to_bool, help="Use distance matrix versus adjacency matrix.", default=False)
 args = parser.parse_args()
 
 # assign to desired variables
 region_filename = args.region_filename
 chains = args.chains
 ID = args.ID
-p = args.p
-distance_matrix = args.distance_matrix
 
 # Make folder structure
-output_folder=f'../../data/interim/bayesian-imputation-model_output/AR({p})/distance_matrix-{distance_matrix}/{ID}_{datetime.today().strftime("%Y-%m-%d")}' # Path to backend
+output_folder=f'../../data/interim/bayesian-imputation-model_output/{ID}_{datetime.today().strftime("%Y-%m-%d")}' # Path to backend
 # check if samples folder exists, if not, make it
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
@@ -61,12 +57,8 @@ mapping = pd.read_csv(f'../../data/interim/spatial_units_mapping.csv')
 # Distance matrix
 # ~~~~~~~~~~~~~~~
 
-if distance_matrix == False:
-    # Load adjacency matrix
-    D = pd.read_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}.csv', index_col=0).values
-else:
-    # Load distance matrix
-    D = pd.read_csv(f'../../data/interim/clusters/distance_matrix_{region_filename}.csv', index_col=0).values
+# Load distance matrix
+D = pd.read_csv(f'../../data/interim/clusters/distance_matrix_{region_filename}.csv', index_col=0).values
 
 
 # Incidence data
@@ -178,7 +170,7 @@ def ou_kernel(x, ell):
 with pm.Model() as model:
 
     # --- Kernel hyperpriors ---
-    total_sigma = pm.HalfNormal("total_sigma", sigma=1)
+    total_sigma = pm.HalfNormal("total_sigma", sigma=0.1)
     ell_s = pm.HalfNormal("ell_s", sigma=100)
     ell_t = pm.HalfNormal("ell_t", sigma=12)
 
@@ -194,30 +186,26 @@ with pm.Model() as model:
     chol_time = pt.slinalg.cholesky(K_time)  # (n_months x n_months)
 
     # --- Standard normal latent field ---
-    #Z = pm.Normal("Z", mu=0, sigma=1, shape=(n_clusters, n_months, n_serotypes))
+    Z = pm.Normal("Z", mu=0, sigma=total_sigma, shape=(n_clusters, n_months, n_serotypes))
 
-    # --- RW(1) latent field ---
-    Z_rw = pm.GaussianRandomWalk(
-        "Z_rw",
-        sigma=total_sigma,
-        init_dist=pm.Normal.dist(mu=0.0, sigma=1.0, shape=(n_clusters, n_serotypes)),
-        shape=(n_clusters, n_serotypes, n_months),
-    )
-    # reshape to (n_clusters, n_months, n_serotypes)
-    Z_rw = Z_rw.dimshuffle(0, 2, 1)
-
+    # # RW(1) latent field
+    # Z = pm.GaussianRandomWalk(
+    #     "Z",
+    #     sigma=total_sigma,
+    #     init_dist=pm.Normal.dist(mu=0.0, sigma=1.0, shape=(n_clusters, n_serotypes)),
+    #     shape=(n_clusters, n_serotypes, n_months),
+    # )
+    # # reshape to (n_clusters, n_months, n_serotypes)
+    # Z = Z.dimshuffle(0, 2, 1)
 
     # --- Apply Kronecker Cholesky ---
     # Using vectorized batched_dot: Ls @ Z[:,:,s] @ Lt.T for each serotype
     theta_list = []
     for s in range(n_serotypes):
-        theta_s = pt.dot(chol_space, Z_rw[:,:,s]).dot(chol_time.T)
+        theta_s = pt.dot(chol_space, Z[:,:,s]).dot(chol_time.T)
         theta_list.append(theta_s)
     theta = pt.stack(theta_list, axis=-1)  # (n_clusters, n_months, n_serotypes)
     theta = theta.dimshuffle(1,0,2)        # (n_months, n_clusters, n_serotypes)
-
-    # Scale by single amplitude
-    #theta = total_sigma * theta
 
     # Flatten to match observation ordering: (n_months*n_clusters, n_serotypes)
     theta_for_softmax = theta.reshape((n_months * n_clusters, n_serotypes))
@@ -243,137 +231,14 @@ with pm.Model() as model:
     # Compute variance inflation of dirichlet multinomial compared to multinomial
     VIF = pm.Deterministic("VIF", (N_typed + phi_obs_t) / (1 + phi_obs_t))
 
-
-# with pm.Model() as model:
-
-#     # --- Subtype Composition Model ---
-#     # p_{i,s,t} ~ Softmax(\theta_{i,s,t})
-#     # \theta_{i,s,t} = \sum_{k=1}^p \rho_k \alpha_{i,s,t-k} +  \kappa_{i,s,t}^{corr}                                    # AR(p) process with RW(1) CAR innovation noise
-#     # \kappa_{i,s,t}^{corr} =  \epsilon_{i,s,t}^{corr}  * chol(Q))                                                      # spatially correlated noise
-#     # \epislon_{i,s,t}^{corr} ~ \epislon_{i,s,t-1}^{corr} + N(0, \sigma^2)
-
-
-#     # Try to combine an AR(p) with innovations driven by a RW(1) CAR prior
-#     ## Regularisation of the overall noise
-#     total_sigma = pm.HalfNormal("total_sigma", sigma=0.01)
-
-#     ## Temporal correlation structure: Harmonically decaying weights (gamma=1) summing to one to guarantee non-stationarity
-#     gamma = pt.ones(n_serotypes)
-#     first_lag = pm.Deterministic("first_lag", critical_rho1(p, gamma))
-#     rho = pm.Deterministic("rho", first_lag[:, None] / ((np.arange(1, p + 1)[None,:])**gamma[:, None]))
-
-#     ## Priors for spatial correlation radius (zeta)
-#     if distance_matrix: 
-#         zeta = pm.HalfNormal("zeta", sigma=100)
-#     else:
-#         zeta = -1
-#         pass
-
-#     ## Compute cholesky decomposition of the precision matrix Q
-#     # D_shared: (n_clusters, n_clusters)
-#     # zeta_car: (n_serotypes, p)
-#     # We need to broadcast D against zeta
-#     W = pt.exp(-D[None, :, :] / zeta)
-#     # Construct degree tensor (matrix equivalent: row sums of weighted distance matrix on diagonal of eye(n_clusters))
-#     degree = pt.sum(W, axis=-1)[:, :, None]
-#     I = pt.eye(n_clusters)[None, :, :]
-#     D = I * degree
-#     # Q = D - a * W + jitter
-#     a = 1
-#     jitter = 1e-6 * pt.diag(pt.ones(n_clusters))
-#     jitter = jitter[None, :, :]
-#     Q = D - a * W + jitter
-#     chol = pt.slinalg.cholesky(Q) # shape (n_serotypes, n_cluster, n_clusters)
-
-#     ## Initialise AR(p) initial condition
-#     AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(p, n_serotypes, n_clusters))
-
-#     ## Precompute the spatial innovation noise as RW(1)
-#     # epsilon_corr shape: (n_entities (= n_serotypes*n_clusters), n_months - p)
-#     epsilon_corr_rw = pm.GaussianRandomWalk(
-#         "epsilon_corr_rw",
-#         sigma=total_sigma,
-#         init_dist=pm.Normal.dist(mu=0.0, sigma=1.0, shape=(n_serotypes * n_clusters,)),
-#         shape=(n_serotypes * n_clusters, n_months - p),
-#     )
-#     # reshape to (n_serotypes, n_clusters, n_months - p) and then dimshuffle to (n_months - p, n_serotypes, n_clusters)
-#     epsilon_corr_rw = epsilon_corr_rw.reshape((n_serotypes, n_clusters, n_months - p)).dimshuffle(2, 0, 1)
-
-#     ## AR(p) function
-#     def arp_step(epsilon_corr_t, previous_vals, rho, chol):
-#         """
-#         previous_vals: (p, n_serotypes, n_clusters)
-#         epsilon_t: (n_serotypes, n_clusters)
-#         epsilon_uncorr_t: (n_serotypes, n_clusters)
-#         """
-
-#         # Scale the spatial innovation with the cholesky of the precision matrix
-#         kappa_corr = pt.batched_dot(epsilon_corr_t, chol)
-
-#         # Compute AR(p) process
-#         AR_mean = []
-#         for lag in range(p):
-#             # Apply temporal weight rho_k (serotype-specific)
-#             AR_mean.append(rho[:, lag][:, None] * previous_vals[lag])
-
-#         # Sum weighted AR and spatial noise over lags
-#         new_vals = sum(AR_mean) + kappa_corr  # (n_serotypes, n_clusters)
-
-#         # Shift lag window: insert new_vals at position 0
-#         updated_vals = pt.concatenate(
-#             [new_vals[None, :, :], previous_vals[:-1]], axis=0
-#         )
-
-#         return updated_vals
-    
-#     # Compute AR(p) function
-#     sequences, _ = pytensor.scan(
-#         fn=arp_step,
-#         sequences=[epsilon_corr_rw,],
-#         outputs_info=AR_init,
-#         non_sequences=[rho, chol],
-#     )
-    
-#     ## Concatenate initial condition 'AR_init': (p, n_serotypes, n_clusters) to output of 'sequences': (n_months - p, p, n_serotypes, n_clusters)
-#     theta_log_final = pt.concatenate([pt.repeat(AR_init[None, :, :, :], p, axis=0), sequences], axis=0)
-#     ## Slice lag zero (p=0) over full time axis (n_months, n_serotypes, n_clusters) and convert to flat format
-#     theta_log = theta_log_final[:, 0, :, :].reshape((len(df), n_serotypes))
-
-#     # Softmax transform AR(p)+RW(1, CAR) model
-#     p = pm.Deterministic("p", pm.math.softmax(theta_log, axis=1))
-
-#     # Hierarchical prior for RW step size per cluster
-#     logphi_rw_sigma_hierarchical_mean = pm.HalfNormal("logphi_rw_sigma_hierarchical_mean", sigma=1)
-#     logphi_rw_sigma_cluster = pm.HalfNormal("logphi_rw_sigma_cluster", sigma=logphi_rw_sigma_hierarchical_mean, shape=n_clusters)
-
-#     # Cluster-specific Gaussian random walks for log(phi)
-#     logphi_rw = pm.GaussianRandomWalk(
-#         "logphi_rw",
-#         sigma=pt.transpose(pt.repeat(logphi_rw_sigma_cluster[:, None], n_months-1, axis=1)),
-#         init_dist=pm.Normal.dist(mu=5, sigma=1, shape=n_clusters),
-#         shape=(n_clusters, n_months),
-#     )
-#     phi_obs_t = pm.Deterministic("phi_obs_t", pm.math.exp(logphi_rw.flatten()))
-
-#     # Compute Dirichlet concentration parameter
-#     alpha = phi_obs_t[:, None] * p
-
-#     # Compute variance inflation of dirichlet multinomial compared to multinomial
-#     VIF = pm.Deterministic("VIF", (N_typed + phi_obs_t) / (1 + phi_obs_t))
-
-#     # --- Observed subtyped incidences ---
-#     Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
-
-
 #######################
 ## Running the model ##
 #######################
 
 # NUTS
-chains=1
-draws=200
+draws=50
 with model:
-    trace = pm.sample(draws, tune=1000, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(draws, tune=50, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 
 #######################
@@ -401,12 +266,7 @@ with model:
 arviz.to_netcdf(trace, f"{output_folder}/trace.nc")
 arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
 
-# Traceplot
-#variables2plot = [
-#                    'total_sigma', 'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
-#                ]
-#if distance_matrix:
-#    variables2plot += ['zeta',]
+# Traceplots
 variables2plot = [
                     'total_sigma', 'ell_s', 'ell_t', 'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
                 ]
