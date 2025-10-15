@@ -170,7 +170,7 @@ def ou_kernel(x, ell):
 with pm.Model() as model:
 
     # --- Kernel hyperpriors ---
-    total_sigma = pm.HalfNormal("total_sigma", sigma=0.02) # --> Final inferred value of around ~0.3-0.35 yields optimal smoothing
+    total_sigma = 0.35 #pm.HalfNormal("total_sigma", sigma=0.02) # --> Final inferred value of around ~0.35 yields optimal smoothing imo
     ell_s = pm.HalfNormal("ell_s", sigma=100)
     ell_t = pm.HalfNormal("ell_t", sigma=12)
 
@@ -226,9 +226,9 @@ with pm.Model() as model:
 #######################
 
 # NUTS
-draws=50
+draws=25
 with model:
-    trace = pm.sample(draws, tune=50, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(draws, tune=200, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 
 #######################
@@ -258,7 +258,7 @@ arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
 
 # Traceplots
 variables2plot = [
-                   'total_sigma', 'ell_s', 'ell_t', 'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
+                   'ell_s', 'ell_t', 'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
                 ]
 
 for var in variables2plot:
