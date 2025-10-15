@@ -225,12 +225,10 @@ with pm.Model() as model:
             ARp = pt.tensordot(rho, prev_vals, axes=[0,0])
             MAq = pt.tensordot(psi, prev_kappa, axes=[0,0])
             new_vals = ARp + MAq + kappa_t
-            # shift the lag windows
-            new_prev_kappa = pt.roll(prev_kappa, shift=1, axis=0)
-            new_prev_kappa = pt.set_subtensor(new_prev_kappa[0], kappa_t)
-            new_prev_vals = pt.roll(prev_vals, shift=1, axis=0)
-            new_prev_vals = pt.set_subtensor(new_prev_vals[0], new_vals)
-            return new_prev_kappa, new_prev_vals
+            # Shift lag windows
+            new_kappa = pt.concatenate([kappa_t[None, :, :], prev_kappa[:-1]], axis=0)
+            new_vals = pt.concatenate([new_vals[None, :, :], prev_vals[:-1]], axis=0)
+            return new_kappa, new_vals
         
         # perform scanning
         [_, sequence_vals], _ = pytensor.scan(
