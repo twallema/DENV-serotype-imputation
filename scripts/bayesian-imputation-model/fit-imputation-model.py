@@ -27,6 +27,7 @@ parser.add_argument("-region_filename", type=str, help="Spatial aggregation clus
 parser.add_argument("-chains", type=int, help="Number of parallel chains.", default=4)
 parser.add_argument("-ID", type=str, help="Sampler output name.")
 parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
+parser.add_argument("-q", type=int, help="Order of MA(q) process.", default=1)
 parser.add_argument("-distance_matrix", type=str_to_bool, help="Use distance matrix versus adjacency matrix.", default=False)
 args = parser.parse_args()
 
@@ -35,6 +36,7 @@ region_filename = args.region_filename
 chains = args.chains
 ID = args.ID
 p = args.p
+q = args.q
 distance_matrix = args.distance_matrix
 
 # Make folder structure
@@ -178,106 +180,130 @@ with pm.Model() as model:
 
     # Try to combine an AR(p) with innovations driven by a RW(1) CAR prior
     ## Regularisation of the overall noise
-    total_sigma = pm.HalfNormal("total_sigma", sigma=0.01)
-    a_CAR = pm.Beta("a_CAR", alpha=3, beta=1)
-    a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.90)
+    total_sigma = pm.HalfNormal("total_sigma", sigma=0.1)
+    a_CAR = pm.Beta("a_CAR", alpha=5, beta=1)
+    a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.999)
 
     ## Temporal correlation structure: Harmonically decaying weights (gamma=1) summing to one to guarantee non-stationarity
     gamma = pt.ones(n_serotypes)
-    first_lag = pm.Deterministic("first_lag", critical_rho1(p, gamma))
-    rho = pm.Deterministic("rho", first_lag[:, None] / ((np.arange(1, p + 1)[None,:])**gamma[:, None]))
+    first_lag_p = pm.Deterministic("first_lag_p", critical_rho1(p, gamma))
+    first_lag_q = pm.Deterministic("first_lag_q", critical_rho1(q, gamma))
+    rho = pm.Deterministic("rho", first_lag_p[:, None] / ((np.arange(1, p + 1)[None,:])**gamma[:, None]))
+    psi = pm.Deterministic("psi", first_lag_q[:, None] / ((np.arange(1, q + 1)[None,:])**gamma[:, None]))
 
     ## Priors for spatial correlation
     W = pt.constant(W)                                  # fixed adjacency matrix in graph
     D = pt.diag(pt.sum(W, axis=1))                      # degree matrix
-    jitter = 1e-3 * pt.eye(n_clusters)                  # small jitter
+    jitter = 1e-5 * pt.eye(n_clusters)                  # small jitter
     Q = D - a_CAR_trunc * W + jitter                    # build precision matrix Q = D - a * W + jitter  (shape: n_clusters x n_clusters)
     L_Q = pt.slinalg.cholesky(Q)                        # Cholesky of precision: Q = L_Q @ L_Q.T  (lower-triangular)
     L_cov = pt.slinalg.solve(L_Q, pt.eye(n_clusters))   # Compute L_cov = L_Q^{-1} such that Sigma = L_cov @ L_cov.T = Q^{-1}
     chol_cov_scaled = total_sigma * L_cov               # scale covariance cholesky by total_sigma (put scale inside chol)
 
     ## Initialise AR(p) initial condition
-    AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(n_serotypes, n_clusters))
-    kappa_init = pm.Normal("kappa_init", mu=0, sigma=1, shape=(n_serotypes, n_clusters))
+    AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(p, n_serotypes, n_clusters))
+    kappa_init = pm.Normal("kappa_init", mu=0, sigma=1, shape=(q, n_serotypes, n_clusters))
 
-    # -------------------
-    # log_phi ~ ARMA(1,1)
-    # -------------------
+    # -------------------------------------------------
+    # log_phi = ARMA(p,q) + \epsilon_t
+    # Variant 1: \epsilon_t ~ MvNormal(0, total_sigma**2 * Q^{-1})
+    # Variant 2: \epsilon_t ~ \epsilon_{t-1} + Normal(0,1) MvNormal(0, total_sigma**2 * Q^{-1})
+    # -------------------------------------------------
 
     # https://www.youtube.com/watch?v=G9VWXZdbtKQ
     # https://pytensor.readthedocs.io/en/latest/library/scan.html 
     # https://gist.github.com/ricardoV94/a49b2cc1cf0f32a5f6dc31d6856ccb63#file-pymc_timeseries_ma-ipynb
     # https://becarioprecario.bitbucket.io/spde-gitbook/ch-intro.html
 
-    # ---- Step 1: Construct a CustomDist that returns the innovations of the ARMA(1,1) trajectory ---- 
+    # # ---- Step 1: Construct a CustomDist that returns the innovations of the ARMA(1,1) trajectory ---- 
+    # def arma_pq_dist(kappa_init, AR_init, rho, psi, chol_cov_scaled, shape=None):
+    #     """
+    #     This function is called by pm.CustomDist; it must return a sequence of random
+    #     variables built with .dist(...) inside the step so each time point is a true RV.
+    #     In the example below 'new_vals' -- which is the variable whose trajectory we are interested in -- cannot be returned 
+    #     """
 
-    def arma_11_dist(kappa_init, AR_init, rho, psi, chol_cov_scaled, shape=None):
-        """
-        This function is called by pm.CustomDist; it must return a sequence of random
-        variables built with .dist(...) inside the step so each time point is a true RV.
-        In the example below 'new_vals' -- which is the variable whose trajectory we are interested in -- cannot be returned 
-        """
+    #     # helper: the single-step function for scan
+    #     def arma_pq_step(prev_kappa, prev_vals, rho, psi, chol_cov_scaled):
 
-        # helper: the single-step function for scan
-        def arma_11_step(prev_kappa, prev_vals, rho, psi, chol_cov_scaled):
+    #         # draw a spatially correlated innovation for the current time step
+    #         new_kappa = pm.MvNormal.dist(mu=pt.zeros(n_clusters), chol=chol_cov_scaled, shape=(n_serotypes, n_clusters))
 
-            # draw a spatially correlated innovation for the current time step
-            new_kappa = pm.MvNormal.dist(mu=pt.zeros(n_clusters), cov=chol_cov_scaled, shape=(n_serotypes, n_clusters))
+    #         # update the states
+    #         ARp = sum(rho[:, lag][:, None] * prev_vals[lag] for lag in range(p))
+    #         MAq = sum(psi[:, lag][:, None] * prev_kappa[lag] for lag in range(q))
+    #         new_vals = ARp + MAq + new_kappa # (n_serotypes, n_clusters)
 
-            # compute total new state
-            new_vals = rho * prev_vals + psi * prev_kappa + new_kappa  # (n_serotypes, n_clusters)
+    #         # Shift lag windows
+    #         new_kappa = pt.concatenate([new_kappa[None, :, :], prev_kappa[:-1]], axis=0)
+    #         new_vals = pt.concatenate([new_vals[None, :, :], prev_vals[:-1]], axis=0)
+            
+    #         return (new_kappa, new_vals), collect_default_updates([new_kappa, new_vals])
 
-            return (new_kappa, new_vals), collect_default_updates([new_kappa, new_vals])
+    #     # run the scan function to generate the sequence of innovations
+    #     [sequence_kappa, _], _ = pytensor.scan(
+    #         fn=arma_pq_step,
+    #         outputs_info=[kappa_init, AR_init],  # not used as we use full prev_vals; see below
+    #         non_sequences=[rho, psi, chol_cov_scaled],
+    #         n_steps=n_months,
+    #         strict=True,
+    #     )
+    #     # cannot return the prev_vals directly :'(
+    #     return sequence_kappa[:, 0, :, :]
 
-        # run the scan function to generate the sequence of innovations
-        [sequence_kappa, _], _ = pytensor.scan(
-            fn=arma_11_step,
-            outputs_info=[kappa_init, AR_init],  # not used as we use full prev_vals; see below
-            non_sequences=[rho, psi, chol_cov_scaled],
-            n_steps=n_months,
-            strict=True,
-        )
-        # cannot return the prev_vals directly :'(
-        return sequence_kappa
+    # # Create the CustomDist node representing the distribution of innovations (n_steps, n_serotypes, n_clusters) --> these are fit to the data
+    # kappa_sequence = pm.CustomDist(
+    #     "kappa_sequence",
+    #     kappa_init,
+    #     AR_init,
+    #     rho,
+    #     psi,
+    #     chol_cov_scaled,
+    #     dist=arma_pq_dist,
+    #     shape=(n_months, n_serotypes, n_clusters) # maybe size
+    # )
 
-    # Create the CustomDist node representing the distribution of innovations (n_steps, n_serotypes, n_clusters) --> these are fit to the data
-    theta_sequence = pm.CustomDist(
-        "theta_sequence",
-        kappa_init,
-        AR_init,
-        1,
-        1,
-        chol_cov_scaled,
-        dist=arma_11_dist,
-        shape=(n_months, n_serotypes, n_clusters) # maybe size
+    
+
+
+    # ---- Step 1: Generate a sequence of spatially correlated innovations ----
+    kappa_sequence = pm.MvNormal(
+        "kappa_sequence",
+        mu=pt.zeros((n_serotypes, n_clusters)),
+        chol=chol_cov_scaled,
+        shape=(n_months, n_serotypes, n_clusters)
     )
 
-    # ---- Step 2: Deterministically reconstruct the ARMA(1,1) sequence using the innovations ----
-    def reconstruct_arma(kappa_init, AR_init, theta_sequence, rho, psi):
+    # ---- Step 2: Deterministically reconstruct the ARMA(p,q) sequence using the sequence of innovations ----
+    def reconstruct_arma_pq(kappa_init, AR_init, kappa_sequence, rho, psi):
         """
-        Reconstruct the ARMA(1,1) sequence deterministically from innovations
+        Reconstruct the ARMA(p,q) sequence deterministically from innovations
         """
 
-        # Actually we need to carry prev_kappa too:
-        def step_full(kappa_t, prev_kappa, prev_vals, rho, psi):
-            new_val = rho * prev_vals + psi * prev_kappa + kappa_t
-            return kappa_t, new_val  # carry (prev_val, prev_kappa), output new_val
-
-        # Scan
-        outputs, _ = pytensor.scan(
-            fn=step_full,
-            outputs_info=[kappa_init, AR_init],  # (prev_val, prev_kappa)
-            sequences=theta_sequence,
+        # define update function
+        def step(kappa_t, prev_kappa, prev_vals, rho, psi):
+            # update the states
+            ARp = sum(rho[:, lag][:, None] * prev_vals[lag] for lag in range(p))
+            MAq = sum(psi[:, lag][:, None] * prev_kappa[lag] for lag in range(q))
+            new_vals = ARp + MAq + kappa_t
+            # shift the lag windows
+            new_kappa = pt.concatenate([kappa_t[None, :, :], prev_kappa[:-1]], axis=0)
+            new_vals = pt.concatenate([new_vals[None, :, :], prev_vals[:-1]], axis=0)
+            return new_kappa, new_vals
+        
+        # perform scanning
+        [_, sequence_vals], _ = pytensor.scan(
+            fn=step,
+            sequences=kappa_sequence,
+            outputs_info=[kappa_init, AR_init],
             non_sequences=[rho, psi],
         )
-
-        arma_sequence = outputs[1]  # deterministic ARMA trajectory
-        return arma_sequence
+        return sequence_vals[:, 0, :, :] # return states
 
     # Wrap into a pm.Deterministic variable
     theta_log = pm.Deterministic(
         "theta_log",
-        reconstruct_arma(kappa_init, AR_init, theta_sequence, 1, 1)
+        reconstruct_arma_pq(kappa_init, AR_init, kappa_sequence, rho, psi)
     )
 
     # Flatten
@@ -314,9 +340,9 @@ with pm.Model() as model:
 
 
 # NUTS
-draws=500
+draws=20
 with model:
-    trace = pm.sample(draws, tune=1500, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, random_seed=42)
+    trace = pm.sample(draws, tune=20, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, random_seed=42)
 
 
 #######################
