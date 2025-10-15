@@ -170,7 +170,7 @@ def ou_kernel(x, ell):
 with pm.Model() as model:
 
     # --- Kernel hyperpriors ---
-    total_sigma = pm.HalfNormal("total_sigma", sigma=0.1)
+    total_sigma = pm.HalfNormal("total_sigma", sigma=0.02) # --> Final inferred value of around ~0.3-0.35 yields optimal smoothing
     ell_s = pm.HalfNormal("ell_s", sigma=100)
     ell_t = pm.HalfNormal("ell_t", sigma=12)
 
@@ -187,16 +187,6 @@ with pm.Model() as model:
 
     # --- Standard normal latent field ---
     Z = pm.Normal("Z", mu=0, sigma=total_sigma, shape=(n_clusters, n_months, n_serotypes))
-
-    # # RW(1) latent field
-    # Z = pm.GaussianRandomWalk(
-    #     "Z",
-    #     sigma=total_sigma,
-    #     init_dist=pm.Normal.dist(mu=0.0, sigma=1.0, shape=(n_clusters, n_serotypes)),
-    #     shape=(n_clusters, n_serotypes, n_months),
-    # )
-    # # reshape to (n_clusters, n_months, n_serotypes)
-    # Z = Z.dimshuffle(0, 2, 1)
 
     # --- Apply Kronecker Cholesky ---
     # Using vectorized batched_dot: Ls @ Z[:,:,s] @ Lt.T for each serotype
@@ -254,7 +244,7 @@ plt.close()
 
 # Expand data & take 10x as much samples
 expanded_idata = trace.copy()
-expanded_idata.posterior = trace.posterior.expand_dims(pred_id=5)
+expanded_idata.posterior = trace.posterior.expand_dims(pred_id=10)
 with model:
     ppc = pm.sample_posterior_predictive(
         expanded_idata,
@@ -268,7 +258,7 @@ arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
 
 # Traceplots
 variables2plot = [
-                    'total_sigma', 'ell_s', 'ell_t', 'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
+                   'total_sigma', 'ell_s', 'ell_t', 'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
                 ]
 
 for var in variables2plot:
