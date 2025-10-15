@@ -161,7 +161,7 @@ n_serotypes = len(sero_cols)
 
 def critical_rho1(p, gamma):
     """Compute the coefficient of the first lag so that the sum of `p` AR coefficients: rho_k = 1/k**gamma sum to zero; resulting in a non-stationary process"""
-    return 1 / pt.sum(1 / np.arange(1, p + 1)[None,:]**gamma[:,None], axis=1)
+    return 1 / pt.sum(1 / np.arange(1, p + 1)[None,:]**gamma, axis=1)
 
 ###############################
 ## Bayesian imputation model ##
@@ -182,14 +182,14 @@ with pm.Model() as model:
     ## Regularisation of the overall noise
     total_sigma = pm.HalfNormal("total_sigma", sigma=0.1)
     a_CAR = pm.Beta("a_CAR", alpha=5, beta=1)
-    a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.999)
+    a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.99)
 
     ## Temporal correlation structure: Harmonically decaying weights (gamma=1) summing to one to guarantee non-stationarity
-    gamma = pt.ones(n_serotypes)
+    gamma = 1
     first_lag_p = pm.Deterministic("first_lag_p", critical_rho1(p, gamma))
     first_lag_q = pm.Deterministic("first_lag_q", critical_rho1(q, gamma))
-    rho = pm.Deterministic("rho", first_lag_p[:, None] / ((np.arange(1, p + 1)[None,:])**gamma[:, None]))
-    psi = pm.Deterministic("psi", first_lag_q[:, None] / ((np.arange(1, q + 1)[None,:])**gamma[:, None]))
+    rho = pm.Deterministic("rho", first_lag_p / ((np.arange(1, p + 1))**gamma))
+    psi = pm.Deterministic("psi", first_lag_q / ((np.arange(1, q + 1))**gamma))
 
     ## Priors for spatial correlation
     W = pt.constant(W)                                  # fixed adjacency matrix in graph
@@ -215,57 +215,6 @@ with pm.Model() as model:
     # https://gist.github.com/ricardoV94/a49b2cc1cf0f32a5f6dc31d6856ccb63#file-pymc_timeseries_ma-ipynb
     # https://becarioprecario.bitbucket.io/spde-gitbook/ch-intro.html
 
-    # # ---- Step 1: Construct a CustomDist that returns the innovations of the ARMA(1,1) trajectory ---- 
-    # def arma_pq_dist(kappa_init, AR_init, rho, psi, chol_cov_scaled, shape=None):
-    #     """
-    #     This function is called by pm.CustomDist; it must return a sequence of random
-    #     variables built with .dist(...) inside the step so each time point is a true RV.
-    #     In the example below 'new_vals' -- which is the variable whose trajectory we are interested in -- cannot be returned 
-    #     """
-
-    #     # helper: the single-step function for scan
-    #     def arma_pq_step(prev_kappa, prev_vals, rho, psi, chol_cov_scaled):
-
-    #         # draw a spatially correlated innovation for the current time step
-    #         new_kappa = pm.MvNormal.dist(mu=pt.zeros(n_clusters), chol=chol_cov_scaled, shape=(n_serotypes, n_clusters))
-
-    #         # update the states
-    #         ARp = sum(rho[:, lag][:, None] * prev_vals[lag] for lag in range(p))
-    #         MAq = sum(psi[:, lag][:, None] * prev_kappa[lag] for lag in range(q))
-    #         new_vals = ARp + MAq + new_kappa # (n_serotypes, n_clusters)
-
-    #         # Shift lag windows
-    #         new_kappa = pt.concatenate([new_kappa[None, :, :], prev_kappa[:-1]], axis=0)
-    #         new_vals = pt.concatenate([new_vals[None, :, :], prev_vals[:-1]], axis=0)
-            
-    #         return (new_kappa, new_vals), collect_default_updates([new_kappa, new_vals])
-
-    #     # run the scan function to generate the sequence of innovations
-    #     [sequence_kappa, _], _ = pytensor.scan(
-    #         fn=arma_pq_step,
-    #         outputs_info=[kappa_init, AR_init],  # not used as we use full prev_vals; see below
-    #         non_sequences=[rho, psi, chol_cov_scaled],
-    #         n_steps=n_months,
-    #         strict=True,
-    #     )
-    #     # cannot return the prev_vals directly :'(
-    #     return sequence_kappa[:, 0, :, :]
-
-    # # Create the CustomDist node representing the distribution of innovations (n_steps, n_serotypes, n_clusters) --> these are fit to the data
-    # kappa_sequence = pm.CustomDist(
-    #     "kappa_sequence",
-    #     kappa_init,
-    #     AR_init,
-    #     rho,
-    #     psi,
-    #     chol_cov_scaled,
-    #     dist=arma_pq_dist,
-    #     shape=(n_months, n_serotypes, n_clusters) # maybe size
-    # )
-
-    
-
-
     # ---- Step 1: Generate a sequence of spatially correlated innovations ----
     kappa_sequence = pm.MvNormal(
         "kappa_sequence",
@@ -283,13 +232,15 @@ with pm.Model() as model:
         # define update function
         def step(kappa_t, prev_kappa, prev_vals, rho, psi):
             # update the states
-            ARp = sum(rho[:, lag][:, None] * prev_vals[lag] for lag in range(p))
-            MAq = sum(psi[:, lag][:, None] * prev_kappa[lag] for lag in range(q))
+            ARp = pt.tensordot(rho, prev_vals, axes=[0,0])
+            MAq = pt.tensordot(psi, prev_kappa, axes=[0,0])
             new_vals = ARp + MAq + kappa_t
             # shift the lag windows
-            new_kappa = pt.concatenate([kappa_t[None, :, :], prev_kappa[:-1]], axis=0)
-            new_vals = pt.concatenate([new_vals[None, :, :], prev_vals[:-1]], axis=0)
-            return new_kappa, new_vals
+            new_prev_kappa = pt.roll(prev_kappa, shift=1, axis=0)
+            new_prev_kappa = pt.set_subtensor(new_prev_kappa[0], kappa_t)
+            new_prev_vals = pt.roll(prev_vals, shift=1, axis=0)
+            new_prev_vals = pt.set_subtensor(new_prev_vals[0], new_vals)
+            return new_prev_kappa, new_prev_vals
         
         # perform scanning
         [_, sequence_vals], _ = pytensor.scan(
@@ -309,7 +260,7 @@ with pm.Model() as model:
     # Flatten
     theta_log = theta_log.reshape((len(df), n_serotypes))
 
-    # Softmax transform ARMA(1,1) model
+    # Softmax transform ARMA(p,q) model output
     p = pm.Deterministic("p", pm.math.softmax(theta_log, axis=1))
 
     # Hierarchical prior for RW step size per cluster
