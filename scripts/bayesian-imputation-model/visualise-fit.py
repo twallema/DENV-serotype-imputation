@@ -51,7 +51,7 @@ confidence = 95
 # Load the trace from a NetCDF file
 trace = arviz.from_netcdf(f"{output_folder}/trace.nc")
 
-# Load the posterior predictive check
+# Load the posterior samples
 ppc = arviz.from_netcdf(f"{output_folder}/ppc.nc")
 
 ##################################
@@ -128,14 +128,16 @@ df["year"] = pd.to_datetime(df["date"]).dt.year
 df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
 
-
 # 8. Build PyMC arrays
-# --- For Beta model (typing fraction, always available) ---
-delta_obs = df["delta"].to_numpy().astype(float)
-N_total = df["DENV_total"].to_numpy().astype(int)
 # --- For Multinomial model (subtypes, only when typed) ---
-Y_multinomial = df[sero_cols].to_numpy().astype(int)
-N_typed = df["N_typed"].to_numpy().astype(int)
+# Total number of typed cases
+N_typed = df.pivot(index="date", columns="cluster", values="N_typed").to_numpy().astype(int)    # (n_months, n_clusters)
+# Number of cases per DENV serotype
+Y_list = []
+for col in sero_cols:
+    Y_mat = df.pivot(index="date", columns="cluster", values=col).to_numpy()
+    Y_list.append(Y_mat)
+Y_multinomial = np.stack(Y_list, axis=2).astype(int)    # (n_months, n_clusters, n_serotypes)
 # --- Indices ---
 cluster_idx = df["cluster"].to_numpy().astype(int)
 month_idx = df["month_idx"].to_numpy().astype(int)
@@ -147,13 +149,15 @@ n_years = int(df["year_idx"].max() + 1)
 n_serotypes = len(sero_cols)
 
 
+
 ################################
 ## Output the imputed dataset ##
 ################################
 
 output = df[['date', 'cluster', 'DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'DENV_total']]
-output[['p_1', 'p_2', 'p_3', 'p_4']] = trace['posterior']['p'].mean(dim=['chain','draw']).values
+output[['p_1', 'p_2', 'p_3', 'p_4']] = trace['posterior']['p'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters, n_serotypes))
 output.to_csv(f'{output_folder}/DENV-serotypes-imputed_1996-2025_monthly.csv')
+
 
 
 ################################################
@@ -162,7 +166,7 @@ output.to_csv(f'{output_folder}/DENV-serotypes-imputed_1996-2025_monthly.csv')
 
 # Get serotyped cases from model
 Y_obs = df[['cluster','date']]
-Y_obs[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = ppc['observed_data']['Y_obs'].values
+Y_obs[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = ppc['observed_data']['Y_obs'].values.reshape((n_months*n_clusters, n_serotypes))
 Y_obs = Y_obs.set_index(['cluster','date'])
 
 # Compute observed ratios
@@ -180,19 +184,34 @@ N_typed = N_typed.set_index(['cluster','date'])['N_typed_latent']
 # Get serotype fractions
 ## Mean
 p_mean = df[['cluster','date']]
-p_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['p'].mean(dim=['chain','draw']).values
+p_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['p'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters, n_serotypes))
 p_mean = p_mean.set_index(['cluster','date'])
 ## Lower
 p_lower = df[['cluster','date']]
-p_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['p'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values
+p_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['p'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
 p_lower = p_lower.set_index(['cluster','date'])
 ## Upper
 p_upper = df[['cluster','date']]
-p_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['p'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values
+p_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['p'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
 p_upper = p_upper.set_index(['cluster','date'])
+
+# Get overdispersion
+## Mean
+phi_mean = df[['cluster','date']]
+phi_mean['phi'] = trace['posterior']['phi'].mean(dim=['chain','draw']).values.flatten()
+phi_mean = phi_mean.set_index(['cluster','date'])
+## Lower
+phi_lower = df[['cluster','date']]
+phi_lower['phi'] = trace['posterior']['phi'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.flatten()
+phi_lower = phi_lower.set_index(['cluster','date'])
+## Upper
+phi_upper = df[['cluster','date']]
+phi_upper['phi'] = trace['posterior']['phi'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.flatten()
+phi_upper = phi_upper.set_index(['cluster','date'])
 
 # Get timepoints
 time = df['date'].unique()
+
 
 
 ###################
@@ -203,10 +222,10 @@ time = df['date'].unique()
 for cluster in df['cluster'].unique().tolist():
         
     # Visualisation
-    fig,ax=plt.subplots(nrows=6, sharex=True, figsize=(8.7, 11.3))
+    fig,ax=plt.subplots(nrows=7, sharex=True, figsize=(8.7, 11.3))
 
     # Step 1: total serotyped cases
-    ax[0].scatter(time, N_typed.loc[cluster, slice(None)].values, marker='o', s=2, color='black')
+    ax[0].plot(time, N_typed.loc[cluster, slice(None)].values, marker='o', markersize=2, linewidth=0.5, color='black')
     ax[0].set_ylim([0,200])
     ax[0].set_ylabel('Total serotyped (-)')
     ax[0].set_title(f'Brasil (Cluster: {cluster})')
@@ -250,6 +269,13 @@ for cluster in df['cluster'].unique().tolist():
     )
     ax[5].legend(framealpha=1)
     ax[5].set_ylabel('Serotypes (%)')
+
+    # Step 4: modeled overdispersion factor
+    ax[6].plot(time, phi_mean.loc[cluster, 'phi'], color='red')
+    ax[6].fill_between(time, phi_lower.loc[cluster, 'phi'], phi_upper.loc[cluster, 'phi'], alpha=0.2, color='red')
+    ax[6].set_ylabel('$\phi(t)$ (-)')
+    #ax[6].set_ylim([-3,103])
+
     os.makedirs(f'{output_folder}/fig', exist_ok=True)
     plt.savefig(f'{output_folder}/fig/{cluster}_total_serotyped.pdf')
     #plt.show()

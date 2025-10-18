@@ -133,12 +133,15 @@ df['month_idx'], _ = pd.factorize(df['date'])
 
 
 # 8. Build PyMC arrays
-# --- For Beta model (typing fraction, always available) ---
-delta_obs = df["delta"].to_numpy().astype(float)
-N_total = df["DENV_total"].to_numpy().astype(int)
 # --- For Multinomial model (subtypes, only when typed) ---
-Y_multinomial = df[sero_cols].to_numpy().astype(int)
-N_typed = df["N_typed"].to_numpy().astype(int)
+# Total number of typed cases
+N_typed = df.pivot(index="date", columns="cluster", values="N_typed").to_numpy().astype(int)    # (n_months, n_clusters)
+# Number of cases per DENV serotype
+Y_list = []
+for col in sero_cols:
+    Y_mat = df.pivot(index="date", columns="cluster", values=col).to_numpy()
+    Y_list.append(Y_mat)
+Y_multinomial = np.stack(Y_list, axis=2).astype(int)    # (n_months, n_clusters, n_serotypes)
 # --- Indices ---
 cluster_idx = df["cluster"].to_numpy().astype(int)
 month_idx = df["month_idx"].to_numpy().astype(int)
@@ -171,8 +174,8 @@ with pm.Model() as model:
     # \kappa_{i,s,t}^{corr} ~ Normal(0, Q^{-1})                                                                                     # spatially correlated noise
 
     ## Regularisation of the overall noise
-    total_sigma = pm.HalfNormal("total_sigma", sigma=1)
-    a_CAR = pm.Beta("a_CAR", alpha=5, beta=1)
+    total_sigma = pm.HalfNormal("total_sigma", sigma=0.0025)
+    a_CAR = pm.Beta("a_CAR", alpha=2, beta=1)
     a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.99)
 
     ## Temporal correlation structure: Quadratically decaying weights (gamma=1) summing to one to guarantee non-stationarity
@@ -185,15 +188,16 @@ with pm.Model() as model:
     ## Priors for spatial correlation
     W = pt.constant(W)                                  # fixed adjacency matrix in graph
     D = pt.diag(pt.sum(W, axis=1))                      # degree matrix
-    jitter = 1e-5 * pt.eye(n_clusters)                  # small jitter
+    jitter = 1e-6 * pt.eye(n_clusters)                  # small jitter to stabilize computation
     Q = D - a_CAR_trunc * W + jitter                    # build precision matrix Q = D - a * W + jitter  (shape: n_clusters x n_clusters)
     L_Q = pt.slinalg.cholesky(Q)                        # Cholesky of precision: Q = L_Q @ L_Q.T  (lower-triangular)
     L_cov = pt.slinalg.solve(L_Q, pt.eye(n_clusters))   # Compute L_cov = L_Q^{-1} such that Sigma = L_cov @ L_cov.T = Q^{-1}
     chol_cov_scaled = total_sigma * L_cov               # scale covariance cholesky by total_sigma (put scale inside chol)
 
+
     ## Initialise AR(p) initial condition
-    AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(p, n_serotypes, n_clusters))
-    kappa_init = pm.Normal("kappa_init", mu=0, sigma=1, shape=(q, n_serotypes, n_clusters))
+    AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(p, n_clusters, n_serotypes))
+    kappa_init = pm.Normal("kappa_init", mu=0, sigma=1, shape=(q, n_clusters, n_serotypes))
 
     # -------------------------------------------------
     # log_phi = ARMA(p,q) + \epsilon_t
@@ -208,10 +212,11 @@ with pm.Model() as model:
     # ---- Step 1: Generate a sequence of spatially correlated innovations ----
     kappa_sequence = pm.MvNormal(
         "kappa_sequence",
-        mu=pt.zeros((n_serotypes, n_clusters)),
+        mu=0,
         chol=chol_cov_scaled,
-        shape=(n_months, n_serotypes, n_clusters)
+        shape=(n_months, n_serotypes, n_clusters) # last axis has to be Mv axis
     )
+    kappa_sequence = kappa_sequence.dimshuffle(0, 2, 1) # (n_months, n_clusters, n_serotypes)
 
     # ---- Step 2: Deterministically reconstruct the ARMA(p,q) sequence using the sequence of innovations ----
     def reconstruct_arma_pq(kappa_init, AR_init, kappa_sequence, rho, psi):
@@ -243,32 +248,37 @@ with pm.Model() as model:
     theta_log = pm.Deterministic(
         "theta_log",
         reconstruct_arma_pq(kappa_init, AR_init, kappa_sequence, rho, psi)
-    )
+    )   # (n_months, n_clusters, n_serotypes)
 
-    # Flatten
-    theta_log = theta_log.reshape((len(df), n_serotypes))
+    # -------------------
+    # p = softmax(logphi)
+    # -------------------
 
-    # Softmax transform ARMA(p,q) model output
-    p = pm.Deterministic("p", pm.math.softmax(theta_log, axis=1))
+    p = pm.Deterministic("p", pm.math.softmax(theta_log, axis=2))
 
-    # Hierarchical prior for RW step size per cluster
-    logphi_rw_sigma_hierarchical_mean = pm.HalfNormal("logphi_rw_sigma_hierarchical_mean", sigma=1)
-    logphi_rw_sigma_cluster = pm.HalfNormal("logphi_rw_sigma_cluster", sigma=logphi_rw_sigma_hierarchical_mean, shape=n_clusters)
+    # Overdispersion models
+    ## Time-independent hierarchical overdispersion (per cluster)
+    d_cluster_hierarch = pm.HalfNormal("d_cluster_hierarch", sigma=1e-3)    # --> phi ~ 1000 --> low overdispersion
+    d_cluster = pm.HalfNormal("d_cluster", sigma=d_cluster_hierarch, shape=n_clusters)
+    phi = pm.Deterministic("phi", pt.repeat((1.0 / pm.math.maximum(d_cluster, 1e-12))[None, :], n_months, axis=0))
+    alpha = phi[:, :, None] * p # Broadcast phi over months & serotypes
+    VIF = pm.Deterministic("VIF", (N_typed + phi) / (1 + phi)) # variance inflation of dirichlet multinomial compared to multinomial
 
-    # Cluster-specific Gaussian random walks for log(phi)
-    logphi_rw = pm.GaussianRandomWalk(
-        "logphi_rw",
-        sigma=pt.transpose(pt.repeat(logphi_rw_sigma_cluster[:, None], n_months-1, axis=1)),
-        init_dist=pm.Normal.dist(mu=3, sigma=1, shape=n_clusters),
-        shape=(n_clusters, n_months),
-    )
-    phi_obs_t = pm.Deterministic("phi_obs_t", pm.math.exp(logphi_rw.flatten()))
-
-    # Compute Dirichlet concentration parameter
-    alpha = phi_obs_t[:, None] * p
-
-    # Compute variance inflation of dirichlet multinomial compared to multinomial
-    VIF = pm.Deterministic("VIF", (N_typed + phi_obs_t) / (1 + phi_obs_t))
+    # ## Time-dependent (RW1) hierarchical overdispersion (per cluster)
+    # d_cluster_hierarch = pm.HalfNormal("d_cluster_hierarch", sigma=1e-3)    # --> phi ~ 1000 --> low overdispersion
+    # d_cluster = pm.HalfNormal("d_cluster", sigma=d_cluster_hierarch, shape=n_clusters)
+    # # allow time variation multiplicatively around baseline:
+    # log_rw = pm.GaussianRandomWalk(
+    #     "log_rw",
+    #     sigma=pm.HalfNormal("sigma_rel", sigma=1),  # shrinkage for time deviations
+    #     init_dist=pm.Normal.dist(mu=0, sigma=1),
+    #     shape=(n_months, n_clusters),
+    # )
+    # # reconstruct phi:
+    # d_t = d_cluster[None, :] * pm.math.exp(log_rw)  # positive small numbers
+    # phi = pm.Deterministic("phi", 1.0 / pm.math.maximum(d_t, 1e-12))
+    # alpha = phi[:, :, None] * p # Broadcast phi over serotypes
+    # VIF = pm.Deterministic("VIF", (N_typed + phi) / (1 + phi)) # variance inflation of dirichlet multinomial compared to multinomial
 
     # --- Observed subtyped incidences ---
     Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
@@ -311,7 +321,7 @@ arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
 
 # Traceplot
 variables2plot = [
-                 'total_sigma', 'a_CAR_trunc', 'logphi_rw_sigma_hierarchical_mean', 'logphi_rw_sigma_cluster',
+                'total_sigma', 'a_CAR_trunc', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 for var in variables2plot:
@@ -332,21 +342,15 @@ print(summary_df)
 # ---- extract posterior predictive mean overdispersion proportions ----
 # ---- phi summaries ----
 ## Overall
-x = trace.posterior["phi_obs_t"].values # (chains, draws, n_months * n_clusters)
-x = x.reshape(chains, draws, n_months, n_clusters)
-x = x.reshape(-1, n_months, n_clusters)
-phi_gmean = np.exp(np.nanmean(np.log(x)))
+phi_gmean = np.exp(np.nanmean(np.log(trace.posterior["phi"].values)))
 ## Worst cluster
-phi_gmean_worst = min(np.exp(np.nanmean(np.log(x), axis=(0,1))))
+phi_gmean_worst = min(np.exp(np.nanmean(np.log(trace.posterior["phi"].values), axis=(0,1,2))))
 
 # ---- VIF summaries ----
 ## Overall
-x = trace.posterior["VIF"].values # (chains, draws, n_months * n_clusters)
-x = x.reshape(chains, draws, n_months, n_clusters)
-x = x.reshape(-1, n_months, n_clusters)
-VIF_gmean = np.exp(np.nanmean(np.log(x)))
+VIF_gmean = np.exp(np.nanmean(np.log(trace.posterior["VIF"].values)))
 ## Worst cluster
-VIF_gmean_worst = max(np.exp(np.nanmean(np.log(x), axis=(0,1))))
+VIF_gmean_worst = max(np.exp(np.nanmean(np.log(trace.posterior["VIF"].values), axis=(0,1,2))))
 
 # ---- print summary ----
 print("\phi(t) geometric mean:", phi_gmean)
