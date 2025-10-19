@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
+from contextlib import redirect_stdout
 
 import pytensor
 import pytensor.tensor as pt
@@ -23,25 +24,27 @@ def str_to_bool(value):
 # arguments determine the model + data combo used to forecast
 # How to run: python fit-model.py -ID test -p 2 -distance_matrix False
 parser = argparse.ArgumentParser()
-parser.add_argument("-region_filename", type=str, help="Spatial aggregation clustering was performed on.", default='rgint')
+parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
+parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
 parser.add_argument("-chains", type=int, help="Number of parallel chains.", default=4)
-parser.add_argument("-ID", type=str, help="Sampler output name.")
 parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
 parser.add_argument("-q", type=int, help="Order of MA(q) process.", default=1)
 args = parser.parse_args()
 
 # assign to desired variables
-region_filename = args.region_filename
+spatial_aggregation = args.spatial_aggregation
 chains = args.chains
 ID = args.ID
 p = args.p
 q = args.q
 
-# Make folder structure
-output_folder=f'../../data/interim/bayesian-imputation-model_output/ARMA({p},{q})/{ID}_{datetime.today().strftime("%Y-%m-%d")}' # Path to backend
-# check if samples folder exists, if not, make it
+# pipeline output folder
+abs_dir = os.path.dirname(__file__) # make sure all referenced paths are relative to the lcoation of this file and not the terminal's pwd
+output_folder = os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/bayesian-imputation-model_output/ARMA({p},{q})/')
+# check if output dir exists, if not, make it
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
+
 
 ########################
 ## Preparing the data ##
@@ -50,26 +53,25 @@ if not os.path.exists(output_folder):
 # Load clusters
 # >>>>>>>>>>>>>
 
-clusters = pd.read_csv(f'../../data/interim/clusters/clusters_{region_filename}.csv')
+clusters = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/clusters_{spatial_aggregation}.csv'))
 region = clusters.columns.to_list()[0]
 
 # Load mapping
 # >>>>>>>>>>>>
 
-mapping = pd.read_csv(f'../../data/interim/spatial_units_mapping.csv')
+mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
 
 # Adjacency matrix
 # ~~~~~~~~~~~~~~~~
 
-# Load adjacency matrix
-W = pd.read_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}.csv', index_col=0).values
+W = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/adjacency_matrix_{spatial_aggregation}.csv'), index_col=0).values
 
 
 # Incidence data
 # ~~~~~~~~~~~~~~
 
 # Fetch incidence data
-df = pd.read_csv('../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv', parse_dates=['date'])
+df = pd.read_csv(os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv'), parse_dates=['date'])
 
 # 1. Check if all columns are present
 sero_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4"]
@@ -174,7 +176,7 @@ with pm.Model() as model:
     # \kappa_{i,s,t}^{corr} ~ Normal(0, Q^{-1})                                                                                     # spatially correlated noise
 
     ## Regularisation of the overall noise
-    total_sigma = pm.HalfNormal("total_sigma", sigma=0.0025)
+    total_sigma = pm.HalfNormal("total_sigma", sigma=0.003)
     a_CAR = pm.Beta("a_CAR", alpha=2, beta=1)
     a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.99)
 
@@ -261,24 +263,8 @@ with pm.Model() as model:
     d_cluster_hierarch = pm.HalfNormal("d_cluster_hierarch", sigma=1e-3)    # --> phi ~ 1000 --> low overdispersion
     d_cluster = pm.HalfNormal("d_cluster", sigma=d_cluster_hierarch, shape=n_clusters)
     phi = pm.Deterministic("phi", pt.repeat((1.0 / pm.math.maximum(d_cluster, 1e-12))[None, :], n_months, axis=0))
-    alpha = phi[:, :, None] * p # Broadcast phi over months & serotypes
+    alpha = phi[:, :, None] * p # Broadcast phi over serotypes
     VIF = pm.Deterministic("VIF", (N_typed + phi) / (1 + phi)) # variance inflation of dirichlet multinomial compared to multinomial
-
-    # ## Time-dependent (RW1) hierarchical overdispersion (per cluster)
-    # d_cluster_hierarch = pm.HalfNormal("d_cluster_hierarch", sigma=1e-3)    # --> phi ~ 1000 --> low overdispersion
-    # d_cluster = pm.HalfNormal("d_cluster", sigma=d_cluster_hierarch, shape=n_clusters)
-    # # allow time variation multiplicatively around baseline:
-    # log_rw = pm.GaussianRandomWalk(
-    #     "log_rw",
-    #     sigma=pm.HalfNormal("sigma_rel", sigma=1),  # shrinkage for time deviations
-    #     init_dist=pm.Normal.dist(mu=0, sigma=1),
-    #     shape=(n_months, n_clusters),
-    # )
-    # # reconstruct phi:
-    # d_t = d_cluster[None, :] * pm.math.exp(log_rw)  # positive small numbers
-    # phi = pm.Deterministic("phi", 1.0 / pm.math.maximum(d_t, 1e-12))
-    # alpha = phi[:, :, None] * p # Broadcast phi over serotypes
-    # VIF = pm.Deterministic("VIF", (N_typed + phi) / (1 + phi)) # variance inflation of dirichlet multinomial compared to multinomial
 
     # --- Observed subtyped incidences ---
     Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
@@ -291,7 +277,7 @@ with pm.Model() as model:
 # NUTS
 draws=500
 with model:
-    trace = pm.sample(draws, tune=1500, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(draws, tune=2000, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 
 #######################
@@ -300,16 +286,17 @@ with model:
 
 # Plot posterior predictive checks
 with model:
-    ppc = pm.sample_posterior_predictive(trace)
-arviz.plot_ppc(ppc)
-plt.savefig(f'{output_folder}/ppc.pdf')
+    posterior_predictive = pm.sample_posterior_predictive(trace)
+arviz.plot_ppc(posterior_predictive)
+os.makedirs(f'{output_folder}/fig/posterior_predictive', exist_ok=True)
+plt.savefig(f'{output_folder}/fig/posterior_predictive/ppc.pdf')
 plt.close()    
 
 # Expand data & take 2x as much samples
 expanded_idata = trace.copy()
 expanded_idata.posterior = trace.posterior.expand_dims(pred_id=2)
 with model:
-    ppc = pm.sample_posterior_predictive(
+    posterior_predictive = pm.sample_posterior_predictive(
         expanded_idata,
         sample_dims=["chain", "draw", "pred_id"],
         extend_inferencedata=True,
@@ -317,22 +304,19 @@ with model:
 
 # Assume `trace` is the result of pm.sample()
 arviz.to_netcdf(trace, f"{output_folder}/trace.nc")
-arviz.to_netcdf(ppc, f"{output_folder}/ppc.nc")
+arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc")
 
 # Traceplot
 variables2plot = [
                 'total_sigma', 'a_CAR_trunc', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
+# Save traces
+os.makedirs(f'{output_folder}/fig/trace', exist_ok=True)
 for var in variables2plot:
     arviz.plot_trace(trace, var_names=[var]) 
-    plt.savefig(f'{output_folder}/trace-{var}_typing-effort-model.pdf')
+    plt.savefig(f'{output_folder}/fig/trace/trace-{var}_typing-effort-model.pdf')
     plt.close()
-
-# Print summary
-summary_df = arviz.summary(trace, round_to=3)
-print(summary_df)
-
 
 ###############################
 ## Diagnostics of dispersion ##
@@ -352,11 +336,12 @@ VIF_gmean = np.exp(np.nanmean(np.log(trace.posterior["VIF"].values)))
 ## Worst cluster
 VIF_gmean_worst = max(np.exp(np.nanmean(np.log(trace.posterior["VIF"].values), axis=(0,1,2))))
 
-# ---- print summary ----
-print("\phi(t) geometric mean:", phi_gmean)
-print("\phi(t) geometric mean of the worst cluster:", phi_gmean_worst)
-print("VIF geometric mean:", VIF_gmean)
-print("VIF geometric mean of the worst cluster:", VIF_gmean)
+# ---- print summary to a log file ----
+with open(os.path.join(output_folder, "model_quality.log"), "w") as f, redirect_stdout(f):
+    print("\phi geometric mean across clusters:", phi_gmean)
+    print("\phi geometric mean of the worst cluster:", phi_gmean_worst)
+    print("VIF geometric mean across clusters:", VIF_gmean)
+    print("VIF geometric mean of the worst cluster:", VIF_gmean_worst)
 
 
 

@@ -17,23 +17,22 @@ def str_to_bool(value):
 # arguments are used to find the result
 # How to run: python visualise-fit.py -date 2025-08-27 -ID test -p 2 -distance_matrix False
 parser = argparse.ArgumentParser()
-parser.add_argument("-region_filename", type=str, help="Spatial aggregation clustering was performed on.", default='rgint')
-parser.add_argument("-date", type=str, help="Date experiment was run.")
-parser.add_argument("-ID", type=str, help="Sampler output name.")
+parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
+parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
 parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
 parser.add_argument("-q", type=int, help="Order of MA(q) process.", default=1)
 args = parser.parse_args()
 
 # assign to desired variables
-region_filename = args.region_filename
-date = args.date
+spatial_aggregation = args.spatial_aggregation
 ID = args.ID
 p = args.p
 q = args.q
 
-# Make folder structure
-output_folder=f'../../data/interim/bayesian-imputation-model_output/ARMA({p},{q})/{ID}_{date}' # Path to backend
-# check if samples folder exists, if not, make it
+# pipeline output folder
+abs_dir = os.path.dirname(__file__) # make sure all referenced paths are relative to the lcoation of this file and not the terminal's pwd
+output_folder = os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/bayesian-imputation-model_output/ARMA({p},{q})/')
+# check if output dir exists, if not, raise an error
 if not os.path.exists(output_folder):
     raise ValueError('result not found.')
 
@@ -52,21 +51,21 @@ confidence = 95
 trace = arviz.from_netcdf(f"{output_folder}/trace.nc")
 
 # Load the posterior samples
-ppc = arviz.from_netcdf(f"{output_folder}/ppc.nc")
+posterior_predictive = arviz.from_netcdf(f"{output_folder}/posterior_predictive.nc")
 
 ##################################
 ## Preparing the incidence data ##
 ##################################
 
 # Load mapping
-mapping = pd.read_csv(f'../../data/interim/spatial_units_mapping.csv')
+mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
 
 # Load clusters
-clusters = pd.read_csv(f'../../data/interim/clusters/clusters_{region_filename}.csv')
+clusters = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/clusters_{spatial_aggregation}.csv'))
 region = clusters.columns.to_list()[0]
 
 # Fetch incidence data
-df = pd.read_csv('../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv', parse_dates=['date'])
+df = pd.read_csv(os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv'), parse_dates=['date'])
 
 # 1. Check if all columns are present
 sero_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4"]
@@ -154,9 +153,15 @@ n_serotypes = len(sero_cols)
 ## Output the imputed dataset ##
 ################################
 
+# add latent serotype ratios to output dataframe
 output = df[['date', 'cluster', 'DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'DENV_total']]
 output[['p_1', 'p_2', 'p_3', 'p_4']] = trace['posterior']['p'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters, n_serotypes))
-output.to_csv(f'{output_folder}/DENV-serotypes-imputed_1996-2025_monthly.csv')
+output  = output[["date", "cluster", "p_1", "p_2", "p_3", "p_4"]]
+output_mun = output.merge(mapping[["cluster", "CD_MUN"]], on="cluster", how="left")
+output_mun = output_mun[["date", "CD_MUN", "p_1", "p_2", "p_3", "p_4"]]
+output_mun = output_mun.sort_values(by=["date", "CD_MUN"]).reset_index(drop=True)
+# save result
+output_mun.to_parquet(f'{output_folder}/DENV-serotypes-imputed_1996-2025_monthly.parquet', compression='brotli')
 
 
 
@@ -166,7 +171,7 @@ output.to_csv(f'{output_folder}/DENV-serotypes-imputed_1996-2025_monthly.csv')
 
 # Get serotyped cases from model
 Y_obs = df[['cluster','date']]
-Y_obs[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = ppc['observed_data']['Y_obs'].values.reshape((n_months*n_clusters, n_serotypes))
+Y_obs[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = posterior_predictive['observed_data']['Y_obs'].values.reshape((n_months*n_clusters, n_serotypes))
 Y_obs = Y_obs.set_index(['cluster','date'])
 
 # Compute observed ratios
@@ -273,10 +278,10 @@ for cluster in df['cluster'].unique().tolist():
     # Step 4: modeled overdispersion factor
     ax[6].plot(time, phi_mean.loc[cluster, 'phi'], color='red')
     ax[6].fill_between(time, phi_lower.loc[cluster, 'phi'], phi_upper.loc[cluster, 'phi'], alpha=0.2, color='red')
-    ax[6].set_ylabel('$\phi(t)$ (-)')
+    ax[6].set_ylabel(r'$\phi(t)$ (-)')
     #ax[6].set_ylim([-3,103])
 
-    os.makedirs(f'{output_folder}/fig', exist_ok=True)
-    plt.savefig(f'{output_folder}/fig/{cluster}_total_serotyped.pdf')
+    os.makedirs(f'{output_folder}/fig/posterior_predictive', exist_ok=True)
+    plt.savefig(f'{output_folder}/fig/posterior_predictive/{cluster}_total_serotyped.pdf')
     #plt.show()
     plt.close()
