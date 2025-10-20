@@ -486,6 +486,9 @@ plt.close()
 # Recluster mean co-association matrix using hierarchical clustering
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
+# hierarchical clustering needs distance matrix
+distance = 1 - prob_matrix
+distance = np.clip(distance, 0, 1) # some distances may become very very small negative numbers 
 
 # Perform hierarchical clustering (average linkage)
 Z = linkage(squareform(1 - prob_matrix, checks=False), method='average')
