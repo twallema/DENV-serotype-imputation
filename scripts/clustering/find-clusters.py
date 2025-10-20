@@ -387,7 +387,7 @@ model = MaxPHeuristic(
     threshold_name='N_typed_monthly_mean',
     threshold=threshold,
     top_n=1,
-    verbose=True,
+    verbose=True, # setting to false not allowed
     policy='multiple',
     max_iterations_construction=1000,
     max_iterations_sa=50,
@@ -398,7 +398,7 @@ n_clusters = []
 matrices = []
 clusters = pd.DataFrame(index=geography[region].values)
 
-with open("maxp_stdout.log", "w") as f, redirect_stdout(f): # temporarily sends all output to f
+with open(os.path.join(abs_dir, "maxp_stdout.log"), "w") as f, redirect_stdout(f): # temporarily sends all output to f
     for numRun in range(n):
         print(f"Starting clustering run {numRun+1} of {n}")
 
