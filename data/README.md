@@ -61,17 +61,25 @@ These data are partly confidential and can be found on the Bento lab box.
 
 ### DTW-MDS-embeddings
 
-+ `DTW-MDS-embedding_mun.csv`: Made using `~/scripts/clustering/perform-DTW-MDS.py`.
+Subfolders contain the output of performing DTW on the following timeseries and projecting them down using MDS.
 
-### Clusters
+#### DENV per 100 K
 
-+ `clusters_rgi/rgint.csv`: Made using `~/scripts/clustering/find-clusters.py`.
+#### Index P
 
-+ `adjacency_matrix_rgi/rgint.csv`: Made using `~/scripts/clustering/find-clusters.py`.
+#### Serotypes
 
-### bayesian-imputation-model_output
+### Pipeline output
 
-This folder is not on GitHub but is automatically generated when users run the Bayesian serotype imputation model `~/scripts/bayesian-imputation-model/fit-imputation-model.py`. It will contain diagnostics of the model runs, as well as the final result (latent serotype distribution).
+#### Run ID
+
+##### Clusters
+
+Contains all output of the max-p regionalization `~/scripts/clustering/find-clusters.py`.
+
+##### bayesian-imputation-model_output
+
+Contains all output of the Bayesian serotype imputation model `~/scripts/bayesian-imputation-model/fit-imputation-model.py`. The latent serotype distribution per municipality from 1996-2025 and per month -- the output of this pipeline -- is named `DENV-serotypes-imputed_1996-2025_monthly.parquet`.
 
 ## Conversion scripts
 
