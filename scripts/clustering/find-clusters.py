@@ -1,4 +1,4 @@
-import os
+import sys,os
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -393,10 +393,12 @@ model = MaxPHeuristic(
     max_iterations_sa=50,
 )
 
-
 n_clusters = []
 matrices = []
 clusters = pd.DataFrame(index=geography[region].values)
+
+print(f"Temporarily redirecting stdout to: {os.path.join(abs_dir, "maxp_stdout.log")}") # warn user log output is being redirected
+sys.stdout.flush()  # make sure it's flushed to the logs
 
 with open(os.path.join(abs_dir, "maxp_stdout.log"), "w") as f, redirect_stdout(f): # temporarily sends all output to f
     for numRun in range(n):
@@ -421,7 +423,7 @@ with open(os.path.join(abs_dir, "maxp_stdout.log"), "w") as f, redirect_stdout(f
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 best_obj_vals = []
-with open ("maxp_stdout.log") as f:
+with open(os.path.join(abs_dir,"maxp_stdout.log")) as f:
     lines = f.readlines()
 for i, line in enumerate(lines):
     if "best objective value:" in line.lower():
@@ -429,7 +431,7 @@ for i, line in enumerate(lines):
         best_obj_vals.append(val)
 # Softmax with temperature
 weights = softmax(-np.asarray(best_obj_vals))
-os.remove("maxp_stdout.log")
+os.remove(os.path.join(abs_dir,"maxp_stdout.log"))
 
 
 # Average co-association matrices across runs
