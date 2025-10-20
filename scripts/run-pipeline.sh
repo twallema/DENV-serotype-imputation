@@ -20,7 +20,7 @@ SPATIAL_AGGREGATION="rgint"
 # ------------------------------------------------------
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-LOG_DIR="./.logs/${RUN_ID}_${TIMESTAMP}"
+LOG_DIR="./.log/${RUN_ID}_${SPATIAL_AGGREGATION}_${TIMESTAMP}"
 mkdir -p "$LOG_DIR"
 
 # ------------------------------------------------------
