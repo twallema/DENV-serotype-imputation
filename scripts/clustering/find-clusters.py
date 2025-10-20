@@ -491,7 +491,7 @@ distance = 1 - prob_matrix
 distance = np.clip(distance, 0, 1) # some distances may become very very small negative numbers 
 
 # Perform hierarchical clustering (average linkage)
-Z = linkage(squareform(1 - prob_matrix, checks=False), method='average')
+Z = linkage(squareform(distance, checks=False), method='average')
 
 # Choose number of clusters k
 geography['consensus_clusters_hierarchical'] = fcluster(Z, n_clusters, criterion='maxclust')
