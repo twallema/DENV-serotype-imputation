@@ -8,7 +8,7 @@ Update conda to make sure your version is up-to-date, in a terminal window do,
     conda update conda
     ```
 
-Setup/update the `environment`: All dependencies needed to run the scripts are collected in the conda `hierarchSIR_env.yml` file. To set up the environment,
+Setup/update the `environment`: All dependencies needed to run the scripts are collected in the conda `DENV-SEROTYPE-IMPUTATION.yml` file. To set up the environment,
 
     ```bash
     conda env create -f DENV-SEROTYPE-IMPUTATION.yml
@@ -22,7 +22,7 @@ or alternatively, to update the environment (needed after adding a dependency),
     conda env update -f DENV-SEROTYPE-IMPUTATION.yml --prune
     ```
 
-## Running the pipeline
+## Preparing the pipeline
 
 ### Converting raw linelist data to interim data
 
@@ -36,12 +36,14 @@ or alternatively, to update the environment (needed after adding a dependency),
 
 ### Performing Dynamic Time Warping and lower dimensional embedding through Multidimensional Scaling
 
-5. Run the script `~/scripts/clustering/perform-DTW-MDS.py` to perform Dynamic Time Warping on the DENV per 100K incidence timeseries, yielding a square DTW distance matrix denoting telling us how similar the DENV incidence timeseries are. Then, the script embeds the DTW matrix in a `n_mds_components = 3` dimensional space (dimensionality reduction) so that it can be used as a covariate in the clustering algorithm. Note that 'rgi' denote the 508 immediate regions of Brasil, while 'rgint' denotes the 130 intermediate regions of Brazil. Output appears in `~/data/interim/DTW-MDS-embeddings`.
+5. Run the script `~/scripts/clustering/perform-DTW-MDS-denv_100k.py` to perform Dynamic Time Warping on the DENV per 100K incidence timeseries, yielding a square DTW distance matrix denoting telling us how similar the DENV incidence timeseries are. Then, the script embeds the DTW matrix in a `n_mds_components = 3` dimensional space (dimensionality reduction) so that it can be used as a covariate in the clustering algorithm. Note that 'rgi' denote the 508 immediate regions of Brasil, while 'rgint' denotes the 130 intermediate regions of Brazil. Output appears in `~/data/interim/DTW-MDS-embeddings/denv_100k/`.
+
+## Running the pipeline
 
 ### Clustering
 
-6. Run the script `~/scripts/clustering/find-clusters.py` to cluster the Brazilian municipalities, immediate regions or intermediate regions using the max-p regionalisation algorithm. Output appears in `~/data/interim/clusters`.
+1. Run the script `~/scripts/clustering/find-clusters.py` (script has input arguments) to cluster the Brazilian municipalities, immediate regions or intermediate regions using the max-p regionalisation algorithm. Output appears in `~/data/interim/pipeline_output/<ID>/clusters`. The input of the pipeline are the covariates used in the clustering.
 
 ### Bayesian serotype imputation
 
-7. Finally, run `~/scripts/bayesian-imputation-model/fit-imputation-model.py` to run the bayesian serotype imputation model on the clusters. Output appears in `~/data/interim/bayesian-imputation-model_output`.
+2. Finally, run `~/scripts/bayesian-imputation-model/fit-imputation-model.py` to run the bayesian serotype imputation model on the clusters. Output appears in `~/data/interim/pipeline_output/<ID>/bayesian-imputation-model_output/ARMA(p,q)/`. The output of the pipeline -- the latent DENV serotype distribution from 1996-2025 per month and per Brazilian municipality -- is named `DENV-serotypes-imputed_1996-2025_monthly.parquet`. 

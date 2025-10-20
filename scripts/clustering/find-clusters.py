@@ -12,22 +12,62 @@ from sklearn.preprocessing import StandardScaler
 import numpy as np
 from contextlib import redirect_stdout
 from scipy.special import softmax
-
-# glasbey color map
 from glasbey import create_palette
 from matplotlib.colors import ListedColormap
-
 from sklearn.cluster import SpectralClustering
 from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform
+import argparse
 
-# script settings
+# parse arguments
 # >>>>>>>>>>>>>>>
 
-n = 100 # number of max-p regionalization runs to average
-threshold = 50  # Sum of column 'N_typed_monthly_mean' should exceed this threshold in every cluster
-region_filename = 'rgint' # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
+# example use:
+# $ python find-clusters.py -ID test -spatial_aggregation rgint
 
+# helper function for argument parsing
+def str_to_bool(value):
+    """Convert string arguments to boolean (for SLURM environment variables)."""
+    return value.lower() in ["true", "1", "yes"]
+
+# parse arguments
+parser = argparse.ArgumentParser()
+
+parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
+parser.add_argument("-n", type=int, help="Number of clustering runs to average.", default=250)
+parser.add_argument("-threshold", type=float, help="Minimal number of serotyped cases in a cluster.", default=50)
+parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
+# covariates
+parser.add_argument("-compactness", type=str_to_bool, help="Include cluster compactness as a covariate in clustering.", default=True)
+parser.add_argument("-biome", type=str_to_bool, help="Include biome covariate in clustering.", default=False)
+parser.add_argument("-koppen", type=str_to_bool, help="Include Koppen climate classification covariate in clustering.", default=False)
+parser.add_argument("-human_footprint", type=str_to_bool, help="Include human footprint classification covariate in clustering.", default=True)
+parser.add_argument("-denv_100k_cumulative", type=str_to_bool, help="Include confirmed cumulative DENV incidence per 100K as a covariate in clustering.", default=False)
+parser.add_argument("-denv_100k_DTW", type=str_to_bool, help="Include DTW of confirmed cumulative DENV incidence per 100K as a covariate in clustering.", default=False)
+parser.add_argument("-indexP_DTW", type=str_to_bool, help="Include DTW of index P as a covariate in clustering.", default=True)
+parser.add_argument("-serotypes_DTW", type=str_to_bool, help="Include DTW of recent (2020-2025) serotyped cases as a covariate in clustering.", default=False)
+args = parser.parse_args()
+
+# assign to desired variables
+ID = args.ID
+n = args.n
+threshold = args.threshold
+spatial_aggregation = args.spatial_aggregation
+include_biome = args.biome
+include_koppen = args.koppen
+include_human_footprint = args.human_footprint
+include_compactness = args.compactness
+include_denv_100k_cumulative = args.denv_100k_cumulative
+include_denv_100k_DTW = args.denv_100k_DTW
+include_indexP_DTW = args.indexP_DTW
+include_serotypes_DTW = args.serotypes_DTW
+
+# pipeline output folder
+abs_dir = os.path.dirname(__file__) # make sure all referenced paths are relative to the lcoation of this file and not the terminal's pwd
+output_folder = os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/')
+# check if output dir exists, if not, make it
+if not os.path.exists(output_folder):
+    os.makedirs(output_folder)
 
 # helper function
 # >>>>>>>>>>>>>>>
@@ -72,27 +112,27 @@ def build_co_association_matrix(regions, clusters):
 # >>>>>>>>>>>>>
 
 # Load geodata
-geography = gpd.read_parquet("../../data/interim/geographic-dataset.parquet")
+geography = gpd.read_parquet(os.path.join(abs_dir, "../../data/interim/geographic-dataset.parquet"))
 
 # Load case data
-denv = pd.read_csv('../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv')
+denv = pd.read_csv(os.path.join(abs_dir,'../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv'))
 denv['date'] = pd.to_datetime(denv['date'])
 
 # Load cases per 100K data
-denv_100k = pd.read_csv(f'../../data/interim/DENV_per_100K/DENV_per_100k_{region_filename}.csv')
+denv_100k = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DENV_per_100K/DENV_per_100k_{spatial_aggregation}.csv'))
 denv_100k['date'] = pd.to_datetime(denv_100k['date'])
 
 # Load human footprint 
-human_footprint = pd.read_csv(f'../../data/interim/human-footprint/human-footprint_{region_filename}.csv')
+human_footprint = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/human-footprint/human-footprint_{spatial_aggregation}.csv'))
 
 # Load DENV per 100K DTW-MDS embedding
-DTW_covariates_denv_100k = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-MDS-embedding_{region_filename}.csv')
+DTW_covariates_denv_100k = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-MDS-embedding_{spatial_aggregation}.csv'))
 
 # Load serotypes DTW-MDS embedding
-DTW_covariates_serotypes = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/serotypes/DTW-MDS-embedding_{region_filename}.csv')
+DTW_covariates_serotypes = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/serotypes/DTW-MDS-embedding_{spatial_aggregation}.csv'))
 
 # Load indexP DTW-MDS embedding
-DTW_covariates_indexP = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/indexP/DTW-MDS-embedding_{region_filename}.csv')
+DTW_covariates_indexP = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/indexP/DTW-MDS-embedding_{spatial_aggregation}.csv'))
 region = DTW_covariates_indexP.columns.to_list()[0]
 
 
@@ -202,6 +242,10 @@ geography = geography.merge(
 # ensure biome dummies are int (0/1)
 for col in biome_dummies.columns:
     geography[col] = geography[col].astype(float)
+# make a covariate name mapping
+covariate_names = []
+if include_biome:
+    covariate_names.extend(biome_dummies.columns.to_list())
 
 
 
@@ -219,6 +263,21 @@ geography = geography.merge(
 # Ensure biome dummies are int (0/1)
 for col in koppen_dummies.columns:
     geography[col] = geography[col].astype(float)
+# add to covariate name mapping
+if include_koppen:
+    covariate_names.extend(koppen_dummies.columns.to_list())
+
+
+
+# Make human footprint covariate
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# standardize
+sc = StandardScaler()
+geography['human_footprint'] = sc.fit_transform(human_footprint[["human_footprint"]])
+# add to covariate name mapping
+if include_human_footprint:
+    covariate_names.extend(['human_footprint',])
 
 
 
@@ -230,15 +289,9 @@ denv_100k = denv_100k.groupby(by=f'{region}')['DENV_per_100k'].sum()
 # standardize
 sc = StandardScaler()
 geography['denv_100k_cumulative'] = sc.fit_transform(denv_100k.values.reshape(-1,1))
-
-
-
-# Make human footprint covariate
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-# standardize
-sc = StandardScaler()
-geography['human_footprint'] = sc.fit_transform(human_footprint[["human_footprint"]])
+# add to covariate name mapping
+if include_denv_100k_cumulative:
+    covariate_names.extend(['denv_100k_cumulative',])
 
 
 
@@ -260,6 +313,10 @@ geography[["cx","cy"]] = sc.fit_transform(geography[["cx","cy"]])
 # 4) Normalize the area codes (similarity in codes reflects proximity in space)
 geography[region+'_NORM'] = sc.fit_transform(geography[[region]])
 
+# Add to covariate name mapping
+if include_compactness:
+    covariate_names.extend(['cx', 'cy'])
+
 
 
 # Make DENV per 100k DTW-MDS covariate
@@ -270,11 +327,13 @@ geography = geography.merge(
     DTW_covariates_denv_100k, 
     on = f'{region}'
 )
-
 # Standardize DTW-MDS embedding
 sc = StandardScaler()
 DTW_covariates_denv_100k_names = [x for x in DTW_covariates_denv_100k.columns.to_list() if x != f'{region}']
 geography[DTW_covariates_denv_100k_names] = sc.fit_transform(geography[DTW_covariates_denv_100k_names])
+# Add to covariate name mapping
+if include_denv_100k_DTW:
+    covariate_names.extend(DTW_covariates_denv_100k_names)
 
 
 
@@ -286,11 +345,13 @@ geography = geography.merge(
     DTW_covariates_indexP, 
     on = f'{region}'
 )
-
 # Standardize DTW-MDS embedding
 sc = StandardScaler()
 DTW_covariates_indexP_names = [x for x in DTW_covariates_indexP.columns.to_list() if x != f'{region}']
 geography[DTW_covariates_indexP_names] = sc.fit_transform(geography[DTW_covariates_indexP_names])
+# Add to covariate name mapping
+if include_indexP_DTW:
+    covariate_names.extend(DTW_covariates_indexP_names)
 
 
 
@@ -302,19 +363,13 @@ geography = geography.merge(
     DTW_covariates_serotypes, 
     on = f'{region}'
 )
-
 # Standardize DTW-MDS embedding
 sc = StandardScaler()
 DTW_covariates_serotypes_names = [x for x in DTW_covariates_serotypes.columns.to_list() if x != f'{region}']
 geography[DTW_covariates_serotypes_names] = sc.fit_transform(geography[DTW_covariates_serotypes_names])
-
-
-
-# Decide on attributes to use
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-# my pick
-attrs = ['cx', 'cy'] + DTW_covariates_indexP_names + ['human_footprint'] #+ koppen_dummies.columns.to_list() # DTW_covariates_denv_100k_names + DTW_covariates_serotypes_names + ['denv_100k_cumulative',] + biome_dummies.columns.to_list()
+# Add to covariate name mapping
+if include_serotypes_DTW:
+    covariate_names.extend(DTW_covariates_serotypes_names)
 
 
 
@@ -328,10 +383,10 @@ w = Rook.from_dataframe(geography, use_index=False)
 model = MaxPHeuristic(
     geography,
     w, 
-    attrs_name=attrs,
+    attrs_name=covariate_names,
     threshold_name='N_typed_monthly_mean',
     threshold=threshold,
-    top_n=3,
+    top_n=1,
     verbose=True,
     policy='multiple',
     max_iterations_construction=1000,
@@ -343,7 +398,7 @@ n_clusters = []
 matrices = []
 clusters = pd.DataFrame(index=geography[region].values)
 
-with open("maxp_stdout.txt", "w") as f, redirect_stdout(f): # temporarily sends all output to f
+with open("maxp_stdout.log", "w") as f, redirect_stdout(f): # temporarily sends all output to f
     for numRun in range(n):
         print(f"Starting clustering run {numRun+1} of {n}")
 
@@ -366,7 +421,7 @@ with open("maxp_stdout.txt", "w") as f, redirect_stdout(f): # temporarily sends 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 best_obj_vals = []
-with open ("maxp_stdout.txt") as f:
+with open ("maxp_stdout.log") as f:
     lines = f.readlines()
 for i, line in enumerate(lines):
     if "best objective value:" in line.lower():
@@ -374,7 +429,7 @@ for i, line in enumerate(lines):
         best_obj_vals.append(val)
 # Softmax with temperature
 weights = softmax(-np.asarray(best_obj_vals))
-os.remove("maxp_stdout.txt")
+os.remove("maxp_stdout.log")
 
 
 # Average co-association matrices across runs
@@ -386,7 +441,7 @@ for association_matrix, weight in zip(matrices, weights):
    prob_matrix += weight * association_matrix
 
 # save mean co-association matrix
-prob_matrix.to_csv(f"../../data/interim/clusters/prob_matrix_{region_filename}.csv")
+prob_matrix.to_csv(os.path.join(output_folder, f"prob_matrix_{spatial_aggregation}.csv"))
 
 # compute median number of clusters
 n_clusters = int(np.median(n_clusters))
@@ -420,7 +475,7 @@ for ax, run in zip(axes, selected_runs):
     ax.set_title(run, fontsize=10)
     ax.axis("off")
 plt.tight_layout()
-plt.savefig(f'../../data/interim/clusters/clusters_{region_filename}.png', dpi=300)
+plt.savefig(os.path.join(output_folder, f'clusters_{spatial_aggregation}.png'), dpi=300)
 plt.close()
 
 
@@ -478,13 +533,13 @@ ax[1].set_title(f"Spectral clustering", fontsize=14)
 ax[1].axis("off")
 fig.suptitle('Consensus clusters')
 plt.tight_layout()
-plt.savefig(f'../../data/interim/clusters/consensus_clusters_{region_filename}.png', dpi=300)
+plt.savefig(os.path.join(output_folder, f'consensus_clusters_{spatial_aggregation}.png'), dpi=300)
 plt.close()
 
 # Save the consensus clusters (hierarchical)
 clusters = geography[[f'{region}', 'consensus_clusters_hierarchical']]
 clusters = clusters.rename(columns={'consensus_clusters_hierarchical': 'cluster'})
-clusters.to_csv(f"../../data/interim/clusters/clusters_{region_filename}.csv", index=False)
+clusters.to_csv(os.path.join(output_folder, f"clusters_{spatial_aggregation}.csv"), index=False)
 
 
 # Build the clusters' adjacency matrix needed for the Bayesian imputation model
@@ -527,7 +582,7 @@ for uf in cluster_list:
         adj_matrix.loc[uf, neighbor] = 1
 
 # Save in a .csv
-adj_matrix.to_csv(f'../../data/interim/clusters/adjacency_matrix_{region_filename}.csv')
+adj_matrix.to_csv(os.path.join(output_folder, f'adjacency_matrix_{spatial_aggregation}.csv'))
 
 
 
@@ -566,4 +621,4 @@ for i, row_i in centroids_gdf.iterrows():
         dist_matrix.loc[row_i['consensus_clusters_hierarchical'], row_j['consensus_clusters_hierarchical']] = dist
 
 # Save the distance matrix to a csv file
-dist_matrix.to_csv(f'../../data/interim/clusters/distance_matrix_{region_filename}.csv')
+dist_matrix.to_csv(os.path.join(output_folder, f'distance_matrix_{spatial_aggregation}.csv'))
