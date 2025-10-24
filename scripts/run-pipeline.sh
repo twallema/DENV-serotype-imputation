@@ -12,7 +12,7 @@ set -o pipefail  # safer error handling
 # Define pipeline run variables
 # ------------------------------------------------------
 
-RUN_ID="compactness"                 
+RUN_ID="indexP"                 
 SPATIAL_AGGREGATION="rgint"
 
 # ------------------------------------------------------
@@ -38,15 +38,15 @@ echo "[$(date)] Running find-clusters.py..." | tee -a "$LOG_DIR/pipeline.log"
 python clustering/find-clusters.py \
     -ID "$RUN_ID" \
     -spatial_aggregation "$SPATIAL_AGGREGATION" \
-    -n 250 \
-    -threshold 50 \
-    -compactness True \
+    -n 500 \
+    -threshold 35 \
+    -compactness False \
     -biome False \
     -koppen False \
     -human_footprint False \
     -denv_100k_cumulative False \
     -denv_100k_DTW False \
-    -indexP_DTW False \
+    -indexP_DTW True \
     -serotypes_DTW False \
     > "$LOG_DIR/find-clusters.log" 2>&1
 

@@ -213,7 +213,7 @@ if region:
 
 # Compute the mimimum sum of serotyped cases across all years (will have to be changed)
 # limit time window (before 1999 will likely be excluded because it's way too limited; from 2019 onwards all regions have good subtyping)
-denv = denv[((denv['date'] > datetime(2000,1,1)) & (denv['date'] < datetime(2008,1,1)))]
+denv = denv[((denv['date'] > datetime(2000,1,1)) & (denv['date'] < datetime(2019,1,1)))]
 # extract year
 denv["year"] = pd.to_datetime(denv["date"]).dt.year
 # compute total cases per month
@@ -221,7 +221,7 @@ denv["N_typed"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
 # sum cases by year
 active_sum = denv.groupby([f'{region}',"year"])['N_typed'].sum().reset_index()
 # take mean across years
-mean_active_sum = active_sum.groupby(f'{region}')["N_typed"].mean().reset_index() # array for clustering
+mean_active_sum = active_sum.groupby(f'{region}')["N_typed"].median().reset_index() # array for clustering
 mean_active_sum.rename(columns={"N_typed":"N_typed_monthly_mean"}, inplace=True)
 # merge min_yearly_sum
 geography = geography.merge(mean_active_sum, on=f'{region}', how="left")
@@ -386,11 +386,11 @@ model = MaxPHeuristic(
     attrs_name=covariate_names,
     threshold_name='N_typed_monthly_mean',
     threshold=threshold,
-    top_n=1,
+    top_n=2,
     verbose=True, # setting to false not allowed
     policy='multiple',
     max_iterations_construction=1000,
-    max_iterations_sa=50,
+    max_iterations_sa=20,
 )
 
 n_clusters = []
@@ -496,7 +496,11 @@ Z = linkage(squareform(distance, checks=False), method='average')
 # Choose number of clusters k
 geography['consensus_clusters_hierarchical'] = fcluster(Z, n_clusters, criterion='maxclust')
 
-
+# Save clustermap
+import seaborn as sns
+sns.clustermap(1-distance, cmap='viridis')
+plt.savefig(os.path.join(output_folder, f'clustermap_probmatrix_{spatial_aggregation}.png'), dpi=300)
+plt.close()
 
 # Recluster mean co-association matrix using spectral clustering
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
