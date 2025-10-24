@@ -176,7 +176,7 @@ with pm.Model() as model:
     # \kappa_{i,s,t}^{corr} ~ Normal(0, Q^{-1})                                                                                     # spatially correlated noise
 
     ## Regularisation of the overall noise
-    total_sigma = pm.HalfNormal("total_sigma", sigma=0.003)
+    total_sigma = pm.HalfNormal("total_sigma", sigma=0.004)
     a_CAR = pm.Beta("a_CAR", alpha=2, beta=1)
     a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.99)
 
@@ -260,7 +260,7 @@ with pm.Model() as model:
 
     # Overdispersion models
     ## Time-independent hierarchical overdispersion (per cluster)
-    d_cluster_hierarch = pm.HalfNormal("d_cluster_hierarch", sigma=1e-3)    # --> phi ~ 1000 --> low overdispersion
+    d_cluster_hierarch = pm.HalfNormal("d_cluster_hierarch", sigma=1/3)    # --> phi ~ 1000 --> low overdispersion
     d_cluster = pm.HalfNormal("d_cluster", sigma=d_cluster_hierarch, shape=n_clusters)
     phi = pm.Deterministic("phi", pt.repeat((1.0 / pm.math.maximum(d_cluster, 1e-12))[None, :], n_months, axis=0))
     alpha = phi[:, :, None] * p # Broadcast phi over serotypes

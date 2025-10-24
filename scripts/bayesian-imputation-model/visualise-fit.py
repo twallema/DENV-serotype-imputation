@@ -3,6 +3,7 @@ import arviz
 import argparse
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 from datetime import datetime
 import matplotlib.pyplot as plt
 
@@ -160,6 +161,21 @@ output  = output[["date", "cluster", "p_1", "p_2", "p_3", "p_4"]]
 output_mun = output.merge(mapping[["cluster", "CD_MUN"]], on="cluster", how="left")
 output_mun = output_mun[["date", "CD_MUN", "p_1", "p_2", "p_3", "p_4"]]
 output_mun = output_mun.sort_values(by=["date", "CD_MUN"]).reset_index(drop=True)
+# refetch incidence data & merge it
+inc = pd.read_csv(os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv'), parse_dates=['date'])
+output_mun = output_mun.merge(
+    inc[['CD_MUN', 'date', 'DENV_total']],
+    on=['CD_MUN', 'date'],
+    how='left'  # keeps all rows from df2
+)
+# fetch geodata to get population count
+geography = gpd.read_parquet(os.path.join(abs_dir, "../../data/interim/geographic-dataset.parquet"))
+output_mun = output_mun.merge(
+    geography[['CD_MUN', 'POP']],
+    on='CD_MUN',
+    how='left'
+)
+
 # save result
 output_mun.to_parquet(f'{output_folder}/DENV-serotypes-imputed_1996-2025_monthly.parquet', compression='brotli')
 

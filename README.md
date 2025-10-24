@@ -40,6 +40,8 @@ or alternatively, to update the environment (needed after adding a dependency),
 
 ## Running the pipeline
 
+See `~/scripts/run-pipeline.sh`
+
 ### Clustering
 
 1. Run the script `~/scripts/clustering/find-clusters.py` (script has input arguments) to cluster the Brazilian municipalities, immediate regions or intermediate regions using the max-p regionalisation algorithm. Output appears in `~/data/interim/pipeline_output/<ID>/clusters`. The input of the pipeline are the covariates used in the clustering.

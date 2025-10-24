@@ -1,4 +1,4 @@
-import os
+import sys,os
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -213,7 +213,7 @@ if region:
 
 # Compute the mimimum sum of serotyped cases across all years (will have to be changed)
 # limit time window (before 1999 will likely be excluded because it's way too limited; from 2019 onwards all regions have good subtyping)
-denv = denv[((denv['date'] > datetime(2000,1,1)) & (denv['date'] < datetime(2008,1,1)))]
+denv = denv[((denv['date'] > datetime(2000,1,1)) & (denv['date'] < datetime(2019,1,1)))]
 # extract year
 denv["year"] = pd.to_datetime(denv["date"]).dt.year
 # compute total cases per month
@@ -221,7 +221,7 @@ denv["N_typed"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
 # sum cases by year
 active_sum = denv.groupby([f'{region}',"year"])['N_typed'].sum().reset_index()
 # take mean across years
-mean_active_sum = active_sum.groupby(f'{region}')["N_typed"].mean().reset_index() # array for clustering
+mean_active_sum = active_sum.groupby(f'{region}')["N_typed"].median().reset_index() # array for clustering
 mean_active_sum.rename(columns={"N_typed":"N_typed_monthly_mean"}, inplace=True)
 # merge min_yearly_sum
 geography = geography.merge(mean_active_sum, on=f'{region}', how="left")
@@ -386,19 +386,22 @@ model = MaxPHeuristic(
     attrs_name=covariate_names,
     threshold_name='N_typed_monthly_mean',
     threshold=threshold,
-    top_n=1,
-    verbose=True,
+    top_n=2,
+    verbose=True, # setting to false not allowed
     policy='multiple',
     max_iterations_construction=1000,
-    max_iterations_sa=50,
+    max_iterations_sa=20,
 )
-
 
 n_clusters = []
 matrices = []
 clusters = pd.DataFrame(index=geography[region].values)
 
-with open("maxp_stdout.log", "w") as f, redirect_stdout(f): # temporarily sends all output to f
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+print(f"Temporarily redirecting stdout to: {os.path.join(abs_dir, f"maxp_stdout_{timestamp}.log")}") # warn user log output is being redirected
+sys.stdout.flush()  # make sure it's flushed to the logs
+
+with open(os.path.join(abs_dir, f"maxp_stdout_{timestamp}.log"), "w") as f, redirect_stdout(f): # temporarily sends all output to f
     for numRun in range(n):
         print(f"Starting clustering run {numRun+1} of {n}")
 
@@ -421,7 +424,7 @@ with open("maxp_stdout.log", "w") as f, redirect_stdout(f): # temporarily sends 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 best_obj_vals = []
-with open ("maxp_stdout.log") as f:
+with open(os.path.join(abs_dir,f"maxp_stdout_{timestamp}.log")) as f:
     lines = f.readlines()
 for i, line in enumerate(lines):
     if "best objective value:" in line.lower():
@@ -429,7 +432,7 @@ for i, line in enumerate(lines):
         best_obj_vals.append(val)
 # Softmax with temperature
 weights = softmax(-np.asarray(best_obj_vals))
-os.remove("maxp_stdout.log")
+os.remove(os.path.join(abs_dir,f"maxp_stdout_{timestamp}.log"))
 
 
 # Average co-association matrices across runs
@@ -483,14 +486,21 @@ plt.close()
 # Recluster mean co-association matrix using hierarchical clustering
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
+# hierarchical clustering needs distance matrix
+distance = 1 - prob_matrix
+distance = np.clip(distance, 0, 1) # some distances may become very very small negative numbers 
 
 # Perform hierarchical clustering (average linkage)
-Z = linkage(squareform(1 - prob_matrix, checks=False), method='average')
+Z = linkage(squareform(distance, checks=False), method='average')
 
 # Choose number of clusters k
 geography['consensus_clusters_hierarchical'] = fcluster(Z, n_clusters, criterion='maxclust')
 
-
+# Save clustermap
+import seaborn as sns
+sns.clustermap(1-distance, cmap='viridis')
+plt.savefig(os.path.join(output_folder, f'clustermap_probmatrix_{spatial_aggregation}.png'), dpi=300)
+plt.close()
 
 # Recluster mean co-association matrix using spectral clustering
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
