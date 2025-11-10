@@ -38,7 +38,8 @@ echo "[$(date)] Running find-clusters.py..." | tee -a "$LOG_DIR/pipeline.log"
 python clustering/find-clusters.py \
     -ID "$RUN_ID" \
     -spatial_aggregation "$SPATIAL_AGGREGATION" \
-    -n 500 \
+    -n 100 \
+    -max_iterations_sa 10 \
     -threshold 35 \
     -compactness False \
     -biome False \
