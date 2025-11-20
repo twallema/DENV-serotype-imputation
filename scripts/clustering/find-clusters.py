@@ -434,7 +434,8 @@ for i, line in enumerate(lines):
         val = float(lines[i+1].strip())
         best_obj_vals.append(val)
 # Softmax with temperature
-weights = softmax(-np.asarray(best_obj_vals))
+T = (25/1300) * (np.mean(best_obj_vals))
+weights = softmax(-np.asarray(best_obj_vals)/T)
 os.remove(os.path.join(abs_dir,f"maxp_stdout_{timestamp}.log"))
 
 
