@@ -48,6 +48,10 @@ These data are partly confidential and can be found on the Bento lab box.
 
 + `DENV_per_100k_mun.csv`: Total dengue incidence per 100K inhabitants at the municipality level. Made using the formatted linelist data in `data/interim/datasus_DENV-linelist` and `data/conversion/build_dengue-incidence-100k.py`.
 
+### Nearest hypermetro
+
++ `nearest-hypermetro_mun.csv`: Brazilian municipalities clustered to their nearest hypermetropolitan area. Made using `data/conversion/build_closest-hypermetro-area.R` using data downloaded using the geobr package.
+
 ### Datasus DENV linelist dataset
 
 #### UF

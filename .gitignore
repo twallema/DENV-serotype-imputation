@@ -167,6 +167,7 @@ dmypy.json
 
 # R
 .Rhistory
+.RData
 
 # Data
 data/raw/datasus_DENV-linelist/composite_dataset/composite_*

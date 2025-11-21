@@ -38,7 +38,8 @@ parser.add_argument("-n", type=int, help="Number of clustering runs to average."
 parser.add_argument("-threshold", type=float, help="Minimal number of serotyped cases in a cluster.", default=50)
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
 # covariates
-parser.add_argument("-compactness", type=str_to_bool, help="Include cluster compactness as a covariate in clustering.", default=True)
+parser.add_argument("-compactness", type=str_to_bool, help="Include cluster compactness as a covariate in clustering.", default=False)
+parser.add_argument("-nearest_hypermetro", type=str_to_bool, help="Include nearest hypermetro area as a covariate in clustering.", default=True)
 parser.add_argument("-biome", type=str_to_bool, help="Include biome covariate in clustering.", default=False)
 parser.add_argument("-koppen", type=str_to_bool, help="Include Koppen climate classification covariate in clustering.", default=False)
 parser.add_argument("-human_footprint", type=str_to_bool, help="Include human footprint classification covariate in clustering.", default=True)
@@ -57,6 +58,7 @@ include_biome = args.biome
 include_koppen = args.koppen
 include_human_footprint = args.human_footprint
 include_compactness = args.compactness
+include_nearest_hypermetro = args.nearest_hypermetro
 include_denv_100k_cumulative = args.denv_100k_cumulative
 include_denv_100k_DTW = args.denv_100k_DTW
 include_indexP_DTW = args.indexP_DTW
@@ -135,6 +137,8 @@ DTW_covariates_serotypes = pd.read_csv(os.path.join(abs_dir, f'../../data/interi
 DTW_covariates_indexP = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/indexP/DTW-MDS-embedding_{spatial_aggregation}.csv'))
 region = DTW_covariates_indexP.columns.to_list()[0]
 
+# Load nearest hypermetro area
+nearest_hypermetro = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/nearest-hypermetro/nearest-hypermetro_{spatial_aggregation}.csv'))
 
 
 # Aggregate incidence and geographical dataset to the intermediate/immediate regions
@@ -267,6 +271,25 @@ for col in koppen_dummies.columns:
 if include_koppen:
     covariate_names.extend(koppen_dummies.columns.to_list())
 
+
+# Make nearest hypermetro area covariate
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# Make dummies for the nearest hypermetro covariate
+nearest_hypermetro_dummies = pd.get_dummies(nearest_hypermetro['hypermetro_id'], prefix="nearest_hypermetro")
+# Merge to the geography dataframe
+geography = geography.merge(
+    nearest_hypermetro_dummies, 
+    left_index=True, 
+    right_index=True, 
+    how="left"
+)
+# Ensure nearest_hypermetro dummies are int (0/1)
+for col in nearest_hypermetro_dummies.columns:
+    geography[col] = geography[col].astype(float)
+# add to covariate name mapping
+if include_nearest_hypermetro:
+    covariate_names.extend(nearest_hypermetro_dummies.columns.to_list())
 
 
 # Make human footprint covariate
