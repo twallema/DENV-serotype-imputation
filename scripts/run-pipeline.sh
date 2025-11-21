@@ -42,6 +42,7 @@ python clustering/find-clusters.py \
     -max_iterations_sa 10 \
     -threshold 35 \
     -compactness False \
+    -nearest_hypermetro False \
     -biome False \
     -koppen False \
     -human_footprint False \
