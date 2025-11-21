@@ -76,9 +76,25 @@ ggplot() + theme_void() + theme_bw() +
 
 
 
+# Compute final result
+metro_polys2 <- st_transform(metro_polys, 3857)
+munis2 <- st_transform(shape_munis, 3857)
 
+nearest_idx <- st_nearest_feature(munis2, metro_polys2)
+munis_in_hypermetro <- munis2 %>%
+  mutate(cluster_id = metro_polys2$cluster_id[nearest_idx])
 
-
+### Visualise nearest hypermetro areas
+n_cols <- length(unique(munis_in_hypermetro$cluster_id))
+cols <- randomColor(n_cols, luminosity = "bright")
+ggplot() + theme_void() + theme_bw() + 
+  ggtitle("Urban clusters") +
+  geom_sf(data = shape_states, color="black") +
+  geom_sf(data = metro_polys, color='grey') +
+  geom_sf(data = munis_in_hypermetro, aes(fill=factor(cluster_id)), alpha=0.5) +
+  scale_fill_manual(values = cols) +
+  theme(legend.position = "none") #+
+#coord_sf(xlim = c(-50, -40), ylim = c(-25, -20))
 
 
 
