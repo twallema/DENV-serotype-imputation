@@ -35,8 +35,8 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
 parser.add_argument("-n", type=int, help="Number of clustering runs to average.", default=250)
-parser.add_argument("-max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=20)
-parser.add_argument("-threshold", type=float, help="Minimal number of serotyped cases in a cluster.", default=50)
+parser.add_argument("-max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=10)
+parser.add_argument("-threshold", type=float, help="Minimal number of serotyped cases in a cluster.", default=30)
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
 # covariates
 parser.add_argument("-compactness", type=str_to_bool, help="Include cluster compactness as a covariate in clustering.", default=False)
