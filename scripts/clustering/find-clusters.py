@@ -41,7 +41,7 @@ parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation 
 # covariates
 parser.add_argument("-compactness", type=str_to_bool, help="Include cluster compactness as a covariate in clustering.", default=False)
 parser.add_argument("-nearest_hypermetro", type=str_to_bool, help="Include nearest hypermetro area as a covariate in clustering.", default=True)
-parser.add_argument("-biome", type=str_to_bool, help="Include biome covariate in clustering.", default=False)
+parser.add_argument("-biome", type=str_to_bool, help="Include biome covariate in clustering.", default=True)
 parser.add_argument("-koppen", type=str_to_bool, help="Include Koppen climate classification covariate in clustering.", default=False)
 parser.add_argument("-human_footprint", type=str_to_bool, help="Include human footprint classification covariate in clustering.", default=True)
 parser.add_argument("-denv_100k_cumulative", type=str_to_bool, help="Include confirmed cumulative DENV incidence per 100K as a covariate in clustering.", default=False)
