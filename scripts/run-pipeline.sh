@@ -14,6 +14,7 @@ set -o pipefail  # safer error handling
 
 RUN_ID="indexP"                 
 SPATIAL_AGGREGATION="rgint"
+VALIDATION_BW=0
 
 # ------------------------------------------------------
 # Create a log directory
@@ -38,7 +39,8 @@ echo "[$(date)] Running find-clusters.py..." | tee -a "$LOG_DIR/pipeline.log"
 python clustering/find-clusters.py \
     -ID "$RUN_ID" \
     -spatial_aggregation "$SPATIAL_AGGREGATION" \
-    -n 100 \
+    -validation_bw "$VALIDATION_BW" \
+    -n 200 \
     -max_iterations_sa 10 \
     -threshold 35 \
     -compactness False \

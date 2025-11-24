@@ -38,6 +38,7 @@ parser.add_argument("-n", type=int, help="Number of clustering runs to average."
 parser.add_argument("-max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=10)
 parser.add_argument("-threshold", type=float, help="Minimal number of serotyped cases in a cluster.", default=30)
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
+parser.add_argument("-validation_bw", type=float, help="Fraction of spatial units left out for within-sample validation.", default=0)
 # covariates
 parser.add_argument("-compactness", type=str_to_bool, help="Include cluster compactness as a covariate in clustering.", default=True)
 parser.add_argument("-nearest_hypermetro", type=str_to_bool, help="Include nearest hypermetro area as a covariate in clustering.", default=True)
@@ -56,6 +57,7 @@ n = args.n
 max_iterations_sa = args.max_iterations_sa
 threshold = args.threshold
 spatial_aggregation = args.spatial_aggregation
+validation_bw = args.validation_bw
 include_biome = args.biome
 include_koppen = args.koppen
 include_human_footprint = args.human_footprint
@@ -215,8 +217,8 @@ if region:
    
 
 
-# Compute threshold
-# >>>>>>>>>>>>>>>>>
+# Compute threshold & leave out within-sample validation
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # Compute the mimimum sum of serotyped cases across all years (will have to be changed)
 # limit time window (before 1999 will likely be excluded because it's way too limited; from 2019 onwards all regions have good subtyping)
@@ -226,12 +228,35 @@ denv["year"] = pd.to_datetime(denv["date"]).dt.year
 # compute total cases per month
 denv["N_typed"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
 # sum cases by year
-active_sum = denv.groupby([f'{region}',"year"])['N_typed'].sum().reset_index()
+yearly_sum = denv.groupby([f'{region}',"year"])['N_typed'].sum().reset_index()
 # take mean across years
-mean_active_sum = active_sum.groupby(f'{region}')["N_typed"].median().reset_index() # array for clustering
-mean_active_sum.rename(columns={"N_typed":"N_typed_monthly_mean"}, inplace=True)
+yearly_sum_median = yearly_sum.groupby(f'{region}')["N_typed"].mean() # array for clustering
+yearly_sum_median.rename("N_typed_yearly_median", inplace=True)
+
+# perform training-validation split
+validation_center = 0.5
+validation_labels = yearly_sum_median.loc[((yearly_sum_median > np.quantile(yearly_sum_median, q=validation_center-validation_bw)) & (yearly_sum_median < np.quantile(yearly_sum_median, q=validation_center+validation_bw)))].index.values
+pd.DataFrame(data=validation_labels, columns=[f'{region}',]).to_csv(os.path.join(output_folder, 'validation_labels.csv'), index=False)
+yearly_sum_median.loc[validation_labels] = 0
+
+# visualise where the left out areas are
+geography['validation_labels'] = geography[f'{region}'].isin(validation_labels)
+fig,ax=plt.subplots()
+geography.plot(
+    column='validation_labels',
+    categorical=True,
+    linewidth=0.2,
+    edgecolor="grey",
+    legend=False,
+    ax=ax
+)
+ax.set_title('Areas left out during within-sample validation', fontsize=10)
+ax.axis("off")
+plt.savefig(os.path.join(output_folder, 'validation_labels.png'), dpi=300)
+plt.close()
+
 # merge min_yearly_sum
-geography = geography.merge(mean_active_sum, on=f'{region}', how="left")
+geography = geography.merge(yearly_sum_median, on=f'{region}', how="left")
 
 
 
@@ -410,7 +435,7 @@ model = MaxPHeuristic(
     geography,
     w, 
     attrs_name=covariate_names,
-    threshold_name='N_typed_monthly_mean',
+    threshold_name='N_typed_yearly_median',
     threshold=threshold,
     top_n=2,
     verbose=True, # setting to false not allowed
