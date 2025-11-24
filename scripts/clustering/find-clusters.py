@@ -39,7 +39,7 @@ parser.add_argument("-max_iterations_sa", type=int, help="Number of simulated an
 parser.add_argument("-threshold", type=float, help="Minimal number of serotyped cases in a cluster.", default=30)
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
 # covariates
-parser.add_argument("-compactness", type=str_to_bool, help="Include cluster compactness as a covariate in clustering.", default=False)
+parser.add_argument("-compactness", type=str_to_bool, help="Include cluster compactness as a covariate in clustering.", default=True)
 parser.add_argument("-nearest_hypermetro", type=str_to_bool, help="Include nearest hypermetro area as a covariate in clustering.", default=True)
 parser.add_argument("-biome", type=str_to_bool, help="Include biome covariate in clustering.", default=True)
 parser.add_argument("-koppen", type=str_to_bool, help="Include Koppen climate classification covariate in clustering.", default=False)
