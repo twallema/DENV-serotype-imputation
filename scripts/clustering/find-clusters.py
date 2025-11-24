@@ -35,12 +35,13 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
 parser.add_argument("-n", type=int, help="Number of clustering runs to average.", default=250)
-parser.add_argument("-threshold", type=float, help="Minimal number of serotyped cases in a cluster.", default=50)
+parser.add_argument("-max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=10)
+parser.add_argument("-threshold", type=float, help="Minimal number of serotyped cases in a cluster.", default=30)
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
 # covariates
-parser.add_argument("-compactness", type=str_to_bool, help="Include cluster compactness as a covariate in clustering.", default=False)
+parser.add_argument("-compactness", type=str_to_bool, help="Include cluster compactness as a covariate in clustering.", default=True)
 parser.add_argument("-nearest_hypermetro", type=str_to_bool, help="Include nearest hypermetro area as a covariate in clustering.", default=True)
-parser.add_argument("-biome", type=str_to_bool, help="Include biome covariate in clustering.", default=False)
+parser.add_argument("-biome", type=str_to_bool, help="Include biome covariate in clustering.", default=True)
 parser.add_argument("-koppen", type=str_to_bool, help="Include Koppen climate classification covariate in clustering.", default=False)
 parser.add_argument("-human_footprint", type=str_to_bool, help="Include human footprint classification covariate in clustering.", default=True)
 parser.add_argument("-denv_100k_cumulative", type=str_to_bool, help="Include confirmed cumulative DENV incidence per 100K as a covariate in clustering.", default=False)
@@ -52,6 +53,7 @@ args = parser.parse_args()
 # assign to desired variables
 ID = args.ID
 n = args.n
+max_iterations_sa = args.max_iterations_sa
 threshold = args.threshold
 spatial_aggregation = args.spatial_aggregation
 include_biome = args.biome
@@ -64,8 +66,9 @@ include_denv_100k_DTW = args.denv_100k_DTW
 include_indexP_DTW = args.indexP_DTW
 include_serotypes_DTW = args.serotypes_DTW
 
+
 # pipeline output folder
-abs_dir = os.path.dirname(__file__) # make sure all referenced paths are relative to the lcoation of this file and not the terminal's pwd
+abs_dir = os.path.dirname(__file__) # make sure all referenced paths are relative to the location of this file and not the terminal's pwd
 output_folder = os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/')
 # check if output dir exists, if not, make it
 if not os.path.exists(output_folder):
@@ -413,7 +416,7 @@ model = MaxPHeuristic(
     verbose=True, # setting to false not allowed
     policy='multiple',
     max_iterations_construction=1000,
-    max_iterations_sa=20,
+    max_iterations_sa  = max_iterations_sa,
 )
 
 n_clusters = []
@@ -454,7 +457,8 @@ for i, line in enumerate(lines):
         val = float(lines[i+1].strip())
         best_obj_vals.append(val)
 # Softmax with temperature
-weights = softmax(-np.asarray(best_obj_vals))
+T = (25/1300) * (np.mean(best_obj_vals))
+weights = softmax(-np.asarray(best_obj_vals)/T)
 os.remove(os.path.join(abs_dir,f"maxp_stdout_{timestamp}.log"))
 
 
