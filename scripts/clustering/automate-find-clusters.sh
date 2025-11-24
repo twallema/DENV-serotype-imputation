@@ -39,6 +39,7 @@ for SA in "${SA_VALUES[@]}"; do
             COMPACTNESS=False
             BIOME=False
             KOPPEN=False
+            METRO=False
             HUMAN_FOOTPRINT=False
             DENV_100K_CUMULATIVE=False
             DENV_100K_DTW=False
@@ -59,6 +60,7 @@ for SA in "${SA_VALUES[@]}"; do
                 -max_iterations_sa "$SA" \
                 -threshold 35 \
                 -compactness $COMPACTNESS \
+                -nearest_hypermetro $METRO\
                 -biome $BIOME \
                 -koppen $KOPPEN \
                 -human_footprint $HUMAN_FOOTPRINT \
