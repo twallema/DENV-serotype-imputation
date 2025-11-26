@@ -36,7 +36,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
 parser.add_argument("-n", type=int, help="Number of clustering runs to average.", default=250)
 parser.add_argument("-max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=10)
-parser.add_argument("-threshold", type=float, help="Minimal number of serotyped cases in a cluster.", default=30)
+parser.add_argument("-threshold", type=float, help="Minimal number of serotyped cases in a cluster.", default=50)
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
 parser.add_argument("-validation_bw", type=float, help="Fraction of spatial units left out for within-sample validation.", default=0)
 # covariates
@@ -236,8 +236,11 @@ yearly_sum_median.rename("N_typed_yearly_median", inplace=True)
 # perform training-validation split
 validation_center = 0.5
 validation_labels = yearly_sum_median.loc[((yearly_sum_median > np.quantile(yearly_sum_median, q=validation_center-validation_bw)) & (yearly_sum_median < np.quantile(yearly_sum_median, q=validation_center+validation_bw)))].index.values
-pd.DataFrame(data=validation_labels, columns=[f'{region}',]).to_csv(os.path.join(output_folder, 'validation_labels.csv'), index=False)
 yearly_sum_median.loc[validation_labels] = 0
+
+# convert validation labels to municipality level (because the incidence data used in the bayesian model is too)
+validation_labels_muni = muncipality_region_map[muncipality_region_map[f'{region}'].isin(validation_labels)]['CD_MUN']
+validation_labels_muni.to_csv(os.path.join(output_folder, 'validation_labels.csv'), index=False)
 
 # visualise where the left out areas are
 geography['validation_labels'] = geography[f'{region}'].isin(validation_labels)
