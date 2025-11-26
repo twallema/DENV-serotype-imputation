@@ -26,7 +26,7 @@ def str_to_bool(value):
 parser = argparse.ArgumentParser()
 parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
-parser.add_argument("-chains", type=int, help="Number of parallel chains.", default=4)
+parser.add_argument("-chains", type=int, help="Number of parallel chains.", default=3)
 parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
 parser.add_argument("-q", type=int, help="Order of MA(q) process.", default=1)
 args = parser.parse_args()
@@ -282,9 +282,9 @@ with pm.Model() as model:
 
 
 # NUTS
-draws=100
+draws=500
 with model:
-    trace = pm.sample(draws, tune=100, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(draws, tune=1500, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 
 #######################
