@@ -234,8 +234,12 @@ yearly_sum_median = yearly_sum.groupby(f'{region}')["N_typed"].mean() # array fo
 yearly_sum_median.rename("N_typed_yearly_median", inplace=True)
 
 # perform training-validation split
-validation_center = 0.5
-validation_labels = yearly_sum_median.loc[((yearly_sum_median > np.quantile(yearly_sum_median, q=validation_center-validation_bw)) & (yearly_sum_median < np.quantile(yearly_sum_median, q=validation_center+validation_bw)))].index.values
+## Take validation_bw around Q1 territories
+validation_center = 0.25
+validation_labels = yearly_sum_median.loc[((yearly_sum_median > np.quantile(yearly_sum_median, q=validation_center-validation_bw)) & (yearly_sum_median < np.quantile(yearly_sum_median, q=validation_center+validation_bw)))].index.values.tolist()
+## Take validation_bw around Q2 territories
+validation_center = 0.50
+validation_labels.extend(yearly_sum_median.loc[((yearly_sum_median > np.quantile(yearly_sum_median, q=validation_center-validation_bw)) & (yearly_sum_median < np.quantile(yearly_sum_median, q=validation_center+validation_bw)))].index.values.tolist())
 yearly_sum_median.loc[validation_labels] = 0
 
 # convert validation labels to municipality level (because the incidence data used in the bayesian model is too)
@@ -257,6 +261,7 @@ ax.set_title('Areas left out during within-sample validation', fontsize=10)
 ax.axis("off")
 plt.savefig(os.path.join(output_folder, 'validation_labels.png'), dpi=300)
 plt.close()
+
 
 # merge min_yearly_sum
 geography = geography.merge(yearly_sum_median, on=f'{region}', how="left")
