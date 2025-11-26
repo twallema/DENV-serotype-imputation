@@ -50,6 +50,11 @@ if not os.path.exists(output_folder):
 ## Preparing the data ##
 ########################
 
+# Load left out spatial units
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+validation_labels = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/validation_labels.csv')).squeeze()
+
 # Load clusters
 # >>>>>>>>>>>>>
 
@@ -65,7 +70,6 @@ mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_m
 # ~~~~~~~~~~~~~~~~
 
 W = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/adjacency_matrix_{spatial_aggregation}.csv'), index_col=0).values
-
 
 # Incidence data
 # ~~~~~~~~~~~~~~
@@ -84,7 +88,10 @@ df = df.sort_values(["CD_MUN", "date"]).reset_index(drop=True)
 # 3. Take only from startdate
 df = df[df['date'] > startdate]
 
-# 4. Aggregate to the spatial clusters
+# 4. Remove within-sample validation municipalities
+df.loc[df['CD_MUN'].isin(validation_labels.values), ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'DENV_total'] ] = np.nan
+
+# 5. Aggregate to the spatial clusters
 # make right mapping
 mapping = mapping[['CD_MUN', f'{region}']]
 mapping = clusters.merge(mapping, on=f'{region}', how="left")
@@ -119,22 +126,22 @@ agg_2.loc[mask] = agg_2.loc[mask].fillna(0)
 ## merge both dataframes
 df = agg_1.merge(agg_2)
 
-# 5. Add number of serotyped cases
+# 6. Add number of serotyped cases
 df["N_typed"] = df[sero_cols].sum(axis=1, skipna=False)           # if serotypes available --> sum them
 df.loc[df[sero_cols].isna().all(axis=1), 'N_typed'] = np.nan      # if all serotypes are Nan --> N_typed = 0 --> Wait, I don't think this is appropriate.
 
-# 6. Compute delta (typing fraction)
+# 7. Compute delta (typing fraction)
 df["delta"] = df["N_typed"] / df["DENV_total"]
 df['delta'] = df['delta'].where(df['N_typed'] > 0, np.nan) # When N_typed == 0, we don't know delta — mark as missing
 df["delta"] = df["delta"].clip(lower=1e-12, upper=1 - 1e-12)
 
-# 7. Compute year and month index
+# 8. Compute year and month index
 df["year"] = pd.to_datetime(df["date"]).dt.year
 df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
 
 
-# 8. Build PyMC arrays
+# 9. Build PyMC arrays
 # --- For Multinomial model (subtypes, only when typed) ---
 # Total number of typed cases
 N_typed = df.pivot(index="date", columns="cluster", values="N_typed").to_numpy().astype(int)    # (n_months, n_clusters)
