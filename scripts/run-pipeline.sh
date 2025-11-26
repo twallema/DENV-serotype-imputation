@@ -12,9 +12,9 @@ set -o pipefail  # safer error handling
 # Define pipeline run variables
 # ------------------------------------------------------
 
-RUN_ID="indexP"                 
+RUN_ID="default_rgint"                 
 SPATIAL_AGGREGATION="rgint"
-VALIDATION_BW=0
+VALIDATION_BW=0.025
 
 # ------------------------------------------------------
 # Create a log directory
@@ -40,14 +40,14 @@ python clustering/find-clusters.py \
     -ID "$RUN_ID" \
     -spatial_aggregation "$SPATIAL_AGGREGATION" \
     -validation_bw "$VALIDATION_BW" \
-    -n 200 \
+    -n 250 \
     -max_iterations_sa 10 \
-    -threshold 35 \
-    -compactness False \
-    -nearest_hypermetro False \
-    -biome False \
+    -threshold 75 \
+    -compactness True \
+    -nearest_hypermetro True \
+    -biome True \
     -koppen False \
-    -human_footprint False \
+    -human_footprint True \
     -denv_100k_cumulative False \
     -denv_100k_DTW False \
     -indexP_DTW True \
