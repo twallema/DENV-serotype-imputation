@@ -54,9 +54,9 @@ trace = arviz.from_netcdf(f"{output_folder}/trace.nc")
 # Load the posterior samples
 posterior_predictive = arviz.from_netcdf(f"{output_folder}/posterior_predictive.nc")
 
-##################################
-## Preparing the incidence data ##
-##################################
+###########################################################################
+## Preparing the incidence data (excludes within-sample validation data) ##
+###########################################################################
 
 # Load left out spatial units
 validation_labels = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/validation_labels.csv')).squeeze()
@@ -83,6 +83,13 @@ df = df.sort_values(["CD_MUN", "date"]).reset_index(drop=True)
 df = df[df['date'] > startdate]
 
 # 4. Remove within-sample validation municipalities
+## Save validation data
+df_validation = df.loc[df['CD_MUN'].isin(validation_labels.values)]
+## Add the cluster label
+mapping = mapping[['CD_MUN', f'{region}']]
+mapping = clusters.merge(mapping, on=f'{region}', how="left")
+df_validation = df_validation.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
+## Remove from visualisation dataset
 df.loc[df['CD_MUN'].isin(validation_labels.values), ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'DENV_total'] ] = np.nan
 
 # 5. Aggregate to the spatial clusters
@@ -185,6 +192,42 @@ output_mun = output_mun.merge(
 # save result
 output_mun.to_parquet(f'{output_folder}/DENV-serotypes-imputed_1996-2025_monthly.parquet', compression='brotli')
 
+##############################################
+## Compute within-sample validation metrics ##
+##############################################
+
+# Extract p_i per municipality
+df_p = output_mun.loc[output_mun['CD_MUN'].isin(validation_labels.values)][['date', 'CD_MUN', 'p_1', 'p_2', 'p_3', 'p_4']]
+
+# Extract phi per cluster
+phi_mean = df[['cluster','date']]
+phi_mean['phi'] = trace['posterior']['phi'].mean(dim=['chain','draw']).values.flatten()
+phi_mean = phi_mean.set_index(['cluster','date'])
+phi_mean = phi_mean.groupby(by='cluster')['phi'].mean()
+
+# Merge p_i and phi --> compute alpha_i = p_i * phi
+df_p = df_p.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
+df_p = df_p.merge(phi_mean, on='cluster', how='left')
+df_p[['a_1', 'a_2', 'a_3', 'a_4']] = df_p[['p_1', 'p_2', 'p_3', 'p_4']].values * df_p[['phi']].values
+
+# Only evaluate log-likelihood when data are valid
+mask = ~df_validation[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].isna().all(axis=1)
+df_validation = df_validation.dropna(subset=['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4'], how='all')
+df_validation = df_validation.fillna(0)
+df_p = df_p.loc[mask]
+
+# Compute log likelihood
+from scipy.stats import dirichlet_multinomial
+x = df_validation[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].values
+n = np.sum(x, axis=1)
+alpha = df_p[['a_1', 'a_2', 'a_3', 'a_4']].values
+logp = dirichlet_multinomial.logpmf(x=x, alpha=alpha, n=n)
+
+# Save result
+df_validation['ll_dirichletmultinomial'] = logp
+df_validation[['p_1', 'p_2', 'p_3', 'p_4']] = df_p[['p_1', 'p_2', 'p_3', 'p_4']].values
+df_validation['phi'] = df_p[['phi']].values
+df_validation[['date', 'CD_MUN', 'cluster', 'phi', 'DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'p_1', 'p_1', 'p_3', 'p_4', 'll_dirichletmultinomial']].to_csv(f'{output_folder}/validation_loglikelihood.csv', index=False)
 
 
 ################################################
