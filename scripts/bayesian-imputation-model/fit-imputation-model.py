@@ -282,9 +282,9 @@ with pm.Model() as model:
 
 
 # NUTS
-draws=500
+draws=100
 with model:
-    trace = pm.sample(draws, tune=2000, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(draws, tune=100, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 
 #######################
