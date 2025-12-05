@@ -187,7 +187,7 @@ with pm.Model() as model:
     a_CAR = pm.Beta("a_CAR", alpha=2, beta=1)
     a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.99)
 
-    ## Temporal correlation structure: Quadratically decaying weights (gamma=1) summing to one to guarantee non-stationarity
+    ## Temporal correlation structure: Quadratically decaying weights (gamma=2) summing to one to guarantee non-stationarity
     gamma = 2
     first_lag_p = pm.Deterministic("first_lag_p", critical_rho1(p, gamma))
     first_lag_q = pm.Deterministic("first_lag_q", critical_rho1(q, gamma))
@@ -202,7 +202,6 @@ with pm.Model() as model:
     L_Q = pt.slinalg.cholesky(Q)                        # Cholesky of precision: Q = L_Q @ L_Q.T  (lower-triangular)
     L_cov = pt.slinalg.solve(L_Q, pt.eye(n_clusters))   # Compute L_cov = L_Q^{-1} such that Sigma = L_cov @ L_cov.T = Q^{-1}
     chol_cov_scaled = total_sigma * L_cov               # scale covariance cholesky by total_sigma (put scale inside chol)
-
 
     ## Initialise AR(p) initial condition
     AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(p, n_clusters, n_serotypes))
