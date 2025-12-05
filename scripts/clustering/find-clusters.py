@@ -1,4 +1,4 @@
-import sys,os
+import io, sys, os
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -36,8 +36,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
 parser.add_argument("-n", type=int, help="Number of clustering runs to average.", default=250)
 parser.add_argument("-max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=10)
-parser.add_argument("-threshold", type=float, help="Minimal number of serotyped cases in a cluster.", default=30)
+parser.add_argument("-threshold", type=float, help="Minimal number of serotyped cases in a cluster.", default=75)
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
+parser.add_argument("-validation_bw", type=float, help="Fraction of spatial units left out for within-sample validation.", default=0)
 # covariates
 parser.add_argument("-compactness", type=str_to_bool, help="Include cluster compactness as a covariate in clustering.", default=True)
 parser.add_argument("-nearest_hypermetro", type=str_to_bool, help="Include nearest hypermetro area as a covariate in clustering.", default=True)
@@ -56,6 +57,7 @@ n = args.n
 max_iterations_sa = args.max_iterations_sa
 threshold = args.threshold
 spatial_aggregation = args.spatial_aggregation
+validation_bw = args.validation_bw
 include_biome = args.biome
 include_koppen = args.koppen
 include_human_footprint = args.human_footprint
@@ -215,8 +217,8 @@ if region:
    
 
 
-# Compute threshold
-# >>>>>>>>>>>>>>>>>
+# Compute threshold & leave out within-sample validation
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # Compute the mimimum sum of serotyped cases across all years (will have to be changed)
 # limit time window (before 1999 will likely be excluded because it's way too limited; from 2019 onwards all regions have good subtyping)
@@ -226,12 +228,43 @@ denv["year"] = pd.to_datetime(denv["date"]).dt.year
 # compute total cases per month
 denv["N_typed"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
 # sum cases by year
-active_sum = denv.groupby([f'{region}',"year"])['N_typed'].sum().reset_index()
+yearly_sum = denv.groupby([f'{region}',"year"])['N_typed'].sum().reset_index()
 # take mean across years
-mean_active_sum = active_sum.groupby(f'{region}')["N_typed"].median().reset_index() # array for clustering
-mean_active_sum.rename(columns={"N_typed":"N_typed_monthly_mean"}, inplace=True)
+yearly_sum_median = yearly_sum.groupby(f'{region}')["N_typed"].mean() # array for clustering
+yearly_sum_median.rename("N_typed_yearly_median", inplace=True)
+
+# perform training-validation split
+## Take validation_bw around Q1 territories
+validation_center = 0.25
+validation_labels = yearly_sum_median.loc[((yearly_sum_median > np.quantile(yearly_sum_median, q=validation_center-validation_bw)) & (yearly_sum_median < np.quantile(yearly_sum_median, q=validation_center+validation_bw)))].index.values.tolist()
+## Take validation_bw around Q2 territories
+validation_center = 0.50
+validation_labels.extend(yearly_sum_median.loc[((yearly_sum_median > np.quantile(yearly_sum_median, q=validation_center-validation_bw)) & (yearly_sum_median < np.quantile(yearly_sum_median, q=validation_center+validation_bw)))].index.values.tolist())
+yearly_sum_median.loc[validation_labels] = 0
+
+# convert validation labels to municipality level (because the incidence data used in the bayesian model is too)
+validation_labels_muni = muncipality_region_map[muncipality_region_map[f'{region}'].isin(validation_labels)]['CD_MUN']
+validation_labels_muni.to_csv(os.path.join(output_folder, 'validation_labels.csv'), index=False)
+
+# visualise where the left out areas are
+geography['validation_labels'] = geography[f'{region}'].isin(validation_labels)
+fig,ax=plt.subplots()
+geography.plot(
+    column='validation_labels',
+    categorical=True,
+    linewidth=0.2,
+    edgecolor="grey",
+    legend=False,
+    ax=ax
+)
+ax.set_title('Areas left out during within-sample validation', fontsize=10)
+ax.axis("off")
+plt.savefig(os.path.join(output_folder, 'validation_labels.png'), dpi=300)
+plt.close()
+
+
 # merge min_yearly_sum
-geography = geography.merge(mean_active_sum, on=f'{region}', how="left")
+geography = geography.merge(yearly_sum_median, on=f'{region}', how="left")
 
 
 
@@ -399,67 +432,128 @@ if include_serotypes_DTW:
 
 
 
-# Run max-p regionalization model `n` times 
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# Run max-p regionalization model `n` times in parallel
+# TODO: when packaging this code these 2 functions will go in the source code
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-# Build contiguity weight map
-w = Rook.from_dataframe(geography, use_index=False)
+from contextlib import redirect_stdout
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing as mp
 
-# Setup max-p regionalization model
-model = MaxPHeuristic(
-    geography,
-    w, 
-    attrs_name=covariate_names,
-    threshold_name='N_typed_monthly_mean',
-    threshold=threshold,
-    top_n=2,
-    verbose=True, # setting to false not allowed
-    policy='multiple',
-    max_iterations_construction=1000,
-    max_iterations_sa  = max_iterations_sa,
-)
+def run_single_maxp(
+    run_index, geography_df, region_col, covariate_names, threshold,
+    max_iterations_sa
+):
+    """
+    Worker function: rebuilds its own MaxP model & captures stdout inside process.
+    Returns (run_index, labels, co_assoc_matrix, best_obj_value)
+    """
+    # Local import to avoid multiprocessing overhead
+    from libpysal.weights import Rook
+    from spopt.region import MaxPHeuristic
 
-n_clusters = []
-matrices = []
-clusters = pd.DataFrame(index=geography[region].values)
+    # Build contiguity weights
+    w = Rook.from_dataframe(geography_df, use_index=False)
 
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-print(f"Temporarily redirecting stdout to: {os.path.join(abs_dir, f"maxp_stdout_{timestamp}.log")}") # warn user log output is being redirected
-sys.stdout.flush()  # make sure it's flushed to the logs
+    # Build model
+    model = MaxPHeuristic(
+        geography_df,
+        w,
+        attrs_name=covariate_names,
+        threshold_name="N_typed_yearly_median",
+        threshold=threshold,
+        top_n=2,
+        policy="multiple",
+        max_iterations_construction=1000,
+        max_iterations_sa=max_iterations_sa,
+        verbose=True
+    )
 
-with open(os.path.join(abs_dir, f"maxp_stdout_{timestamp}.log"), "w") as f, redirect_stdout(f): # temporarily sends all output to f
-    for numRun in range(n):
-        print(f"Starting clustering run {numRun+1} of {n}")
+    # Capture stdout
+    f = io.StringIO()
+    with redirect_stdout(f):
+        model.solve()
 
-        # run model
-        model.solve() 
+    stdout_data = f.getvalue().splitlines()
+    best_vals = []
 
-        # append the individual run to dataframes 
-        clusters[f'run_{numRun+1}'] = model.labels_
-        geography[f'run_{numRun+1}'] = model.labels_
+    # Parse stdout for objective value
+    for i, line in enumerate(stdout_data):
+        if "best objective value:" in line.lower():
+            try:
+                best_vals.append(float(stdout_data[i+1].strip()))
+            except:
+                pass
+    best_obj_value = best_vals[-1] if best_vals else np.nan
 
-        # save number of clusters
-        n_clusters.append(len(np.unique(model.labels_)))
+    # Build outputs
+    labels = model.labels_.copy()
+    coassoc = build_co_association_matrix(geography_df[region_col], labels)
 
-        # save a matrix of size (n_regions x n_regions) containing 1 if regions belong to the same cluster for every run
-        matrices.append(build_co_association_matrix(geography[region], model.labels_))
+    return run_index, labels, coassoc, best_obj_value
+
+
+def run_parallel_maxp(n_cores, n, geography, region, covariate_names, threshold, max_iterations_sa):
+
+    results = []
+    with ProcessPoolExecutor(max_workers=n_cores) as ex:
+        futures = [
+            ex.submit(
+                run_single_maxp,
+                run_index=i,
+                geography_df=geography,
+                region_col=region,
+                covariate_names=covariate_names,
+                threshold=threshold,
+                max_iterations_sa=max_iterations_sa,
+            )
+            for i in range(n)
+        ]
+
+        for fut in futures:
+            results.append(fut.result())
+
+    # Sort by run index so output ordering is guaranteed
+    results.sort(key=lambda x: x[0])
+
+    # Extract outputs
+    all_labels   = [r[1] for r in results]
+    all_matrices = [r[2] for r in results]
+    obj_vals     = [r[3] for r in results]
+
+    return all_labels, all_matrices, obj_vals
+
+# run model in parallel
+if __name__ == '__main__':
+    # default unix parallel process spawn method
+    mp.set_start_method("fork")
+    # run func
+    labels, matrices, best_obj_vals = run_parallel_maxp(
+        n_cores=mp.cpu_count(),
+        n=n,
+        max_iterations_sa=max_iterations_sa,
+        geography=geography,
+        region=f"{region}",
+        covariate_names=covariate_names,
+        threshold=threshold,
+    )
 
 
 
-# Extract best_obj_values from f and softmax them
+# Assign weights to every run using tuned softmax
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-best_obj_vals = []
-with open(os.path.join(abs_dir,f"maxp_stdout_{timestamp}.log")) as f:
-    lines = f.readlines()
-for i, line in enumerate(lines):
-    if "best objective value:" in line.lower():
-        val = float(lines[i+1].strip())
-        best_obj_vals.append(val)
-# Softmax with temperature
 T = (25/1300) * (np.mean(best_obj_vals))
 weights = softmax(-np.asarray(best_obj_vals)/T)
-os.remove(os.path.join(abs_dir,f"maxp_stdout_{timestamp}.log"))
+
+
+
+# Save individual runs in geography dataframe
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+for i in range(n):
+    geography[f'run_{i}'] = labels[i]
+
 
 
 # Average co-association matrices across runs
@@ -474,7 +568,7 @@ for association_matrix, weight in zip(matrices, weights):
 prob_matrix.to_csv(os.path.join(output_folder, f"prob_matrix_{spatial_aggregation}.csv"))
 
 # compute median number of clusters
-n_clusters = int(np.median(n_clusters))
+n_clusters = int(np.median([len(np.unique(l)) for l in labels]))
 
 # make a categorical color palette with n_clusters distinct colors
 glasbey_cmap = ListedColormap(create_palette(palette_size=n_clusters))
@@ -485,7 +579,7 @@ glasbey_cmap = ListedColormap(create_palette(palette_size=n_clusters))
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # 1. Get all run columns
-run_columns = [col for col in clusters.columns if col.startswith("run_")]
+run_columns = [col for col in geography.columns if col.startswith("run_")]
 # 2. Randomly pick 12 runs
 selected_runs = np.random.choice(run_columns, size=12, replace=False)
 # 3. Set up the 3x4 grid
@@ -528,6 +622,8 @@ import seaborn as sns
 sns.clustermap(1-distance, cmap='viridis')
 plt.savefig(os.path.join(output_folder, f'clustermap_probmatrix_{spatial_aggregation}.png'), dpi=300)
 plt.close()
+
+
 
 # Recluster mean co-association matrix using spectral clustering
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -579,9 +675,9 @@ clusters = clusters.rename(columns={'consensus_clusters_hierarchical': 'cluster'
 clusters.to_csv(os.path.join(output_folder, f"clusters_{spatial_aggregation}.csv"), index=False)
 
 
+
 # Build the clusters' adjacency matrix needed for the Bayesian imputation model
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
 
 # Step 1: Dissolve municipalities to state-level geometries
 clusters_geography = geography.dissolve(by='consensus_clusters_hierarchical', as_index=False)
