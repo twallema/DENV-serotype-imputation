@@ -6,12 +6,12 @@ set -o pipefail  # safer error handling
 
 SPATIAL_AGGREGATION="rgint"
 
-SA_VALUES=(10 20)
-N_VALUES=(100 500 1000)
+SA_VALUES=(10)
+N_VALUES=(500)
 
 COVARIATE_SETS=("default")
 
-RUN_ID=72
+RUN_ID=69
 REPS=(a b c d e)
 
 # RANDOM=42

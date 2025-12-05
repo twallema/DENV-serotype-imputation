@@ -71,7 +71,7 @@ include_serotypes_DTW = args.serotypes_DTW
 
 # pipeline output folder
 abs_dir = os.path.dirname(__file__) # make sure all referenced paths are relative to the location of this file and not the terminal's pwd
-output_folder = os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/')
+output_folder = os.path.join(abs_dir, f'../../data/interim/testing_find_clusters_output/{ID}/clusters/') # changed to testing location
 # check if output dir exists, if not, make it
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
@@ -543,7 +543,7 @@ if __name__ == '__main__':
 # Assign weights to every run using tuned softmax
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-T = (25/1300) * (np.mean(best_obj_vals))
+T = (50/1300) * (np.mean(best_obj_vals)) # Trying 50/1300
 weights = softmax(-np.asarray(best_obj_vals)/T)
 
 

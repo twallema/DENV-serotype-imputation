@@ -49,7 +49,7 @@ python clustering/find-clusters.py \
     -koppen False \
     -human_footprint True \
     -denv_100k_cumulative False \
-    -denv_100k_DTW False \
+    -denv_100k_DTW True \
     -indexP_DTW True \
     -serotypes_DTW False \
     > "$LOG_DIR/find-clusters.log" 2>&1
