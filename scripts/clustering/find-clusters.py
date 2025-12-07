@@ -701,9 +701,6 @@ for cluster_id in geography["consensus_clusters_hierarchical"].unique():
     plt.savefig(os.path.join(output_folder, f'clusters/cluster_{cluster_id}.png'), dpi=300)
     plt.close()
 
-import sys
-sys.exit()
-
 
 # Build the clusters' adjacency matrix needed for the Bayesian imputation model
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
