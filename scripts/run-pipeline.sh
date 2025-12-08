@@ -40,9 +40,9 @@ python clustering/find-clusters.py \
     -ID "$RUN_ID" \
     -spatial_aggregation "$SPATIAL_AGGREGATION" \
     -validation_bw "$VALIDATION_BW" \
-    -n 100 \
+    -n 500 \
     -max_iterations_sa 20 \
-    -threshold 90 \
+    -threshold 100 \
     -compactness True \
     -nearest_hypermetro True \
     -biome True \
