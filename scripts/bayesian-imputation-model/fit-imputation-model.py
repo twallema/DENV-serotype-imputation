@@ -183,7 +183,7 @@ with pm.Model() as model:
     # \kappa_{i,s,t}^{corr} ~ Normal(0, Q^{-1})                                                                                     # spatially correlated noise
 
     ## Regularisation of the overall noise
-    total_sigma = pm.HalfNormal("total_sigma", sigma=0.003)
+    total_sigma = pm.HalfNormal("total_sigma", sigma=0.0035)
     a_CAR = pm.Beta("a_CAR", alpha=2, beta=1)
     a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.99)
 
