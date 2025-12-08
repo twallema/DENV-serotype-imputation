@@ -6,6 +6,12 @@ Here we list a description of all datasets, raw datasets are unaltered original 
 
 + `indexP_monthlyclimate_allmuni.csv`: Index-P at the municipality level, seasonal average (monthly). Obtained from Dr. Laura Alexander. Papers supporting a correlation between index P and DENV transmission: https://pmc.ncbi.nlm.nih.gov/articles/PMC9610358/
 
+### Genetic sequence databases
+
++ `genbank_sequences.csv`: Metadata from the Brazilian Dengue sequences in Genbank. Downloaded from https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Nucleotide&VirusLineage_ss=Dengue%20virus,%20taxid:12637&Country_s=Brazil
+
++ `DENV1.tsv`/`DENV2.tsv`/etc.: Metadata from the Brazilian Dengue sequences in GISAID. Downloaded by Yining Sun on 2025-12-09.
+
 ### Skinner et al. 2023
 
 + `full_dataset.csv`: Dataset used in Skinner et al. (2023) Human footprint is associated with shifts in the assemblages of major vector-borne diseases. Nature Sustainability. Contains the human footprint for all except one Brazilian municipality (Lucena; 2508604) from 2013-2019. Downloaded from https://github.com/ckglidden/human-footprint-index-VBD/blob/main/data/full_dataset.csv.
