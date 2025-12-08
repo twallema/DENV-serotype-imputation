@@ -581,6 +581,9 @@ glasbey_cmap = ListedColormap(create_palette(palette_size=n_clusters))
 # Randomly select and visualize 12 runs on a 3x4 grid
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
+# load state boundaries
+gdf_states = gpd.read_parquet(os.path.join(abs_dir, "../../data/interim/geographic-dataset.parquet")).dissolve(by='CD_UF')
+
 # 1. Get all run columns
 run_columns = [col for col in geography.columns if col.startswith("run_")]
 # 2. Randomly pick 12 runs
@@ -590,6 +593,7 @@ fig, axes = plt.subplots(3, 4, figsize=(15, 15))
 axes = axes.flatten()
 # 4. Plot each run
 for ax, run in zip(axes, selected_runs):
+    gdf_states.boundary.plot(ax=ax, linewidth=0.5, color="black")   # state boundaries
     geography.plot(
         column=geography[run],
         categorical=True,
@@ -642,6 +646,7 @@ geography['consensus_clusters_spectral'] = sc.fit_predict(prob_matrix)+1
 # visualise clusters on a map
 fig, ax = plt.subplots(nrows=1, ncols=2)
 # hierarchical (left)
+gdf_states.boundary.plot(ax=ax[0], linewidth=0.5, color="black")   # state boundaries
 geography.plot(
     column="consensus_clusters_hierarchical",          # color regions by cluster label
     categorical=True,
@@ -655,6 +660,7 @@ geography.plot(
 ax[0].set_title(f"Hierarchical clustering", fontsize=14)
 ax[0].axis("off")
 # spectral (right)
+gdf_states.boundary.plot(ax=ax[1], linewidth=0.5, color="black")   # state boundaries
 geography.plot(
     column="consensus_clusters_spectral",          # color regions by cluster label
     categorical=True,
@@ -677,12 +683,10 @@ clusters = geography[[f'{region}', 'consensus_clusters_hierarchical']]
 clusters = clusters.rename(columns={'consensus_clusters_hierarchical': 'cluster'})
 clusters.to_csv(os.path.join(output_folder, f"clusters_{spatial_aggregation}.csv"), index=False)
 
+
+
 # Save a map of Brazil with every cluster highlighted
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-
-# load state boundaries
-gdf_states = gpd.read_parquet(os.path.join(abs_dir, "../../data/interim/geographic-dataset.parquet")).dissolve(by='CD_UF')
 
 # make output folder
 if not os.path.exists(os.path.join(output_folder, 'clusters')):
