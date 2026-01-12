@@ -1,6 +1,6 @@
 
 """
-Docstring for build_births-deaths
+This scripts estimates the number of births and deaths in a Brazilian municipality per year (2001-2024) under the assumption that the birth and death rates on the municipality level are the same as the state's
 """
 
 import numpy as np
