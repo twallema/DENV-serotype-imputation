@@ -292,7 +292,7 @@ time = df['date'].unique()
 for cluster in df['cluster'].unique().tolist():
         
     # Visualisation
-    fig,ax=plt.subplots(nrows=7, sharex=True, figsize=(8.7, 11.3))
+    fig,ax=plt.subplots(nrows=6, sharex=True, figsize=(8.7, 11.3))
 
     # Step 1: total serotyped cases
     ax[0].plot(time, N_typed.loc[cluster, slice(None)].values, marker='o', markersize=2, linewidth=0.5, color='black')
@@ -337,14 +337,8 @@ for cluster in df['cluster'].unique().tolist():
         colors=['black', 'red', 'green', 'blue'],
         alpha=0.9
     )
-    ax[5].legend(framealpha=1)
+    ax[5].legend(framealpha=1, loc=3)
     ax[5].set_ylabel('Serotypes (%)')
-
-    # Step 4: modeled overdispersion factor
-    ax[6].plot(time, phi_mean.loc[cluster, 'phi'], color='red')
-    ax[6].fill_between(time, phi_lower.loc[cluster, 'phi'], phi_upper.loc[cluster, 'phi'], alpha=0.2, color='red')
-    ax[6].set_ylabel(r'$\phi(t)$ (-)')
-    #ax[6].set_ylim([-3,103])
 
     os.makedirs(f'{output_folder}/fig/posterior_predictive', exist_ok=True)
     plt.savefig(f'{output_folder}/fig/posterior_predictive/{cluster}_total_serotyped.pdf')

@@ -12,9 +12,9 @@ set -o pipefail  # safer error handling
 # Define pipeline run variables
 # ------------------------------------------------------
 
-RUN_ID="default_rgint"                 
+RUN_ID="meeting_brazil_rgint_2"                 
 SPATIAL_AGGREGATION="rgint"
-VALIDATION_BW=0.025
+VALIDATION_BW=0
 
 # ------------------------------------------------------
 # Create a log directory
@@ -40,9 +40,9 @@ python clustering/find-clusters.py \
     -ID "$RUN_ID" \
     -spatial_aggregation "$SPATIAL_AGGREGATION" \
     -validation_bw "$VALIDATION_BW" \
-    -n 250 \
-    -max_iterations_sa 10 \
-    -threshold 75 \
+    -n 500 \
+    -max_iterations_sa 20 \
+    -threshold 100 \
     -compactness True \
     -nearest_hypermetro True \
     -biome True \
