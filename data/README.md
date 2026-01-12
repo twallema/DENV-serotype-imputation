@@ -28,6 +28,11 @@ Downloaded using the instructions under '2 - Using FTPWeb' on https://sprint.mos
 
 + `environ_vars.csv`: Environmental characteristics of the municipalities (columns 'koppen' and 'biome').
 
+### IBGE population projections
+
++ `projecoes_2024_tab4_indicadores.xlsx`: Retrieved from: https://www.ibge.gov.br/estatisticas/sociais/populacao/9109-projecao-da-populacao.html (População por sexo e idade simples)
+
+
 ### Datasus DENV linelist dataset
 
 These data are partly confidential and can be found on the Bento lab box.
@@ -68,6 +73,9 @@ These data are partly confidential and can be found on the Bento lab box.
 
 + `DENV-serotypes_1996-2025_weekly/monthly_mun.csv`: Weekly or monthly total confirmed (not discarded) DENV cases at the municipality level, as well as number of serotyped cases per DENV serotype. Generated using `DENV_datasus_conversion.py`. 
 
+### IBGE population projections
+
+`IBGE_births-deaths_UF.csv`: Contains the births, deaths and population of Brazil's federative units from 2000-2070. Extracted from `projecoes_2024_tab4_indicadores.xlsx` using MS Excel.
 
 ### DTW-MDS-embeddings
 
