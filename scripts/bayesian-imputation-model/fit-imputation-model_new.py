@@ -233,7 +233,7 @@ with pm.Model() as model:
     ## Parameters 
     # Fitness sensitivity
     gamma = pm.LogNormal("gamma", mu=0, sigma=1, shape=n_serotypes)     # Intrinsic fitness 
-    sigma_F = pm.HalfNormal("sigma_F", sigma=0.1)                       # Fitness innovation noise
+    sigma_F = pm.HalfNormal("sigma_F", sigma=0.01)                       # Fitness innovation noise
     kappa = pm.Beta("kappa", alpha=2, beta=20, shape=n_serotypes)       # Reported fractions 
     f_S0 = pm.Beta("f_S0", alpha=2, beta=1, shape=n_serotypes)          # Fraction of total population susceptible to each serotype
 
@@ -287,19 +287,6 @@ with pm.Model() as model:
     # --------------
 
     p = pm.Deterministic("p", pm.math.softmax(F, axis=2))
-
-
-    # fig,ax=plt.subplots(nrows=4)
-    # # serotype distributions
-    # ax[0].plot(p.eval()[:,0,0], color='black', label='DENV-1')
-    # ax[0].plot(p.eval()[:,0,1], color='red', label='DENV-2')
-    # ax[0].plot(p.eval()[:,0,2], color='green', label='DENV-3')
-    # ax[0].plot(p.eval()[:,0,3], color='blue', label='DENV-4')
-    # ax[1].plot(S.eval()[:,0,1], color='black')
-    # ax[2].plot(F.eval()[:,0,1], color='black')
-    # ax[3].plot(DENV_total[:,0], color='black')
-    # plt.show()
-    # plt.close()
 
     # Overdispersion models
     ## Time-independent hierarchical overdispersion (per cluster)
