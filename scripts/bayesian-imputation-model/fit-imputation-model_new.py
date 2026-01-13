@@ -14,7 +14,9 @@ pytensor.config.cxx = '/usr/bin/clang++'
 pytensor.config.on_opt_error = "ignore"
 
 # analysis startdate
-startdate = datetime(1900,1,1)
+start_year = 2001
+end_year = 2024
+assert start_year >= 2001, "demography data before 2001 is missing."
 
 # helper function for argument parsing
 def str_to_bool(value):
@@ -27,20 +29,16 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
 parser.add_argument("-chains", type=int, help="Number of parallel chains.", default=3)
-parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
-parser.add_argument("-q", type=int, help="Order of MA(q) process.", default=1)
 args = parser.parse_args()
 
 # assign to desired variables
 spatial_aggregation = args.spatial_aggregation
 chains = args.chains
 ID = args.ID
-p = args.p
-q = args.q
 
 # pipeline output folder
 abs_dir = os.path.dirname(__file__) # make sure all referenced paths are relative to the lcoation of this file and not the terminal's pwd
-output_folder = os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/bayesian-imputation-model_output/ARMA({p},{q})/')
+output_folder = os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/bayesian-imputation-model_output/new_model/')
 # check if output dir exists, if not, make it
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
@@ -65,6 +63,44 @@ region = clusters.columns.to_list()[0]
 # >>>>>>>>>>>>
 
 mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
+mapping = mapping.merge(clusters[[region, 'cluster']], on=region, how='left')
+
+# Compute demography in start_year per cluster
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+demo = pd.read_csv(os.path.join(abs_dir, f'../../data/raw/sprint_2025/datasus_population_2001_2024.csv'))
+demo = demo.rename(columns={'geocode': 'CD_MUN'})
+demo = demo.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
+demo = demo.groupby(['cluster', 'year'], as_index=False)['population'].sum()
+
+# Compute births and death rates per cluster
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+bd = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/IBGE_population-projections/IBGE_births-deaths_mun-estimated.csv'))
+bd = bd.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
+bd = bd.groupby(['year', 'cluster'], as_index=False).agg(estimated_births=('estimated_births', 'sum'),estimated_deaths=('estimated_deaths', 'sum'),population=('population', 'sum'))
+
+# # plot actual versus estimated population
+# bd['natural_increase'] = bd['estimated_births'] - bd['estimated_deaths']
+# df_pop_2001 = (
+#     demo
+#     .query('year == 2001')
+#     .loc[:, ['cluster', 'population']]
+#     .rename(columns={'population': 'population_2001'})
+# )
+# bd = bd.merge(df_pop_2001, on='cluster', how='left')
+# bd['estimated_population'] = (
+#     bd['population_2001']
+#     + bd.groupby('cluster')['natural_increase']
+#          .transform(lambda x: x.cumsum().shift(fill_value=0))
+# )
+# for cluster in range(1,29):
+#     fig,ax=plt.subplots()
+#     ax.plot(demo[demo['cluster'] == cluster]['year'], demo[demo['cluster'] == cluster]['population'], color='black', label='actual')
+#     ax.plot(bd[bd['cluster'] == cluster]['year'], bd[bd['cluster'] == cluster]['estimated_population'], color='red', label='estimated')
+#     ax.legend()
+#     plt.show()
+#     plt.close()
 
 # Adjacency matrix
 # ~~~~~~~~~~~~~~~~
@@ -85,8 +121,8 @@ assert all(col in df.columns for col in required_cols)
 # 2. Sort for safety
 df = df.sort_values(["CD_MUN", "date"]).reset_index(drop=True)
 
-# 3. Take only from startdate
-df = df[df['date'] > startdate]
+# 3. Take only from start_year to end_year
+df = df[((df['date'] > datetime(start_year,1,1)) & (df['date'] <= datetime(end_year,12,31)))]
 
 # 4. Remove within-sample validation municipalities
 df.loc[df['CD_MUN'].isin(validation_labels.values), ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'DENV_total'] ] = np.nan
@@ -140,9 +176,8 @@ df["year"] = pd.to_datetime(df["date"]).dt.year
 df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
 
-
 # 9. Build PyMC arrays
-# --- For Multinomial model (subtypes, only when typed) ---
+# --- For DirichletMultinomial model ---
 # Total number of typed cases
 N_typed = df.pivot(index="date", columns="cluster", values="N_typed").to_numpy().astype(int)    # (n_months, n_clusters)
 # Number of cases per DENV serotype
@@ -151,10 +186,25 @@ for col in sero_cols:
     Y_mat = df.pivot(index="date", columns="cluster", values=col).to_numpy()
     Y_list.append(Y_mat)
 Y_multinomial = np.stack(Y_list, axis=2).astype(int)    # (n_months, n_clusters, n_serotypes)
+
+# --- For imunity model ---
+# Total number of dengue cases
+DENV_total = df.pivot(index="date", columns="cluster", values="DENV_total").to_numpy().astype(int)  # (n_months, n_clusters)
+# Births (absolute) and death rate
+df_expanded = df.merge(bd, on=["year", "cluster"], how="left")
+df_expanded["estimated_births"] = df_expanded["estimated_births"] / 12
+df_expanded["estimated_deaths"] = df_expanded["estimated_deaths"] / 12
+df_expanded["estimated_death_rate"] = df_expanded["estimated_deaths"] / df_expanded["population"]
+births = df_expanded.pivot(index="date", columns="cluster", values="estimated_births").to_numpy().astype(int) # (n_months, n_clusters)
+death_rate = df_expanded.pivot(index="date", columns="cluster", values="estimated_death_rate").to_numpy() # (n_months, n_clusters)
+# Initial demography
+demo = demo[demo['year'] == start_year]['population'].values
+
 # --- Indices ---
 cluster_idx = df["cluster"].to_numpy().astype(int)
 month_idx = df["month_idx"].to_numpy().astype(int)
 year_idx = df["year_idx"].to_numpy().astype(int)
+
 # --- Lengths ---
 n_clusters = int(len(df['cluster'].unique()))
 n_months = int(len(df["month_idx"].unique()))
@@ -178,38 +228,24 @@ from pymc.pytensorf import collect_default_updates
 with pm.Model() as model:
 
     # --- Subtype Composition Model ---
-    # p_{i,s,t} ~ Softmax(log \theta_{i,s,t})
-    # log \theta_{i,s,t} = \sum_{k=1}^p \rho_k \theta_{i,s,t-k} + \sum_{k=1}^q \psi_k \kappa_{i,s,t-k} + \kappa_{i,s,t}^{corr}      # ARMA(p,q) with                              # AR(p) process with RW(1) CAR innovation noise
-    # \kappa_{i,s,t}^{corr} ~ Normal(0, Q^{-1})                                                                                     # spatially correlated noise
+    # p_{i,s,t} ~ Softmax(F_{i,s,t})
 
-    ## Regularisation of the overall noise
-    total_sigma = pm.HalfNormal("total_sigma", sigma=0.0035)
-    a_CAR = pm.Beta("a_CAR", alpha=2, beta=1)
-    a_CAR_trunc = pm.Deterministic("a_CAR_trunc", a_CAR*0.99)
+    ## Parameters 
+    # Fitness sensitivity
+    gamma = pm.LogNormal("gamma", mu=0, sigma=1, shape=n_serotypes)     # Intrinsic fitness 
+    sigma_F = pm.HalfNormal("sigma_F", sigma=0.1)                       # Fitness innovation noise
+    kappa = pm.Beta("kappa", alpha=2, beta=20, shape=n_serotypes)       # Reported fractions 
+    f_S0 = pm.Beta("f_S0", alpha=2, beta=1, shape=n_serotypes)          # Fraction of total population susceptible to each serotype
 
-    ## Temporal correlation structure: Quadratically decaying weights (gamma=2) summing to one to guarantee non-stationarity
-    gamma = 2
-    first_lag_p = pm.Deterministic("first_lag_p", critical_rho1(p, gamma))
-    first_lag_q = pm.Deterministic("first_lag_q", critical_rho1(q, gamma))
-    rho = pm.Deterministic("rho", first_lag_p / ((np.arange(1, p + 1))**gamma))
-    psi = pm.Deterministic("psi", first_lag_q / ((np.arange(1, q + 1))**gamma))
+    ## Initial states
+    S0 = pm.Deterministic("S0", demo[None, :] * f_S0[:, None]).dimshuffle(1,0)  # susceptibles (n_clusters, n_serotypes)
+    F0 = pm.Normal("F0", mu=0.0, sigma=1.0, shape=(n_clusters, n_serotypes))    # fitness
 
-    ## Priors for spatial correlation
-    W = pt.constant(W)                                  # fixed adjacency matrix in graph
-    D = pt.diag(pt.sum(W, axis=1))                      # degree matrix
-    jitter = 1e-6 * pt.eye(n_clusters)                  # small jitter to stabilize computation
-    Q = D - a_CAR_trunc * W + jitter                    # build precision matrix Q = D - a * W + jitter  (shape: n_clusters x n_clusters)
-    L_Q = pt.slinalg.cholesky(Q)                        # Cholesky of precision: Q = L_Q @ L_Q.T  (lower-triangular)
-    L_cov = pt.slinalg.solve(L_Q, pt.eye(n_clusters))   # Compute L_cov = L_Q^{-1} such that Sigma = L_cov @ L_cov.T = Q^{-1}
-    chol_cov_scaled = total_sigma * L_cov               # scale covariance cholesky by total_sigma (put scale inside chol)
-
-    ## Initialise AR(p) initial condition
-    AR_init = pm.Normal("AR_init", mu=0, sigma=1, shape=(p, n_clusters, n_serotypes))
-    kappa_init = pm.Normal("kappa_init", mu=0, sigma=1, shape=(q, n_clusters, n_serotypes))
+    ## Fitness innovations
+    eps_F = pm.Normal("eps_F", mu=0.0, sigma=sigma_F, shape=(n_months-1, n_clusters, n_serotypes))
 
     # -------------------------------------------------
-    # log_phi = ARMA(p,q) + \epsilon_t
-    # \epsilon_t ~ MvNormal(0, total_sigma**2 * Q^{-1})
+    # equations go here
     # -------------------------------------------------
 
     # https://www.youtube.com/watch?v=G9VWXZdbtKQ
@@ -217,52 +253,53 @@ with pm.Model() as model:
     # https://gist.github.com/ricardoV94/a49b2cc1cf0f32a5f6dc31d6856ccb63#file-pymc_timeseries_ma-ipynb
     # https://becarioprecario.bitbucket.io/spde-gitbook/ch-intro.html
 
-    # ---- Step 1: Generate a sequence of spatially correlated innovations ----
-    kappa_sequence = pm.MvNormal(
-        "kappa_sequence",
-        mu=0,
-        chol=chol_cov_scaled,
-        shape=(n_months, n_serotypes, n_clusters) # last axis has to be Mv axis
+    def step(births_t, deaths_t, D_t, eps_t, S_prev, F_prev, gamma, kappa):
+        # births_t: (n_clusters,)
+        # deaths_t: (n_clusters,)
+        # D_t: (n_clusters,)
+        # eps_t: (n_clusters, n_serotypes)
+        # Susceptible update
+        S_t = S_prev - D_t[:, None] * pm.math.softmax(F_prev, axis=1) / kappa[None, :] + births_t[:, None] - deaths_t[:, None] * S_prev
+        S_t = 1 + pt.softplus(S_t - 1)           
+        # Fitness update
+        F_t = F_prev + gamma[None, :] * pm.math.log(S_t / S_prev) + eps_t 
+        return S_t, F_t
+
+    # run step sequence
+    (S_seq, F_seq), _ = pytensor.scan(
+        fn=step,
+        sequences=[
+            pt.as_tensor_variable(births),
+            pt.as_tensor_variable(death_rate),
+            pt.as_tensor_variable(DENV_total),
+            eps_F
+        ],
+        outputs_info=[S0, F0],
+        non_sequences=[gamma, kappa],
     )
-    kappa_sequence = kappa_sequence.dimshuffle(0, 2, 1) # (n_months, n_clusters, n_serotypes)
 
-    # ---- Step 2: Deterministically reconstruct the ARMA(p,q) sequence using the sequence of innovations ----
-    def reconstruct_arma_pq(kappa_init, AR_init, kappa_sequence, rho, psi):
-        """
-        Reconstruct the ARMA(p,q) sequence deterministically from innovations
-        """
+    # attach initial states
+    S = pm.Deterministic("S", pt.concatenate([S0[None, :, :], S_seq], axis=0))
+    F = pm.Deterministic("F", pt.concatenate([F0[None, :, :], F_seq], axis=0))
 
-        # define update function
-        def step(kappa_t, prev_kappa, prev_vals, rho, psi):
-            # update the states
-            ARp = pt.tensordot(rho, prev_vals, axes=[0,0])
-            MAq = pt.tensordot(psi, prev_kappa, axes=[0,0])
-            new_vals = ARp + MAq + kappa_t
-            # Shift lag windows
-            new_kappa = pt.concatenate([kappa_t[None, :, :], prev_kappa[:-1]], axis=0)
-            new_vals = pt.concatenate([new_vals[None, :, :], prev_vals[:-1]], axis=0)
-            return new_kappa, new_vals
-        
-        # perform scanning
-        [_, sequence_vals], _ = pytensor.scan(
-            fn=step,
-            sequences=kappa_sequence,
-            outputs_info=[kappa_init, AR_init],
-            non_sequences=[rho, psi],
-        )
-        return sequence_vals[:, 0, :, :] # return states
+    # --------------
+    # p = softmax(F)
+    # --------------
 
-    # Wrap into a pm.Deterministic variable
-    theta_log = pm.Deterministic(
-        "theta_log",
-        reconstruct_arma_pq(kappa_init, AR_init, kappa_sequence, rho, psi)
-    )   # (n_months, n_clusters, n_serotypes)
+    p = pm.Deterministic("p", pm.math.softmax(F, axis=2))
 
-    # -------------------
-    # p = softmax(logphi)
-    # -------------------
 
-    p = pm.Deterministic("p", pm.math.softmax(theta_log, axis=2))
+    # fig,ax=plt.subplots(nrows=4)
+    # # serotype distributions
+    # ax[0].plot(p.eval()[:,0,0], color='black', label='DENV-1')
+    # ax[0].plot(p.eval()[:,0,1], color='red', label='DENV-2')
+    # ax[0].plot(p.eval()[:,0,2], color='green', label='DENV-3')
+    # ax[0].plot(p.eval()[:,0,3], color='blue', label='DENV-4')
+    # ax[1].plot(S.eval()[:,0,1], color='black')
+    # ax[2].plot(F.eval()[:,0,1], color='black')
+    # ax[3].plot(DENV_total[:,0], color='black')
+    # plt.show()
+    # plt.close()
 
     # Overdispersion models
     ## Time-independent hierarchical overdispersion (per cluster)
@@ -274,6 +311,29 @@ with pm.Model() as model:
 
     # --- Observed subtyped incidences ---
     Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
+    
+
+    # fig,ax=plt.subplots(nrows=5)
+    # # serotype distributions
+    # ax[0].plot(p.eval()[:,0,0], color='black', label='DENV-1')
+    # ax[0].plot(p.eval()[:,0,1], color='red', label='DENV-2')
+    # ax[0].plot(p.eval()[:,0,2], color='green', label='DENV-3')
+    # ax[0].plot(p.eval()[:,0,3], color='blue', label='DENV-4')
+    # ax[0].legend()
+    # # DENV-1 counts observed versus modeled
+    # ax[1].plot(Y_obs.eval()[:, 0, 0], color='black', linestyle='--', label='DENV-1')
+    # ax[1].plot(Y_multinomial[:, 0, 0], color='black', label='DENV-1')
+    # # DENV-2 counts observed versus modeled
+    # ax[2].plot(Y_obs.eval()[:, 0, 1], color='red', label='DENV-2')
+    # ax[2].plot(Y_multinomial[:, 0, 1], color='black', label='DENV-2')
+    # # DENV-3 counts observed versus modeled
+    # ax[3].plot(Y_obs.eval()[:, 0, 2], color='green', label='DENV-3')
+    # ax[3].plot(Y_multinomial[:, 0, 2], color='black', label='DENV-3')
+    # # DENV-4 counts observed versus modeled
+    # ax[4].plot(Y_obs.eval()[:, 0, 3], color='blue', label='DENV-4')
+    # ax[4].plot(Y_multinomial[:, 0, 3], color='black', label='DENV-4')
+    # plt.show()
+    # plt.close()
 
 #######################
 ## Running the model ##
@@ -281,9 +341,9 @@ with pm.Model() as model:
 
 
 # NUTS
-draws=500
+draws=25
 with model:
-    trace = pm.sample(draws, tune=1500, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(draws, tune=25, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 
 #######################
@@ -314,7 +374,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                'total_sigma', 'a_CAR_trunc', 'd_cluster_hierarch', 'd_cluster',
+                'gamma', 'sigma_F', 'kappa', 'f_S0',
                 ]
 
 # Save traces
