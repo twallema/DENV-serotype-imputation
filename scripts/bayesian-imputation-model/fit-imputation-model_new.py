@@ -274,14 +274,14 @@ with pm.Model() as model:
     # https://gist.github.com/ricardoV94/a49b2cc1cf0f32a5f6dc31d6856ccb63#file-pymc_timeseries_ma-ipynb
     # https://becarioprecario.bitbucket.io/spde-gitbook/ch-intro.html
 
-    def step(births_t, deaths_t, D_t, eps_t, S_prev, p_prev, gamma, kappa):
+    def step(births_t, deaths_t, D_t, eps_t, S_prev, z_prev, gamma, kappa):
 
         # -----------------------
         # 1. Susceptible dynamics
         # -----------------------
         S_t = (
             S_prev
-            - D_t[:, None] * p_prev / kappa
+            - D_t[:, None] * pm.math.softmax(z_prev, axis=1) / kappa
             + births_t[:, None]
             - deaths_t[:, None] * S_prev
         )
@@ -295,22 +295,19 @@ with pm.Model() as model:
         f_t = gamma * pt.log(S_t)
 
         # mean fitness φ_t
-        phi_t = pt.sum(p_prev * f_t, axis=1, keepdims=True)
+        phi_t = pt.sum(pm.math.softmax(z_prev, axis=1) * f_t, axis=1, keepdims=True)
 
         # ----------------------------
         # 3. Replicator update (Euler)
         # ----------------------------
-        dp = p_prev * (f_t - phi_t) + eps_t
-        p_t = p_prev + dp
+        
+        z_t = z_prev + (f_t - phi_t) + eps_t
 
-        # numerical safety: keep on simplex
-        p_t = pt.maximum(p_t, 0)
-        p_t = p_t / pt.sum(p_t, axis=1, keepdims=True)
-
-        return S_t, p_t
+        return S_t, z_t
 
     # run step sequence
-    (S_seq, p_seq), _ = pytensor.scan(
+    z0 = pt.log(p0)
+    (S_seq, z_seq), _ = pytensor.scan(
         fn=step,
         sequences=[
             pt.as_tensor_variable(births),
@@ -318,13 +315,14 @@ with pm.Model() as model:
             pt.as_tensor_variable(DENV_total),
             eps_F,
         ],
-        outputs_info=[S0, p0],
+        outputs_info=[S0, z0],
         non_sequences=[gamma, kappa],
     )
 
     # attach initial states
     S = pm.Deterministic("S", pt.concatenate([S0[None, :, :], S_seq], axis=0))
-    p = pm.Deterministic("p", pt.concatenate([p0[None, :, :], p_seq], axis=0))
+    z = pm.Deterministic("z", pt.concatenate([z0[None, :, :], z_seq], axis=0))
+    p = pm.Deterministic("p", pm.math.softmax(z, axis=2))
 
     # Overdispersion models
     ## Time-independent hierarchical overdispersion (per cluster)
