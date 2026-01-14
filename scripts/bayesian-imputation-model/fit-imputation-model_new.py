@@ -232,14 +232,17 @@ with pm.Model() as model:
 
     ## Parameters 
     # Fitness sensitivity
-    gamma = pm.LogNormal("gamma", mu=0, sigma=1, shape=n_serotypes)     # Intrinsic fitness 
-    sigma_F = pm.HalfNormal("sigma_F", sigma=0.01)                       # Fitness innovation noise
-    kappa = pm.Beta("kappa", alpha=2, beta=20, shape=n_serotypes)       # Reported fractions 
-    f_S0 = pm.Beta("f_S0", alpha=2, beta=1, shape=n_serotypes)          # Fraction of total population susceptible to each serotype
+    gamma = pt.as_tensor_variable(np.array([0.11, 0.1, 0.1, 0.1])) #pm.LogNormal("gamma", mu=-3, sigma=1, shape=n_serotypes)     # Intrinsic fitness 
+    sigma_F = pm.HalfNormal("sigma_F", sigma=0.001)                       # Fitness innovation noise
+    kappa = pt.as_tensor_variable(np.array([0.02, 0.02, 0.01, 0.005])) # pm.Beta("kappa", alpha=3, beta=100, shape=n_serotypes)       # Reported fractions 
+    f_S0 = pt.as_tensor_variable(np.array([0.2, 0.6, 0.9, 0.95])) # pm.Beta("f_S0", alpha=2, beta=1, shape=n_serotypes)          # Fraction of total population susceptible to each serotype
 
     ## Initial states
     S0 = pm.Deterministic("S0", demo[None, :] * f_S0[:, None]).dimshuffle(1,0)  # susceptibles (n_clusters, n_serotypes)
-    F0 = pm.Normal("F0", mu=0.0, sigma=1.0, shape=(n_clusters, n_serotypes))    # fitness
+    #p0 = pm.Dirichlet("p0", a=np.ones(n_serotypes), shape=(n_clusters, n_serotypes))
+
+    p0 = pt.as_tensor_variable(np.tile(np.array([0.9, 0.001, 0.098, 0.001]), (n_clusters, 1)))
+
 
     ## Fitness innovations
     eps_F = pm.Normal("eps_F", mu=0.0, sigma=sigma_F, shape=(n_months-1, n_clusters, n_serotypes))
@@ -253,40 +256,57 @@ with pm.Model() as model:
     # https://gist.github.com/ricardoV94/a49b2cc1cf0f32a5f6dc31d6856ccb63#file-pymc_timeseries_ma-ipynb
     # https://becarioprecario.bitbucket.io/spde-gitbook/ch-intro.html
 
-    def step(births_t, deaths_t, D_t, eps_t, S_prev, F_prev, gamma, kappa):
-        # births_t: (n_clusters,)
-        # deaths_t: (n_clusters,)
-        # D_t: (n_clusters,)
-        # eps_t: (n_clusters, n_serotypes)
-        # Susceptible update
-        S_t = S_prev - D_t[:, None] * pm.math.softmax(F_prev, axis=1) / kappa[None, :] + births_t[:, None] - deaths_t[:, None] * S_prev
-        S_t = 1 + pt.softplus(S_t - 1)           
-        # Fitness update
-        F_t = F_prev + gamma[None, :] * pm.math.log(S_t / S_prev) + eps_t 
-        return S_t, F_t
+    def step(births_t, deaths_t, D_t, eps_t, S_prev, p_prev, gamma, kappa):
+
+        # -----------------------
+        # 1. Susceptible dynamics
+        # -----------------------
+        S_t = (
+            S_prev
+            - D_t[:, None] * p_prev / kappa[None, :]
+            + births_t[:, None]
+            - deaths_t[:, None] * S_prev
+        )
+
+        # soft lower bound to keep log well-defined
+        S_t = 1 + pt.softplus(S_t - 1)
+
+        # -----------------------
+        # 2. Fitness from resource
+        # -----------------------
+        f_t = gamma[None, :] * pt.log(S_t)
+
+        # mean fitness φ_t
+        phi_t = pt.sum(p_prev * f_t, axis=1, keepdims=True)
+
+        # ----------------------------
+        # 3. Replicator update (Euler)
+        # ----------------------------
+        dp = p_prev * (f_t - phi_t) #+ eps_t
+        p_t = p_prev + dp
+
+        # numerical safety: keep on simplex
+        p_t = pt.maximum(p_t, 0)
+        p_t = p_t / pt.sum(p_t, axis=1, keepdims=True)
+
+        return S_t, p_t
 
     # run step sequence
-    (S_seq, F_seq), _ = pytensor.scan(
+    (S_seq, p_seq), _ = pytensor.scan(
         fn=step,
         sequences=[
             pt.as_tensor_variable(births),
             pt.as_tensor_variable(death_rate),
             pt.as_tensor_variable(DENV_total),
-            eps_F
+            eps_F,
         ],
-        outputs_info=[S0, F0],
+        outputs_info=[S0, p0],
         non_sequences=[gamma, kappa],
     )
 
     # attach initial states
     S = pm.Deterministic("S", pt.concatenate([S0[None, :, :], S_seq], axis=0))
-    F = pm.Deterministic("F", pt.concatenate([F0[None, :, :], F_seq], axis=0))
-
-    # --------------
-    # p = softmax(F)
-    # --------------
-
-    p = pm.Deterministic("p", pm.math.softmax(F, axis=2))
+    p = pm.Deterministic("p", pt.concatenate([p0[None, :, :], p_seq], axis=0))
 
     # Overdispersion models
     ## Time-independent hierarchical overdispersion (per cluster)
@@ -300,27 +320,34 @@ with pm.Model() as model:
     Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
     
 
-    # fig,ax=plt.subplots(nrows=5)
-    # # serotype distributions
-    # ax[0].plot(p.eval()[:,0,0], color='black', label='DENV-1')
-    # ax[0].plot(p.eval()[:,0,1], color='red', label='DENV-2')
-    # ax[0].plot(p.eval()[:,0,2], color='green', label='DENV-3')
-    # ax[0].plot(p.eval()[:,0,3], color='blue', label='DENV-4')
-    # ax[0].legend()
-    # # DENV-1 counts observed versus modeled
-    # ax[1].plot(Y_obs.eval()[:, 0, 0], color='black', linestyle='--', label='DENV-1')
-    # ax[1].plot(Y_multinomial[:, 0, 0], color='black', label='DENV-1')
-    # # DENV-2 counts observed versus modeled
-    # ax[2].plot(Y_obs.eval()[:, 0, 1], color='red', label='DENV-2')
-    # ax[2].plot(Y_multinomial[:, 0, 1], color='black', label='DENV-2')
-    # # DENV-3 counts observed versus modeled
-    # ax[3].plot(Y_obs.eval()[:, 0, 2], color='green', label='DENV-3')
-    # ax[3].plot(Y_multinomial[:, 0, 2], color='black', label='DENV-3')
-    # # DENV-4 counts observed versus modeled
-    # ax[4].plot(Y_obs.eval()[:, 0, 3], color='blue', label='DENV-4')
-    # ax[4].plot(Y_multinomial[:, 0, 3], color='black', label='DENV-4')
-    # plt.show()
-    # plt.close()
+    fig,ax=plt.subplots(nrows=6)
+    cluster = 0
+    # serotype distributions
+    ax[0].plot(p.eval()[:,cluster,0], color='black', label='DENV-1')
+    ax[0].plot(p.eval()[:,cluster,1], color='red', label='DENV-2')
+    ax[0].plot(p.eval()[:,cluster,2], color='green', label='DENV-3')
+    ax[0].plot(p.eval()[:,cluster,3], color='blue', label='DENV-4')
+    ax[0].legend()
+    # susceptibles
+    ax[1].plot(S.eval()[:,cluster,0], color='black', label='DENV-1')
+    ax[1].plot(S.eval()[:,cluster,1], color='red', label='DENV-2')
+    ax[1].plot(S.eval()[:,cluster,2], color='green', label='DENV-3')
+    ax[1].plot(S.eval()[:,cluster,3], color='blue', label='DENV-4')
+    ax[1].legend()
+    # DENV-1 counts observed versus modeled
+    ax[2].plot(Y_obs.eval()[:, cluster, 0], color='black', linestyle='--', label='DENV-1')
+    ax[2].plot(Y_multinomial[:, cluster, 0], color='black', label='DENV-1')
+    # DENV-2 counts observed versus modeled
+    ax[3].plot(Y_obs.eval()[:, cluster, 1], color='red', label='DENV-2')
+    ax[3].plot(Y_multinomial[:, cluster, 1], color='black', label='DENV-2')
+    # DENV-3 counts observed versus modeled
+    ax[4].plot(Y_obs.eval()[:, cluster, 2], color='green', label='DENV-3')
+    ax[4].plot(Y_multinomial[:, cluster, 2], color='black', label='DENV-3')
+    # DENV-4 counts observed versus modeled
+    ax[5].plot(Y_obs.eval()[:, cluster, 3], color='blue', label='DENV-4')
+    ax[5].plot(Y_multinomial[:, cluster, 3], color='black', label='DENV-4')
+    plt.show()
+    plt.close()
 
 #######################
 ## Running the model ##
