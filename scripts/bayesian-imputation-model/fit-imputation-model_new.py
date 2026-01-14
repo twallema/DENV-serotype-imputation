@@ -221,21 +221,45 @@ with pm.Model() as model:
     # p_{i,s,t} ~ Softmax(F_{i,s,t})
 
     ## Parameters 
-    # Fitness sensitivity
-    gamma = pt.as_tensor_variable(np.array([0.11, 0.1, 0.1, 0.1])) #pm.LogNormal("gamma", mu=-3, sigma=1, shape=n_serotypes)     # Intrinsic fitness 
-    sigma_F = pm.HalfNormal("sigma_F", sigma=0.001)                       # Fitness innovation noise
-    kappa = pt.as_tensor_variable(np.array([0.02, 0.02, 0.01, 0.005])) # pm.Beta("kappa", alpha=3, beta=100, shape=n_serotypes)       # Reported fractions 
-    f_S0 = pt.as_tensor_variable(np.array([0.2, 0.6, 0.9, 0.95])) # pm.Beta("f_S0", alpha=2, beta=1, shape=n_serotypes)          # Fraction of total population susceptible to each serotype
+    ## intrinsic fitness
+    log_gamma_s = pm.Normal("log_gamma_s", mu=-3, sigma=1, shape=n_serotypes)   # serotypes have independent means (E[X] = 0.08)
+    gamma_s = pm.Deterministic("gamma_s", pt.exp(log_gamma_s))
+    gamma_cluster_sigma = pm.HalfNormal("gamma_cluster_sigma", sigma=1/3)       # clusters represent perturbations of this serotype's mean
+    gamma = pm.LogNormal("gamma", mu=log_gamma_s, sigma=gamma_cluster_sigma, shape=(n_clusters, n_serotypes))
+
+    ## reported fractions
+    ### Global mean and sd reporting fraction
+    kappa_mu_global = pm.Beta("kappa_mu_global", alpha=3, beta=100)
+    kappa_phi_global = pm.Gamma("kappa_phi_global", alpha=100, beta=1)
+    ### serotype specific reporting fraction
+    kappa_mu_s = pm.Beta("kappa_mu_s", alpha=kappa_mu_global * kappa_phi_global, beta=(1 - kappa_mu_global) * kappa_phi_global, shape=n_serotypes)
+    ### add cluster perturbation in logit space
+    kappa_cluster_sigma = pm.HalfNormal("kappa_cluster_sigma", sigma=1/3)
+    kappa_cluster_offset = pm.Normal("kappa_cluster_offset", mu=0, sigma=kappa_cluster_sigma, shape=n_clusters)
+    logit_kappa = pm.math.logit(kappa_mu_s)[None, :] + kappa_cluster_offset[:, None]
+    kappa = pm.Deterministic("kappa", pm.math.sigmoid(logit_kappa))
+
+    ## susceptible fraction
+    f_S0_mu_s = pm.Beta("f_S0_mu_s", alpha=2, beta=2, shape=n_serotypes)    # serotypes have independent means
+    f_S0_cluster_sigma = pm.HalfNormal("f_S0_cluster_sigma", sigma=1/3)     # shrinkage on cluster variation
+    f_S0_cluster_offset = pm.Normal("f_S0_cluster_offset", mu=0, sigma=f_S0_cluster_sigma, shape=(n_clusters, n_serotypes))    # cluster variation (depends on serotype!)
+    logit_fS0 = pm.math.logit(f_S0_mu_s)[None, :] + f_S0_cluster_offset   # serotype + cluster perturbations
+    f_S0 = pm.Deterministic("f_S0", pm.math.sigmoid(logit_fS0))
 
     ## Initial states
-    S0 = pm.Deterministic("S0", demo[None, :] * f_S0[:, None]).dimshuffle(1,0)  # susceptibles (n_clusters, n_serotypes)
-    #p0 = pm.Dirichlet("p0", a=np.ones(n_serotypes), shape=(n_clusters, n_serotypes))
-
-    p0 = pt.as_tensor_variable(np.tile(np.array([0.9, 0.001, 0.098, 0.001]), (n_clusters, 1)))
-
+    S0 = pm.Deterministic("S0", demo[:, None] * f_S0)  # susceptibles (n_clusters, n_serotypes)
+    p0 = pm.Dirichlet("p0", a=10*np.array([0.9, 0.001, 0.098, 0.001]), shape=(n_clusters, n_serotypes))
 
     ## Fitness innovations
-    eps_F = pm.Normal("eps_F", mu=0.0, sigma=sigma_F, shape=(n_months-1, n_clusters, n_serotypes))
+    sigma = pm.HalfNormal("sigma", sigma=0.01)
+    eps_F = pm.Normal("eps_F", mu=0.0, sigma=sigma, shape=(n_months-1, n_clusters, n_serotypes))
+
+    # Fitness sensitivity
+    #gamma = pt.as_tensor_variable(np.array([0.11, 0.1, 0.1, 0.1])) #pm.LogNormal("gamma", mu=-3, sigma=1, shape=n_serotypes)     # Intrinsic fitness 
+    #kappa = pt.as_tensor_variable(np.array([0.02, 0.02, 0.01, 0.005])) # pm.Beta("kappa", alpha=3, beta=100, shape=n_serotypes)       # Reported fractions 
+    #f_S0 = pt.as_tensor_variable(np.array([0.2, 0.6, 0.9, 0.95])) # pm.Beta("f_S0", alpha=2, beta=1, shape=n_serotypes)          # Fraction of total population susceptible to each serotype
+    #p0 = pt.as_tensor_variable(np.tile(np.array([0.9, 0.001, 0.098, 0.001]), (n_clusters, 1)))
+
 
     # -------------------------------------------------
     # equations go here
@@ -253,7 +277,7 @@ with pm.Model() as model:
         # -----------------------
         S_t = (
             S_prev
-            - D_t[:, None] * p_prev / kappa[None, :]
+            - D_t[:, None] * p_prev / kappa
             + births_t[:, None]
             - deaths_t[:, None] * S_prev
         )
@@ -264,7 +288,7 @@ with pm.Model() as model:
         # -----------------------
         # 2. Fitness from resource
         # -----------------------
-        f_t = gamma[None, :] * pt.log(S_t)
+        f_t = gamma * pt.log(S_t)
 
         # mean fitness φ_t
         phi_t = pt.sum(p_prev * f_t, axis=1, keepdims=True)
@@ -272,7 +296,7 @@ with pm.Model() as model:
         # ----------------------------
         # 3. Replicator update (Euler)
         # ----------------------------
-        dp = p_prev * (f_t - phi_t) #+ eps_t
+        dp = p_prev * (f_t - phi_t) + eps_t
         p_t = p_prev + dp
 
         # numerical safety: keep on simplex
@@ -347,7 +371,8 @@ with pm.Model() as model:
 # NUTS
 draws=25
 with model:
-    trace = pm.sample(draws, tune=25, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(draws, tune=50, target_accept=0.8, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    #trace = pm.sample(1000, tune=1000, chains=1, cores=12, progressbar=True, step=pm.DEMetropolisZ())
 
 
 #######################
@@ -378,7 +403,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                'gamma', 'sigma_F', 'kappa', 'f_S0',
+                'gamma_s', 'gamma_cluster_sigma', 'kappa_mu_global', 'kappa_phi_global', 'kappa_mu_s', 'kappa_cluster_sigma', 'f_S0_mu_s', 'f_S0_cluster_sigma', 'sigma'
                 ]
 
 # Save traces
