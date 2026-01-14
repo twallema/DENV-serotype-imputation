@@ -198,9 +198,6 @@ n_serotypes = len(sero_cols)
 
 with pm.Model() as model:
 
-    # --- Subtype Composition Model ---
-    # p_{i,s,t} ~ Softmax(F_{i,s,t})
-
     ## Parameters 
     ## intrinsic fitness
     log_gamma_s = pm.Normal("log_gamma_s", mu=-3, sigma=1, shape=n_serotypes)   # serotypes have independent means (E[X] = 0.08)
@@ -226,7 +223,6 @@ with pm.Model() as model:
     f_S0_cluster_offset = pm.Normal("f_S0_cluster_offset", mu=0, sigma=f_S0_cluster_sigma, shape=(n_clusters, n_serotypes))    # cluster variation (depends on serotype!)
     logit_fS0 = pm.math.logit(f_S0_mu_s)[None, :] + f_S0_cluster_offset   # serotype + cluster perturbations
     f_S0 = pm.Deterministic("f_S0", pm.math.sigmoid(logit_fS0))
-
 
     ## Fitness innovations
     sigma = pm.HalfNormal("sigma", sigma=0.01)
@@ -287,13 +283,12 @@ with pm.Model() as model:
         f_t = gamma * pt.log(S_t)
         phi_t = pt.sum(p_prev * f_t, axis=1, keepdims=True) # mean fitness phi_t
 
-        # 3. (Logit) Replicator update (Euler)
+        # 3. (Logit) Replicator update
         z_t = z_prev + (f_t - phi_t) + eps_t
 
         return S_t, z_t
 
     # run step sequence
-    
     (S_seq, z_seq), _ = pytensor.scan(
         fn=step,
         sequences=[
@@ -360,9 +355,7 @@ with pm.Model() as model:
 # NUTS
 draws=50
 with model:
-    trace = pm.sample(draws, tune=50, target_accept=0.999, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, initvals=chains*[{'gamma': gamma_0, 'kappa': kappa_0, 'f_S0': f_S0_0, 'p0': p0_0},])
-    #trace = pm.sample(1000, tune=10000, chains=3, cores=3, progressbar=True, step=pm.DEMetropolisZ())
-    #trace = pm.smc.sample_smc(draws=100, chains=12, cores=12, progressbar=True)
+    trace = pm.sample(draws, tune=50, target_accept=0.8, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, initvals=chains*[{'gamma': gamma_0, 'kappa': kappa_0, 'f_S0': f_S0_0, 'p0': p0_0},])
 
 #######################
 ## Running the model ##
