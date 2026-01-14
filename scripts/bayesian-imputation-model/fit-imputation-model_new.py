@@ -80,28 +80,6 @@ bd = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/IBGE_population-proj
 bd = bd.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
 bd = bd.groupby(['year', 'cluster'], as_index=False).agg(estimated_births=('estimated_births', 'sum'),estimated_deaths=('estimated_deaths', 'sum'),population=('population', 'sum'))
 
-# # plot actual versus estimated population
-# bd['natural_increase'] = bd['estimated_births'] - bd['estimated_deaths']
-# df_pop_2001 = (
-#     demo
-#     .query('year == 2001')
-#     .loc[:, ['cluster', 'population']]
-#     .rename(columns={'population': 'population_2001'})
-# )
-# bd = bd.merge(df_pop_2001, on='cluster', how='left')
-# bd['estimated_population'] = (
-#     bd['population_2001']
-#     + bd.groupby('cluster')['natural_increase']
-#          .transform(lambda x: x.cumsum().shift(fill_value=0))
-# )
-# for cluster in range(1,29):
-#     fig,ax=plt.subplots()
-#     ax.plot(demo[demo['cluster'] == cluster]['year'], demo[demo['cluster'] == cluster]['population'], color='black', label='actual')
-#     ax.plot(bd[bd['cluster'] == cluster]['year'], bd[bd['cluster'] == cluster]['estimated_population'], color='red', label='estimated')
-#     ax.legend()
-#     plt.show()
-#     plt.close()
-
 # Adjacency matrix
 # ~~~~~~~~~~~~~~~~
 
@@ -176,6 +154,9 @@ df["year"] = pd.to_datetime(df["date"]).dt.year
 df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
 
+# only do first X clusters
+df = df[df['cluster'].isin([1,])]
+
 # 9. Build PyMC arrays
 # --- For DirichletMultinomial model ---
 # Total number of typed cases
@@ -198,7 +179,7 @@ df_expanded["estimated_death_rate"] = df_expanded["estimated_deaths"] / df_expan
 births = df_expanded.pivot(index="date", columns="cluster", values="estimated_births").to_numpy().astype(int) # (n_months, n_clusters)
 death_rate = df_expanded.pivot(index="date", columns="cluster", values="estimated_death_rate").to_numpy() # (n_months, n_clusters)
 # Initial demography
-demo = demo[demo['year'] == start_year]['population'].values
+demo = demo[((demo['year'] == start_year) & (demo['cluster'].isin([1,])))]['population'].values
 
 # --- Indices ---
 cluster_idx = df["cluster"].to_numpy().astype(int)
@@ -246,20 +227,43 @@ with pm.Model() as model:
     logit_fS0 = pm.math.logit(f_S0_mu_s)[None, :] + f_S0_cluster_offset   # serotype + cluster perturbations
     f_S0 = pm.Deterministic("f_S0", pm.math.sigmoid(logit_fS0))
 
-    ## Initial states
-    S0 = pm.Deterministic("S0", demo[:, None] * f_S0)  # susceptibles (n_clusters, n_serotypes)
-    p0 = pm.Dirichlet("p0", a=10*np.array([0.9, 0.001, 0.098, 0.001]), shape=(n_clusters, n_serotypes))
 
     ## Fitness innovations
     sigma = pm.HalfNormal("sigma", sigma=0.01)
-    eps_F = pm.Normal("eps_F", mu=0.0, sigma=sigma, shape=(n_months-1, n_clusters, n_serotypes))
+    eps_F = pm.Normal("eps_F", mu=0.0, sigma=sigma, shape=(n_months-1, n_clusters, n_serotypes)) #pt.as_tensor_variable(np.zeros(shape=(n_months-1, n_clusters, n_serotypes)))
 
-    # Fitness sensitivity
-    #gamma = pt.as_tensor_variable(np.array([0.11, 0.1, 0.1, 0.1])) #pm.LogNormal("gamma", mu=-3, sigma=1, shape=n_serotypes)     # Intrinsic fitness 
-    #kappa = pt.as_tensor_variable(np.array([0.02, 0.02, 0.01, 0.005])) # pm.Beta("kappa", alpha=3, beta=100, shape=n_serotypes)       # Reported fractions 
-    #f_S0 = pt.as_tensor_variable(np.array([0.2, 0.6, 0.9, 0.95])) # pm.Beta("f_S0", alpha=2, beta=1, shape=n_serotypes)          # Fraction of total population susceptible to each serotype
-    #p0 = pt.as_tensor_variable(np.tile(np.array([0.9, 0.001, 0.098, 0.001]), (n_clusters, 1)))
+    # Manual guesses
+    # gamma
+    gamma_0 = np.ones(shape=(n_clusters, n_serotypes))
+    gamma_0[0,:] = [0.11, 0.1, 0.1, 0.1]
+    #gamma_0[1,:] = [0.105, 0.1, 0.1, 0.1]
+    #gamma_0[2,:] = [0.11, 0.1, 0.1, 0.1]
+    gamma_0 = pt.as_tensor_variable(gamma_0)
 
+    # kappa
+    kappa_0 = np.ones(shape=(n_clusters, n_serotypes))
+    kappa_0[0,:] = [0.02, 0.01, 0.01, 0.005]
+    #kappa_0[1,:] = [0.04, 0.02, 0.015, 0.03]
+    #kappa_0[2,:] = 4 * kappa_0[0,:]
+    kappa_0 = pt.as_tensor_variable(kappa_0)
+
+    # f_s0
+    f_S0_0 = np.ones(shape=(n_clusters, n_serotypes))
+    f_S0_0[0,:] = [0.2, 0.6, 0.9, 0.95]
+    #f_S0_0[1,:] = [0.2, 0.6, 0.9, 0.95]
+    #f_S0_0[2,:] = [0.2, 0.6, 0.9, 0.95]
+    f_S0_0 = pt.as_tensor_variable(f_S0_0)
+
+    # p0
+    p0_0 = 0.25*np.ones(shape=(n_clusters, n_serotypes))
+    p0_0[0,:] = [0.9, 0.001, 0.098, 0.001]
+    #p0_0[1,:] = [0.9, 0.001, 0.098, 0.001]
+    #p0_0[2,:] = [0.9, 0.001, 0.098, 0.001]
+    p0_0 = pt.as_tensor_variable(p0_0)
+
+    ## Initial states
+    S0 = pm.Deterministic("S0", demo[:, None] * f_S0)  # susceptibles (n_clusters, n_serotypes)
+    p0 = pm.Dirichlet("p0", a=10*np.array([0.9, 0.001, 0.098, 0.001]), shape=(n_clusters, n_serotypes))
 
     # -------------------------------------------------
     # equations go here
@@ -334,7 +338,7 @@ with pm.Model() as model:
     Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
     
 
-    fig,ax=plt.subplots(nrows=6)
+    fig,ax=plt.subplots(nrows=6, figsize=(11.7, 8.3))
     cluster = 0
     # serotype distributions
     ax[0].plot(p.eval()[:,cluster,0], color='black', label='DENV-1')
@@ -369,11 +373,11 @@ with pm.Model() as model:
 
 
 # NUTS
-draws=25
+draws=50
 with model:
-    trace = pm.sample(draws, tune=50, target_accept=0.8, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
-    #trace = pm.sample(1000, tune=1000, chains=1, cores=12, progressbar=True, step=pm.DEMetropolisZ())
-
+    trace = pm.sample(draws, tune=50, target_accept=0.999, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, initvals=chains*[{'gamma': gamma_0, 'kappa': kappa_0, 'f_S0': f_S0_0, 'p0': p0_0},])
+    #trace = pm.sample(1000, tune=10000, chains=3, cores=3, progressbar=True, step=pm.DEMetropolisZ())
+    #trace = pm.smc.sample_smc(draws=100, chains=12, cores=12, progressbar=True)
 
 #######################
 ## Running the model ##
@@ -386,16 +390,6 @@ arviz.plot_ppc(posterior_predictive)
 os.makedirs(f'{output_folder}/fig/posterior_predictive', exist_ok=True)
 plt.savefig(f'{output_folder}/fig/posterior_predictive/ppc.pdf')
 plt.close()    
-
-# Expand data & take 2x as much samples
-expanded_idata = trace.copy()
-expanded_idata.posterior = trace.posterior.expand_dims(pred_id=2)
-with model:
-    posterior_predictive = pm.sample_posterior_predictive(
-        expanded_idata,
-        sample_dims=["chain", "draw", "pred_id"],
-        extend_inferencedata=True,
-    )
 
 # Assume `trace` is the result of pm.sample()
 arviz.to_netcdf(trace, f"{output_folder}/trace.nc")
