@@ -211,19 +211,9 @@ n_months = int(len(df["month_idx"].unique()))
 n_years = int(df["year_idx"].max() + 1)
 n_serotypes = len(sero_cols)
 
-#########################
-## Preparing the model ##
-#########################
-
-def critical_rho1(p, gamma):
-    """Compute the coefficient of the first lag so that the sum of `p` AR coefficients: rho_k = 1/k**gamma sum to zero; resulting in a non-stationary process"""
-    return 1 / pt.sum(1 / np.arange(1, p + 1)[None,:]**gamma, axis=1)
-
 ###############################
 ## Bayesian imputation model ##
 ###############################
-
-from pymc.pytensorf import collect_default_updates
 
 with pm.Model() as model:
 
