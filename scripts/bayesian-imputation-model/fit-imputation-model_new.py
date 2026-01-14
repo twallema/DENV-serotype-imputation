@@ -206,7 +206,7 @@ with pm.Model() as model:
     log_gamma_s = pm.Normal("log_gamma_s", mu=-3, sigma=1, shape=n_serotypes)   # serotypes have independent means (E[X] = 0.08)
     gamma_s = pm.Deterministic("gamma_s", pt.exp(log_gamma_s))
     gamma_cluster_sigma = pm.HalfNormal("gamma_cluster_sigma", sigma=1/3)       # clusters represent perturbations of this serotype's mean
-    #gamma = pm.LogNormal("gamma", mu=log_gamma_s, sigma=gamma_cluster_sigma, shape=(n_clusters, n_serotypes))
+    gamma = pm.LogNormal("gamma", mu=log_gamma_s, sigma=gamma_cluster_sigma, shape=(n_clusters, n_serotypes))
 
     ## reported fractions
     ### Global mean and sd reporting fraction
@@ -218,19 +218,19 @@ with pm.Model() as model:
     kappa_cluster_sigma = pm.HalfNormal("kappa_cluster_sigma", sigma=1/3)
     kappa_cluster_offset = pm.Normal("kappa_cluster_offset", mu=0, sigma=kappa_cluster_sigma, shape=n_clusters)
     logit_kappa = pm.math.logit(kappa_mu_s)[None, :] + kappa_cluster_offset[:, None]
-    #kappa = pm.Deterministic("kappa", pm.math.sigmoid(logit_kappa))
+    kappa = pm.Deterministic("kappa", pm.math.sigmoid(logit_kappa))
 
     ## susceptible fraction
     f_S0_mu_s = pm.Beta("f_S0_mu_s", alpha=2, beta=2, shape=n_serotypes)    # serotypes have independent means
     f_S0_cluster_sigma = pm.HalfNormal("f_S0_cluster_sigma", sigma=1/3)     # shrinkage on cluster variation
     f_S0_cluster_offset = pm.Normal("f_S0_cluster_offset", mu=0, sigma=f_S0_cluster_sigma, shape=(n_clusters, n_serotypes))    # cluster variation (depends on serotype!)
     logit_fS0 = pm.math.logit(f_S0_mu_s)[None, :] + f_S0_cluster_offset   # serotype + cluster perturbations
-    #f_S0 = pm.Deterministic("f_S0", pm.math.sigmoid(logit_fS0))
+    f_S0 = pm.Deterministic("f_S0", pm.math.sigmoid(logit_fS0))
 
 
     ## Fitness innovations
     sigma = pm.HalfNormal("sigma", sigma=0.01)
-    eps_F = pt.as_tensor_variable(np.zeros(shape=(n_months-1, n_clusters, n_serotypes))) #pm.Normal("eps_F", mu=0.0, sigma=sigma, shape=(n_months-1, n_clusters, n_serotypes))
+    eps_F = pm.Normal("eps_F", mu=0.0, sigma=sigma, shape=(n_months-1, n_clusters, n_serotypes)) # pt.as_tensor_variable(np.zeros(shape=(n_months-1, n_clusters, n_serotypes)))
 
     # Manual guesses
     # gamma
@@ -238,36 +238,37 @@ with pm.Model() as model:
     gamma_0[0,:] = [0.11, 0.1, 0.1, 0.1]
     #gamma_0[1,:] = [0.105, 0.1, 0.1, 0.1]
     #gamma_0[2,:] = [0.11, 0.1, 0.1, 0.1]
-    gamma = pt.as_tensor_variable(gamma_0)
+    gamma_0 = pt.as_tensor_variable(gamma_0)
 
     # kappa
     kappa_0 = np.ones(shape=(n_clusters, n_serotypes))
     kappa_0[0,:] = [0.02, 0.01, 0.01, 0.005]
     #kappa_0[1,:] = [0.04, 0.02, 0.015, 0.03]
     #kappa_0[2,:] = 4 * kappa_0[0,:]
-    kappa = pt.as_tensor_variable(kappa_0)
+    kappa_0 = pt.as_tensor_variable(kappa_0)
 
     # f_s0
     f_S0_0 = np.ones(shape=(n_clusters, n_serotypes))
     f_S0_0[0,:] = [0.2, 0.6, 0.9, 0.95]
     #f_S0_0[1,:] = [0.2, 0.6, 0.9, 0.95]
     #f_S0_0[2,:] = [0.2, 0.6, 0.9, 0.95]
-    f_S0 = pt.as_tensor_variable(f_S0_0)
+    f_S0_0 = pt.as_tensor_variable(f_S0_0)
 
     # p0
     p0_0 = 0.25*np.ones(shape=(n_clusters, n_serotypes))
     p0_0[0,:] = [0.9, 0.001, 0.098, 0.001]
     #p0_0[1,:] = [0.9, 0.001, 0.098, 0.001]
     #p0_0[2,:] = [0.9, 0.001, 0.098, 0.001]
-    p0 = pt.as_tensor_variable(p0_0)
+    p0_0 = pt.as_tensor_variable(p0_0)
 
     ## Initial states
     S0 = pm.Deterministic("S0", demo[:, None] * f_S0)  # susceptibles (n_clusters, n_serotypes)
-    #p0 = pm.Dirichlet("p0", a=10*np.array([0.9, 0.001, 0.098, 0.001]), shape=(n_clusters, n_serotypes))
+    p0 = pm.Dirichlet("p0", a=10*np.array([0.9, 0.001, 0.098, 0.001]), shape=(n_clusters, n_serotypes))
+    z0 = pt.log(p0)
 
-    # -------------------------------------------------
-    # equations go here
-    # -------------------------------------------------
+    # ---------------------------------------------------------------------
+    # (Logit) Replicator equation integrated using Euler's method with dt=1
+    # ---------------------------------------------------------------------
 
     # https://www.youtube.com/watch?v=G9VWXZdbtKQ
     # https://pytensor.readthedocs.io/en/latest/library/scan.html 
@@ -275,38 +276,24 @@ with pm.Model() as model:
     # https://becarioprecario.bitbucket.io/spde-gitbook/ch-intro.html
 
     def step(births_t, deaths_t, D_t, eps_t, S_prev, z_prev, gamma, kappa):
-
-        # -----------------------
-        # 1. Susceptible dynamics
-        # -----------------------
-        S_t = (
-            S_prev
-            - D_t[:, None] * pm.math.softmax(z_prev, axis=1) / kappa
-            + births_t[:, None]
-            - deaths_t[:, None] * S_prev
-        )
-
-        # soft lower bound to keep log well-defined
-        S_t = 1 + pt.softplus(S_t - 1)
-
-        # -----------------------
-        # 2. Fitness from resource
-        # -----------------------
-        f_t = gamma * pt.log(S_t)
-
-        # mean fitness φ_t
-        phi_t = pt.sum(pm.math.softmax(z_prev, axis=1) * f_t, axis=1, keepdims=True)
-
-        # ----------------------------
-        # 3. Replicator update (Euler)
-        # ----------------------------
         
+        p_prev = pm.math.softmax(z_prev, axis=1) # reconstruct p
+
+        # 1. Susceptible dynamics
+        S_t = (1 - deaths_t[:, None]) * S_prev + births_t[:, None] - D_t[:, None] * p_prev / kappa
+        S_t = 1 + pt.softplus(S_t - 1) # soft lower bound to keep log well-defined
+
+        # 2. Fitness from susceptibles as a resource
+        f_t = gamma * pt.log(S_t)
+        phi_t = pt.sum(p_prev * f_t, axis=1, keepdims=True) # mean fitness phi_t
+
+        # 3. (Logit) Replicator update (Euler)
         z_t = z_prev + (f_t - phi_t) + eps_t
 
         return S_t, z_t
 
     # run step sequence
-    z0 = pt.log(p0)
+    
     (S_seq, z_seq), _ = pytensor.scan(
         fn=step,
         sequences=[
