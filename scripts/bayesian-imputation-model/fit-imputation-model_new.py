@@ -207,9 +207,10 @@ with pm.Model() as model:
 
     ## Parameters 
     ## intrinsic fitness
-    log_gamma_s = pm.Normal("log_gamma_s", mu=-3, sigma=1, shape=n_serotypes)   # serotypes have independent means (E[X] = 0.08)
-    gamma_s = pm.Deterministic("gamma_s", pt.exp(log_gamma_s))
-    gamma_cluster_sigma = pm.HalfNormal("gamma_cluster_sigma", sigma=1/3)       # clusters represent perturbations of this serotype's mean
+    log_gamma_s = pm.Normal("log_gamma_s", mu=pt.log(0.1), sigma=1, shape=n_serotypes)              # serotypes have independent means
+    gamma_s = pm.Deterministic("gamma_s", pt.exp(log_gamma_s))                                      # transform for ease of analysis
+    gamma_cluster_sigma_shrinkage = pm.HalfNormal("gamma_cluster_sigma_shrinkage", sigma=0.1/3)     # shrinkage for serotype-specific deviations between clusters
+    gamma_cluster_sigma = pm.HalfNormal("gamma_cluster_sigma", sigma=gamma_cluster_sigma_shrinkage, shape=n_serotypes) # serotype-specific deviations between clusters
     gamma = pm.LogNormal("gamma", mu=log_gamma_s, sigma=gamma_cluster_sigma, shape=(n_clusters, n_serotypes))
 
     # ## reported fractions
@@ -228,15 +229,16 @@ with pm.Model() as model:
     kappa = pm.LogNormal("kappa", mu=pt.log(0.05), sigma=1/3, shape=(n_clusters, n_serotypes))
     kappa = pm.Deterministic("kappa_clipped", pt.minimum(kappa, 1.0))
 
-    ## susceptible fraction
-    f_S0_mu_s = pm.Beta("f_S0_mu_s", alpha=2, beta=2, shape=n_serotypes)    # serotypes have independent means
-    f_S0_cluster_sigma = pm.HalfNormal("f_S0_cluster_sigma", sigma=1/3)     # shrinkage on cluster variation
-    f_S0_cluster_offset = pm.Normal("f_S0_cluster_offset", mu=0, sigma=f_S0_cluster_sigma, shape=(n_clusters, n_serotypes))    # cluster variation (depends on serotype!)
-    logit_fS0 = pm.math.logit(f_S0_mu_s)[None, :] + f_S0_cluster_offset   # serotype + cluster perturbations
+    # Serotype-level mean susceptible fraction
+    f_S0_mu_s = pm.Beta("f_S0_mu_s", alpha=2, beta=2, shape=n_serotypes)                                                            # serotypes have independent means
+    f_S0_cluster_sigma_shrinkage = pm.HalfNormal("f_S0_cluster_sigma_shrinkage", sigma=1)                                           # shrinkage for serotype-specific deviations between clusters
+    f_S0_cluster_sigma = pm.HalfNormal("f_S0_cluster_sigma", sigma=f_S0_cluster_sigma_shrinkage, shape=n_serotypes)                 # serotype-specific deviations between clusters
+    f_S0_cluster_offset = pm.Normal("f_S0_cluster_offset", mu=0, sigma=f_S0_cluster_sigma, shape=(n_clusters, n_serotypes))         # sample offsets
+    logit_fS0 = pm.math.logit(f_S0_mu_s)[None, :] + f_S0_cluster_offset                                                             # serotype + cluster perturbations
     f_S0 = pm.Deterministic("f_S0", pm.math.sigmoid(logit_fS0))
 
-    ## Fitness innovations
-    sigma = pm.HalfNormal("sigma", sigma=0.1/3)
+    ## Residual innovations
+    sigma = pm.HalfNormal("sigma", sigma=0.01)
     eta = pm.Normal("eta", mu=0.0, sigma=sigma, shape=(n_months-1, n_clusters, n_serotypes)) # pt.as_tensor_variable(np.zeros(shape=(n_months-1, n_clusters, n_serotypes))) --> eliminate residual
     eps_0 = pt.zeros((n_clusters, n_serotypes))
 
@@ -362,7 +364,7 @@ with pm.Model() as model:
 # NUTS
 draws=50
 with model:
-    trace = pm.sample(draws, tune=100, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, initvals=chains*[{'gamma': gamma_0, 'kappa': kappa_0, 'f_S0': f_S0_0, 'sigma': 0.033},])
+    trace = pm.sample(draws, tune=100, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, initvals=chains*[{'gamma': gamma_0, 'kappa': kappa_0, 'f_S0': f_S0_0},])
 
 #######################
 ## Running the model ##
@@ -382,7 +384,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                'gamma_s', 'gamma_cluster_sigma', 'kappa', 'f_S0_mu_s', 'f_S0_cluster_sigma', 'sigma'
+                 'gamma_s', 'gamma_cluster_sigma_shrinkage', 'gamma_cluster_sigma', 'gamma', 'kappa', 'f_S0_mu_s', 'f_S0_cluster_sigma_shrinkage', 'f_S0_cluster_sigma', 'f_S0', 'sigma'
                 ]
 
 # Save traces
