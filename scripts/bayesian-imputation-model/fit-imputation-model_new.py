@@ -155,7 +155,7 @@ df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
 
 # only do first X clusters
-df = df[df['cluster'].isin([1,2])]
+df = df[df['cluster'].isin([1,2,3])]
 
 # 9. Build PyMC arrays
 # --- For DirichletMultinomial model ---
@@ -179,7 +179,7 @@ df_expanded["estimated_death_rate"] = df_expanded["estimated_deaths"] / df_expan
 births = df_expanded.pivot(index="date", columns="cluster", values="estimated_births").to_numpy().astype(int) # (n_months, n_clusters)
 death_rate = df_expanded.pivot(index="date", columns="cluster", values="estimated_death_rate").to_numpy() # (n_months, n_clusters)
 # Initial demography
-demo = demo[((demo['year'] == start_year) & (demo['cluster'].isin([1,2])))]['population'].values
+demo = demo[((demo['year'] == start_year) & (demo['cluster'].isin([1,2,3])))]['population'].values
 
 # --- Indices ---
 cluster_idx = df["cluster"].to_numpy().astype(int)
@@ -205,29 +205,23 @@ p0 = (d[cols] + alpha).div(d[cols].sum(axis=1) + len(cols) * alpha, axis=0)
 
 with pm.Model() as model:
 
-    ## Parameters 
+    # Parameters 
     ## intrinsic fitness
-    log_gamma_s = pm.Normal("log_gamma_s", mu=pt.log(0.1), sigma=1, shape=n_serotypes)              # serotypes have independent means
-    gamma_s = pm.Deterministic("gamma_s", pt.exp(log_gamma_s))                                      # transform for ease of analysis
-    gamma_cluster_sigma_shrinkage = pm.HalfNormal("gamma_cluster_sigma_shrinkage", sigma=0.1/3)     # shrinkage for serotype-specific deviations between clusters
-    gamma_cluster_sigma = pm.HalfNormal("gamma_cluster_sigma", sigma=gamma_cluster_sigma_shrinkage, shape=n_serotypes) # serotype-specific deviations between clusters
-    gamma = pm.LogNormal("gamma", mu=log_gamma_s, sigma=gamma_cluster_sigma, shape=(n_clusters, n_serotypes))
+    beta = pm.Lognormal("beta", mu=pt.log(0.1), sigma=0.1)                                                                          # serotype cycling speed scale
+    gamma_s = pm.Normal("gamma_s", mu=1.0, sigma=0.1, shape=n_serotypes)                                                            # serotypes have independent means
+    gamma_cluster_sigma_shrinkage = pm.HalfNormal("gamma_cluster_sigma_shrinkage", sigma=0.1/3)                                     # shrinkage for serotype-specific deviations between clusters
+    gamma_cluster_sigma = pm.HalfNormal("gamma_cluster_sigma", sigma=gamma_cluster_sigma_shrinkage, shape=n_serotypes)              # serotype-specific deviations between clusters
+    gamma_cluster_offset = pm.Normal("gamma_cluster_offset", mu=0.0, sigma=gamma_cluster_sigma, shape=(n_clusters, n_serotypes))   # sample offsets
+    gamma = pm.Deterministic("gamma", gamma_s[None, :] *  pt.exp(gamma_cluster_offset))   
 
-    # ## reported fractions
-    # ### Global mean and sd reporting fraction
-    # kappa_mu_global = pm.Beta("kappa_mu_global", alpha=10, beta=500)
-    # kappa_phi_global = pm.Gamma("kappa_phi_global", alpha=100, beta=1)
-    # ### serotype specific reporting fraction
-    # kappa_mu_s = pm.Beta("kappa_mu_s", alpha=kappa_mu_global * kappa_phi_global, beta=(1 - kappa_mu_global) * kappa_phi_global, shape=n_serotypes)
-    # ### add cluster perturbation in logit space
-    # kappa_cluster_sigma = pm.HalfNormal("kappa_cluster_sigma", sigma=1/3)
-    # kappa_cluster_offset = pm.Normal("kappa_cluster_offset", mu=0, sigma=kappa_cluster_sigma, shape=n_clusters)
-    # logit_kappa = pm.math.logit(kappa_mu_s)[None, :] + kappa_cluster_offset[:, None]
-    # kappa = pm.Deterministic("kappa", pm.math.sigmoid(logit_kappa))
-
-    # reported fraction (direct estimation)
-    kappa = pm.LogNormal("kappa", mu=pt.log(0.05), sigma=1/3, shape=(n_clusters, n_serotypes))
-    kappa = pm.Deterministic("kappa_clipped", pt.minimum(kappa, 1.0))
+    ## reported fraction
+    kappa_mu_logit = pm.Normal("kappa_mu_logit", mu=pm.math.logit(0.05), sigma=1.0)     # global baseline reporting
+    kappa_s_logit = pm.Normal("kappa_s_logit", mu=0.0, sigma=1.0, shape=n_serotypes)    # serotype effect: intrinsic severity biases typing odds
+    kappa_c_logit = pm.Normal("kappa_c_logit", mu=0.0, sigma=1.0, shape=n_clusters)     # cluster effect: healthcare / surveillance capacity
+    kappa_logit = kappa_mu_logit + kappa_s_logit[None, :] + kappa_c_logit[:, None]      # additive linear model
+    kappa = pm.Deterministic("kappa", pm.math.sigmoid(kappa_logit))                     # back-transform variables
+    kappa_s_OR = pm.Deterministic("kappa_s_OR", pt.exp(kappa_s_logit))
+    kappa_c_OR = pm.Deterministic("kappa_c_OR", pt.exp(kappa_c_logit))
 
     # Serotype-level mean susceptible fraction
     f_S0_mu_s = pm.Beta("f_S0_mu_s", alpha=2, beta=2, shape=n_serotypes)                                                            # serotypes have independent means
@@ -244,29 +238,24 @@ with pm.Model() as model:
 
     # Manual guesses
     # gamma
-    gamma_0 = np.ones(shape=(n_clusters, n_serotypes))
-    gamma_0[0,:] = [0.11, 0.1, 0.1, 0.1]
-    gamma_0[1,:] = [0.105, 0.1, 0.1, 0.1]
-    #gamma_0[2,:] = [0.11, 0.1, 0.1, 0.1]
-    gamma_0 = pt.as_tensor_variable(gamma_0)
+    gamma0 = pt.as_tensor_variable(np.repeat(np.array([1.1, 1, 1, 1])[None,:], n_clusters, axis=0))
 
     # kappa
     kappa_0 = np.ones(shape=(n_clusters, n_serotypes))
     kappa_0[0,:] = [0.02, 0.01, 0.01, 0.005]
     kappa_0[1,:] = [0.04, 0.02, 0.015, 0.03]
-    #kappa_0[2,:] = 4 * kappa_0[0,:]
+    kappa_0[2,:] = 4 * kappa_0[0,:]
     kappa_0 = pt.as_tensor_variable(kappa_0)
 
     # f_s0
     f_S0_0 = np.ones(shape=(n_clusters, n_serotypes))
     f_S0_0[0,:] = [0.3, 0.6, 0.9, 0.7]
     f_S0_0[1,:] = [0.35, 0.6, 0.9, 0.7]
-    #f_S0_0[2,:] = [0.2, 0.6, 0.9, 0.95]
+    f_S0_0[2,:] = [0.2, 0.6, 0.9, 0.95]
     f_S0_0 = pt.as_tensor_variable(f_S0_0)
 
     ## Initial states
     S0 = pm.Deterministic("S0", demo[:, None] * f_S0)  # susceptibles (n_clusters, n_serotypes)
-    z0 = pt.log(p0)
 
     # ---------------------------------------------------------------------
     # (Logit) Replicator equation integrated using Euler's method with dt=1
@@ -277,7 +266,7 @@ with pm.Model() as model:
     # https://gist.github.com/ricardoV94/a49b2cc1cf0f32a5f6dc31d6856ccb63#file-pymc_timeseries_ma-ipynb
     # https://becarioprecario.bitbucket.io/spde-gitbook/ch-intro.html
 
-    def step(births_t, deaths_t, D_t, eta_t, S_prev, z_prev, eps_prev, gamma, kappa):
+    def step(births_t, deaths_t, D_t, eta_t, S_prev, z_prev, eps_prev, gamma, kappa, beta):
         
         p_prev = pm.math.softmax(z_prev, axis=1) # reconstruct p
 
@@ -289,11 +278,11 @@ with pm.Model() as model:
         S_ref = pt.mean(S_prev, axis=1, keepdims=True)  # use average no. susceptibles per cluster as reference --> center fitness around zero in every cluster on every timestep --> replicator only cares about relative fitness hence scale-invariance should work well
         f_t = gamma * pt.log(S_t / S_ref)
 
-        # RW residual
+        # RW(1) on residual (spatial correlation?)
         eps_t = eps_prev + eta_t
 
         # 3. (Logit) Replicator update
-        z_t = z_prev + f_t + eps_t
+        z_t = z_prev + beta * f_t + eps_t
 
         return S_t, z_t, eps_t
 
@@ -306,13 +295,13 @@ with pm.Model() as model:
             pt.as_tensor_variable(DENV_total),
             eta,
         ],
-        outputs_info=[S0, z0, eps_0],
-        non_sequences=[gamma, kappa],
+        outputs_info=[S0, pt.log(p0), eps_0],
+        non_sequences=[gamma, kappa, beta],
     )
 
     # attach initial states
     S = pm.Deterministic("S", pt.concatenate([S0[None, :, :], S_seq], axis=0))
-    z = pm.Deterministic("z", pt.concatenate([z0[None, :, :], z_seq], axis=0))
+    z = pm.Deterministic("z", pt.concatenate([pt.log(p0)[None, :, :], z_seq], axis=0))
     p = pm.Deterministic("p", pm.math.softmax(z, axis=2))
 
     # Overdispersion models
@@ -364,7 +353,7 @@ with pm.Model() as model:
 # NUTS
 draws=50
 with model:
-    trace = pm.sample(draws, tune=100, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, initvals=chains*[{'gamma': gamma_0, 'kappa': kappa_0, 'f_S0': f_S0_0},])
+    trace = pm.sample(draws, tune=100, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}) #, initvals=chains*[{'gamma': gamma_0, 'kappa': kappa_0, 'f_S0': f_S0_0},])
 
 #######################
 ## Running the model ##
@@ -384,7 +373,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                 'gamma_s', 'gamma_cluster_sigma_shrinkage', 'gamma_cluster_sigma', 'gamma', 'kappa', 'f_S0_mu_s', 'f_S0_cluster_sigma_shrinkage', 'f_S0_cluster_sigma', 'f_S0', 'sigma'
+                 'gamma_s', 'gamma_cluster_sigma_shrinkage', 'gamma_cluster_sigma', 'gamma', 'kappa_mu_logit', 'kappa_s_logit', 'kappa_c_logit', 'kappa_s_OR', 'kappa_c_OR', 'kappa', 'f_S0_mu_s', 'f_S0_cluster_sigma_shrinkage', 'f_S0_cluster_sigma', 'f_S0', 'sigma', 'beta'
                 ]
 
 # Save traces
