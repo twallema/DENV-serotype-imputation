@@ -212,17 +212,20 @@ with pm.Model() as model:
     gamma_cluster_sigma = pm.HalfNormal("gamma_cluster_sigma", sigma=1/3)       # clusters represent perturbations of this serotype's mean
     gamma = pm.LogNormal("gamma", mu=log_gamma_s, sigma=gamma_cluster_sigma, shape=(n_clusters, n_serotypes))
 
-    ## reported fractions
-    ### Global mean and sd reporting fraction
-    kappa_mu_global = pm.Beta("kappa_mu_global", alpha=10, beta=500)
-    kappa_phi_global = pm.Gamma("kappa_phi_global", alpha=100, beta=1)
-    ### serotype specific reporting fraction
-    kappa_mu_s = pm.Beta("kappa_mu_s", alpha=kappa_mu_global * kappa_phi_global, beta=(1 - kappa_mu_global) * kappa_phi_global, shape=n_serotypes)
-    ### add cluster perturbation in logit space
-    kappa_cluster_sigma = pm.HalfNormal("kappa_cluster_sigma", sigma=1/3)
-    kappa_cluster_offset = pm.Normal("kappa_cluster_offset", mu=0, sigma=kappa_cluster_sigma, shape=n_clusters)
-    logit_kappa = pm.math.logit(kappa_mu_s)[None, :] + kappa_cluster_offset[:, None]
-    kappa = pm.Deterministic("kappa", pm.math.sigmoid(logit_kappa))
+    # ## reported fractions
+    # ### Global mean and sd reporting fraction
+    # kappa_mu_global = pm.Beta("kappa_mu_global", alpha=10, beta=500)
+    # kappa_phi_global = pm.Gamma("kappa_phi_global", alpha=100, beta=1)
+    # ### serotype specific reporting fraction
+    # kappa_mu_s = pm.Beta("kappa_mu_s", alpha=kappa_mu_global * kappa_phi_global, beta=(1 - kappa_mu_global) * kappa_phi_global, shape=n_serotypes)
+    # ### add cluster perturbation in logit space
+    # kappa_cluster_sigma = pm.HalfNormal("kappa_cluster_sigma", sigma=1/3)
+    # kappa_cluster_offset = pm.Normal("kappa_cluster_offset", mu=0, sigma=kappa_cluster_sigma, shape=n_clusters)
+    # logit_kappa = pm.math.logit(kappa_mu_s)[None, :] + kappa_cluster_offset[:, None]
+    # kappa = pm.Deterministic("kappa", pm.math.sigmoid(logit_kappa))
+
+    kappa = pm.LogNormal("kappa", mu=pt.log(0.05), sigma=1/3, shape=(n_clusters, n_serotypes))
+    kappa = pm.Deterministic("kappa_clipped", pt.minimum(kappa, 1.0))
 
     ## susceptible fraction
     f_S0_mu_s = pm.Beta("f_S0_mu_s", alpha=2, beta=2, shape=n_serotypes)    # serotypes have independent means
@@ -272,7 +275,7 @@ with pm.Model() as model:
 
     def step(births_t, deaths_t, D_t, eps_t, S_prev, z_prev, gamma, kappa):
         
-        p_prev = pm.math.softmax(z_prev, axis=1)        # reconstruct p
+        p_prev = pm.math.softmax(z_prev, axis=1) # reconstruct p
 
         # 1. Susceptible dynamics
         S_t = (1 - deaths_t[:, None]) * S_prev + births_t[:, None] - D_t[:, None] * p_prev / kappa
@@ -281,7 +284,6 @@ with pm.Model() as model:
         # 2. Fitness from susceptibles as a resource
         S_ref = pt.mean(S_prev, axis=1, keepdims=True)  # use average no. susceptibles per cluster as reference --> center fitness around zero in every cluster on every timestep --> replicator only cares about relative fitness hence scale-invariance should work well
         f_t = gamma * pt.log(S_t / S_ref)
-        #phi_t = pt.sum(p_prev * f_t, axis=1, keepdims=True) # mean fitness phi_t
 
         # 3. (Logit) Replicator update
         z_t = z_prev + f_t + eps_t
@@ -375,7 +377,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                'gamma_s', 'gamma_cluster_sigma', 'kappa_mu_global', 'kappa_phi_global', 'kappa_mu_s', 'kappa_cluster_sigma', 'f_S0_mu_s', 'f_S0_cluster_sigma', 'sigma'
+                'gamma_s', 'gamma_cluster_sigma', 'kappa', 'f_S0_mu_s', 'f_S0_cluster_sigma', 'sigma'
                 ]
 
 # Save traces
