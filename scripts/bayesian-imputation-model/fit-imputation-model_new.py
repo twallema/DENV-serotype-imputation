@@ -155,7 +155,7 @@ df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
 
 # only do first X clusters
-df = df[df['cluster'].isin([1,])]
+df = df[df['cluster'].isin([1,2])]
 
 # 9. Build PyMC arrays
 # --- For DirichletMultinomial model ---
@@ -179,7 +179,7 @@ df_expanded["estimated_death_rate"] = df_expanded["estimated_deaths"] / df_expan
 births = df_expanded.pivot(index="date", columns="cluster", values="estimated_births").to_numpy().astype(int) # (n_months, n_clusters)
 death_rate = df_expanded.pivot(index="date", columns="cluster", values="estimated_death_rate").to_numpy() # (n_months, n_clusters)
 # Initial demography
-demo = demo[((demo['year'] == start_year) & (demo['cluster'].isin([1,])))]['population'].values
+demo = demo[((demo['year'] == start_year) & (demo['cluster'].isin([1,2])))]['population'].values
 
 # --- Indices ---
 cluster_idx = df["cluster"].to_numpy().astype(int)
@@ -191,6 +191,13 @@ n_clusters = int(len(df['cluster'].unique()))
 n_months = int(len(df["month_idx"].unique()))
 n_years = int(df["year_idx"].max() + 1)
 n_serotypes = len(sero_cols)
+
+# Estimate initial serotype distribution p0 from first year of data in every cluster
+# Use the mean of the posterior of Dirichlet-Multinomial model with symmetric prior alpha = 1/2 (Jeffrey's prior = uninformative prior)
+d = df[df['year'] == min(df['year'])].groupby(by='cluster')[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].sum()
+cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4"]
+alpha = 1/2
+p0 = (d[cols] + alpha).div(d[cols].sum(axis=1) + len(cols) * alpha, axis=0)
 
 ###############################
 ## Bayesian imputation model ##
@@ -207,7 +214,7 @@ with pm.Model() as model:
 
     ## reported fractions
     ### Global mean and sd reporting fraction
-    kappa_mu_global = pm.Beta("kappa_mu_global", alpha=3, beta=100)
+    kappa_mu_global = pm.Beta("kappa_mu_global", alpha=10, beta=500)
     kappa_phi_global = pm.Gamma("kappa_phi_global", alpha=100, beta=1)
     ### serotype specific reporting fraction
     kappa_mu_s = pm.Beta("kappa_mu_s", alpha=kappa_mu_global * kappa_phi_global, beta=(1 - kappa_mu_global) * kappa_phi_global, shape=n_serotypes)
@@ -225,41 +232,33 @@ with pm.Model() as model:
     f_S0 = pm.Deterministic("f_S0", pm.math.sigmoid(logit_fS0))
 
     ## Fitness innovations
-    sigma = pm.HalfNormal("sigma", sigma=0.01)
-    eps_F = pm.Normal("eps_F", mu=0.0, sigma=sigma, shape=(n_months-1, n_clusters, n_serotypes)) # pt.as_tensor_variable(np.zeros(shape=(n_months-1, n_clusters, n_serotypes)))
+    sigma = pm.HalfNormal("sigma", sigma=0.1/3)
+    eps_F = pt.as_tensor_variable(np.zeros(shape=(n_months-1, n_clusters, n_serotypes))) # pm.Normal("eps_F", mu=0.0, sigma=sigma, shape=(n_months-1, n_clusters, n_serotypes))
 
     # Manual guesses
     # gamma
     gamma_0 = np.ones(shape=(n_clusters, n_serotypes))
     gamma_0[0,:] = [0.11, 0.1, 0.1, 0.1]
-    #gamma_0[1,:] = [0.105, 0.1, 0.1, 0.1]
+    gamma_0[1,:] = [0.105, 0.1, 0.1, 0.1]
     #gamma_0[2,:] = [0.11, 0.1, 0.1, 0.1]
     gamma_0 = pt.as_tensor_variable(gamma_0)
 
     # kappa
     kappa_0 = np.ones(shape=(n_clusters, n_serotypes))
     kappa_0[0,:] = [0.02, 0.01, 0.01, 0.005]
-    #kappa_0[1,:] = [0.04, 0.02, 0.015, 0.03]
+    kappa_0[1,:] = [0.04, 0.02, 0.015, 0.03]
     #kappa_0[2,:] = 4 * kappa_0[0,:]
     kappa_0 = pt.as_tensor_variable(kappa_0)
 
     # f_s0
     f_S0_0 = np.ones(shape=(n_clusters, n_serotypes))
-    f_S0_0[0,:] = [0.2, 0.6, 0.9, 0.95]
-    #f_S0_0[1,:] = [0.2, 0.6, 0.9, 0.95]
+    f_S0_0[0,:] = [0.3, 0.6, 0.9, 0.7]
+    f_S0_0[1,:] = [0.35, 0.6, 0.9, 0.7]
     #f_S0_0[2,:] = [0.2, 0.6, 0.9, 0.95]
     f_S0_0 = pt.as_tensor_variable(f_S0_0)
 
-    # p0
-    p0_0 = 0.25*np.ones(shape=(n_clusters, n_serotypes))
-    p0_0[0,:] = [0.9, 0.001, 0.098, 0.001]
-    #p0_0[1,:] = [0.9, 0.001, 0.098, 0.001]
-    #p0_0[2,:] = [0.9, 0.001, 0.098, 0.001]
-    p0_0 = pt.as_tensor_variable(p0_0)
-
     ## Initial states
     S0 = pm.Deterministic("S0", demo[:, None] * f_S0)  # susceptibles (n_clusters, n_serotypes)
-    p0 = pm.Dirichlet("p0", a=10*np.array([0.9, 0.001, 0.098, 0.001]), shape=(n_clusters, n_serotypes))
     z0 = pt.log(p0)
 
     # ---------------------------------------------------------------------
@@ -273,18 +272,19 @@ with pm.Model() as model:
 
     def step(births_t, deaths_t, D_t, eps_t, S_prev, z_prev, gamma, kappa):
         
-        p_prev = pm.math.softmax(z_prev, axis=1) # reconstruct p
+        p_prev = pm.math.softmax(z_prev, axis=1)        # reconstruct p
 
         # 1. Susceptible dynamics
         S_t = (1 - deaths_t[:, None]) * S_prev + births_t[:, None] - D_t[:, None] * p_prev / kappa
-        S_t = 1 + pt.softplus(S_t - 1) # soft lower bound to keep log well-defined
-
+        S_t = 1 + pt.softplus(S_t - 1) # soft cap at zero preserving gradients
+  
         # 2. Fitness from susceptibles as a resource
-        f_t = gamma * pt.log(S_t)
-        phi_t = pt.sum(p_prev * f_t, axis=1, keepdims=True) # mean fitness phi_t
+        S_ref = pt.mean(S_prev, axis=1, keepdims=True)  # use average no. susceptibles per cluster as reference --> center fitness around zero in every cluster on every timestep --> replicator only cares about relative fitness hence scale-invariance should work well
+        f_t = gamma * pt.log(S_t / S_ref)
+        #phi_t = pt.sum(p_prev * f_t, axis=1, keepdims=True) # mean fitness phi_t
 
         # 3. (Logit) Replicator update
-        z_t = z_prev + (f_t - phi_t) + eps_t
+        z_t = z_prev + f_t + eps_t
 
         return S_t, z_t
 
@@ -318,34 +318,34 @@ with pm.Model() as model:
     Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
     
 
-    fig,ax=plt.subplots(nrows=6, figsize=(11.7, 8.3))
-    cluster = 0
-    # serotype distributions
-    ax[0].plot(p.eval()[:,cluster,0], color='black', label='DENV-1')
-    ax[0].plot(p.eval()[:,cluster,1], color='red', label='DENV-2')
-    ax[0].plot(p.eval()[:,cluster,2], color='green', label='DENV-3')
-    ax[0].plot(p.eval()[:,cluster,3], color='blue', label='DENV-4')
-    ax[0].legend()
-    # susceptibles
-    ax[1].plot(S.eval()[:,cluster,0], color='black', label='DENV-1')
-    ax[1].plot(S.eval()[:,cluster,1], color='red', label='DENV-2')
-    ax[1].plot(S.eval()[:,cluster,2], color='green', label='DENV-3')
-    ax[1].plot(S.eval()[:,cluster,3], color='blue', label='DENV-4')
-    ax[1].legend()
-    # DENV-1 counts observed versus modeled
-    ax[2].plot(Y_obs.eval()[:, cluster, 0], color='black', linestyle='--', label='DENV-1')
-    ax[2].plot(Y_multinomial[:, cluster, 0], color='black', label='DENV-1')
-    # DENV-2 counts observed versus modeled
-    ax[3].plot(Y_obs.eval()[:, cluster, 1], color='red', label='DENV-2')
-    ax[3].plot(Y_multinomial[:, cluster, 1], color='black', label='DENV-2')
-    # DENV-3 counts observed versus modeled
-    ax[4].plot(Y_obs.eval()[:, cluster, 2], color='green', label='DENV-3')
-    ax[4].plot(Y_multinomial[:, cluster, 2], color='black', label='DENV-3')
-    # DENV-4 counts observed versus modeled
-    ax[5].plot(Y_obs.eval()[:, cluster, 3], color='blue', label='DENV-4')
-    ax[5].plot(Y_multinomial[:, cluster, 3], color='black', label='DENV-4')
-    plt.show()
-    plt.close()
+    # fig,ax=plt.subplots(nrows=6, figsize=(11.7, 8.3))
+    # cluster = 1
+    # # serotype distributions
+    # ax[0].plot(p.eval()[:,cluster,0], color='black', label='DENV-1')
+    # ax[0].plot(p.eval()[:,cluster,1], color='red', label='DENV-2')
+    # ax[0].plot(p.eval()[:,cluster,2], color='green', label='DENV-3')
+    # ax[0].plot(p.eval()[:,cluster,3], color='blue', label='DENV-4')
+    # ax[0].legend()
+    # # susceptibles
+    # ax[1].plot(S.eval()[:,cluster,0], color='black', label='DENV-1')
+    # ax[1].plot(S.eval()[:,cluster,1], color='red', label='DENV-2')
+    # ax[1].plot(S.eval()[:,cluster,2], color='green', label='DENV-3')
+    # ax[1].plot(S.eval()[:,cluster,3], color='blue', label='DENV-4')
+    # ax[1].legend()
+    # # DENV-1 counts observed versus modeled
+    # ax[2].plot(Y_obs.eval()[:, cluster, 0], color='black', linestyle='--', label='DENV-1')
+    # ax[2].plot(Y_multinomial[:, cluster, 0], color='black', label='DENV-1')
+    # # DENV-2 counts observed versus modeled
+    # ax[3].plot(Y_obs.eval()[:, cluster, 1], color='red', label='DENV-2')
+    # ax[3].plot(Y_multinomial[:, cluster, 1], color='black', label='DENV-2')
+    # # DENV-3 counts observed versus modeled
+    # ax[4].plot(Y_obs.eval()[:, cluster, 2], color='green', label='DENV-3')
+    # ax[4].plot(Y_multinomial[:, cluster, 2], color='black', label='DENV-3')
+    # # DENV-4 counts observed versus modeled
+    # ax[5].plot(Y_obs.eval()[:, cluster, 3], color='blue', label='DENV-4')
+    # ax[5].plot(Y_multinomial[:, cluster, 3], color='black', label='DENV-4')
+    # plt.show()
+    # plt.close()
 
 #######################
 ## Running the model ##
@@ -353,9 +353,9 @@ with pm.Model() as model:
 
 
 # NUTS
-draws=50
+draws=100
 with model:
-    trace = pm.sample(draws, tune=50, target_accept=0.8, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, initvals=chains*[{'gamma': gamma_0, 'kappa': kappa_0, 'f_S0': f_S0_0, 'p0': p0_0},])
+    trace = pm.sample(draws, tune=50, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, initvals=chains*[{'gamma': gamma_0, 'kappa': kappa_0, 'f_S0': f_S0_0, 'sigma': 0.05},])
 
 #######################
 ## Running the model ##
