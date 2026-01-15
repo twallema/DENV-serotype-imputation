@@ -224,6 +224,7 @@ with pm.Model() as model:
     # logit_kappa = pm.math.logit(kappa_mu_s)[None, :] + kappa_cluster_offset[:, None]
     # kappa = pm.Deterministic("kappa", pm.math.sigmoid(logit_kappa))
 
+    # reported fraction (direct estimation)
     kappa = pm.LogNormal("kappa", mu=pt.log(0.05), sigma=1/3, shape=(n_clusters, n_serotypes))
     kappa = pm.Deterministic("kappa_clipped", pt.minimum(kappa, 1.0))
 
@@ -236,7 +237,8 @@ with pm.Model() as model:
 
     ## Fitness innovations
     sigma = pm.HalfNormal("sigma", sigma=0.1/3)
-    eps_F = pt.as_tensor_variable(np.zeros(shape=(n_months-1, n_clusters, n_serotypes))) # pm.Normal("eps_F", mu=0.0, sigma=sigma, shape=(n_months-1, n_clusters, n_serotypes))
+    eta = pm.Normal("eta", mu=0.0, sigma=sigma, shape=(n_months-1, n_clusters, n_serotypes)) # pt.as_tensor_variable(np.zeros(shape=(n_months-1, n_clusters, n_serotypes))) --> eliminate residual
+    eps_0 = pt.zeros((n_clusters, n_serotypes))
 
     # Manual guesses
     # gamma
@@ -273,7 +275,7 @@ with pm.Model() as model:
     # https://gist.github.com/ricardoV94/a49b2cc1cf0f32a5f6dc31d6856ccb63#file-pymc_timeseries_ma-ipynb
     # https://becarioprecario.bitbucket.io/spde-gitbook/ch-intro.html
 
-    def step(births_t, deaths_t, D_t, eps_t, S_prev, z_prev, gamma, kappa):
+    def step(births_t, deaths_t, D_t, eta_t, S_prev, z_prev, eps_prev, gamma, kappa):
         
         p_prev = pm.math.softmax(z_prev, axis=1) # reconstruct p
 
@@ -285,21 +287,24 @@ with pm.Model() as model:
         S_ref = pt.mean(S_prev, axis=1, keepdims=True)  # use average no. susceptibles per cluster as reference --> center fitness around zero in every cluster on every timestep --> replicator only cares about relative fitness hence scale-invariance should work well
         f_t = gamma * pt.log(S_t / S_ref)
 
+        # RW residual
+        eps_t = eps_prev + eta_t
+
         # 3. (Logit) Replicator update
         z_t = z_prev + f_t + eps_t
 
-        return S_t, z_t
+        return S_t, z_t, eps_t
 
     # run step sequence
-    (S_seq, z_seq), _ = pytensor.scan(
+    (S_seq, z_seq, eps_seq), _ = pytensor.scan(
         fn=step,
         sequences=[
             pt.as_tensor_variable(births),
             pt.as_tensor_variable(death_rate),
             pt.as_tensor_variable(DENV_total),
-            eps_F,
+            eta,
         ],
-        outputs_info=[S0, z0],
+        outputs_info=[S0, z0, eps_0],
         non_sequences=[gamma, kappa],
     )
 
@@ -355,9 +360,9 @@ with pm.Model() as model:
 
 
 # NUTS
-draws=100
+draws=50
 with model:
-    trace = pm.sample(draws, tune=50, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, initvals=chains*[{'gamma': gamma_0, 'kappa': kappa_0, 'f_S0': f_S0_0, 'sigma': 0.05},])
+    trace = pm.sample(draws, tune=100, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, initvals=chains*[{'gamma': gamma_0, 'kappa': kappa_0, 'f_S0': f_S0_0, 'sigma': 0.033},])
 
 #######################
 ## Running the model ##
