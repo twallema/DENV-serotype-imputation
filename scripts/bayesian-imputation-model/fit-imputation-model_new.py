@@ -215,13 +215,15 @@ with pm.Model() as model:
     gamma = pm.Deterministic("gamma", gamma_s[None, :] *  pt.exp(gamma_cluster_offset))   
 
     ## reported fraction
-    kappa_mu_logit = pm.Normal("kappa_mu_logit", mu=pm.math.logit(0.05), sigma=1.0)     # global baseline reporting
+    kappa_mu_logit = pm.Normal("kappa_mu_logit", mu=pm.math.logit(0.1), sigma=1.0)      # global baseline reporting
     kappa_s_logit = pm.Normal("kappa_s_logit", mu=0.0, sigma=1.0, shape=n_serotypes)    # serotype effect: intrinsic severity biases typing odds
     kappa_c_logit = pm.Normal("kappa_c_logit", mu=0.0, sigma=1.0, shape=n_clusters)     # cluster effect: healthcare / surveillance capacity
     kappa_logit = kappa_mu_logit + kappa_s_logit[None, :] + kappa_c_logit[:, None]      # additive linear model
     kappa = pm.Deterministic("kappa", pm.math.sigmoid(kappa_logit))                     # back-transform variables
     kappa_s_OR = pm.Deterministic("kappa_s_OR", pt.exp(kappa_s_logit))
     kappa_c_OR = pm.Deterministic("kappa_c_OR", pt.exp(kappa_c_logit))
+
+    #kappa = pm.Lognormal("kappa", mu=pt.log(0.1), sigma=1/3, shape=(n_clusters, n_serotypes))
 
     # Serotype-level mean susceptible fraction
     f_S0_mu_s = pm.Beta("f_S0_mu_s", alpha=2, beta=2, shape=n_serotypes)                                                            # serotypes have independent means
@@ -238,20 +240,20 @@ with pm.Model() as model:
 
     # Manual guesses
     # gamma
-    gamma0 = pt.as_tensor_variable(np.repeat(np.array([1.1, 1, 1, 1])[None,:], n_clusters, axis=0))
+    gamma_0 = pt.as_tensor_variable(np.repeat(np.array([1.1, 1, 1, 1])[None,:], n_clusters, axis=0))
 
     # kappa
     kappa_0 = np.ones(shape=(n_clusters, n_serotypes))
     kappa_0[0,:] = [0.02, 0.01, 0.01, 0.005]
-    kappa_0[1,:] = [0.04, 0.02, 0.015, 0.03]
-    kappa_0[2,:] = 4 * kappa_0[0,:]
+    kappa_0[1,:] = 3*kappa_0[0,:]
+    #kappa_0[2,:] = 5*kappa_0[0,:]
     kappa_0 = pt.as_tensor_variable(kappa_0)
 
     # f_s0
     f_S0_0 = np.ones(shape=(n_clusters, n_serotypes))
     f_S0_0[0,:] = [0.3, 0.6, 0.9, 0.7]
-    f_S0_0[1,:] = [0.35, 0.6, 0.9, 0.7]
-    f_S0_0[2,:] = [0.2, 0.6, 0.9, 0.95]
+    f_S0_0[1,:] = [0.3, 0.6, 0.9, 0.7]
+    #f_S0_0[2,:] = [0.3, 0.6, 0.9, 0.7]
     f_S0_0 = pt.as_tensor_variable(f_S0_0)
 
     ## Initial states
@@ -269,9 +271,11 @@ with pm.Model() as model:
     def step(births_t, deaths_t, D_t, eta_t, S_prev, z_prev, eps_prev, gamma, kappa, beta):
         
         p_prev = pm.math.softmax(z_prev, axis=1) # reconstruct p
+        S_tot_prev = pt.sum(S_prev, axis=1, keepdims=True)
+        lambda_t = D_t[:, None] / S_tot_prev  # force of infection (each susceptible person contributes 4 infections slots )
 
         # 1. Susceptible dynamics
-        S_t = (1 - deaths_t[:, None]) * S_prev + births_t[:, None] - D_t[:, None] * p_prev / kappa
+        S_t = (1 - deaths_t[:, None]) * S_prev + births_t[:, None] - lambda_t * p_prev / kappa * S_prev
         S_t = 1 + pt.softplus(S_t - 1) # soft cap at zero preserving gradients
   
         # 2. Fitness from susceptibles as a resource
@@ -315,9 +319,8 @@ with pm.Model() as model:
     # --- Observed subtyped incidences ---
     Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
     
-
-    # fig,ax=plt.subplots(nrows=6, figsize=(11.7, 8.3))
-    # cluster = 1
+    # fig,ax=plt.subplots(nrows=7, figsize=(11.7, 8.3))
+    # cluster = 0
     # # serotype distributions
     # ax[0].plot(p.eval()[:,cluster,0], color='black', label='DENV-1')
     # ax[0].plot(p.eval()[:,cluster,1], color='red', label='DENV-2')
@@ -342,6 +345,8 @@ with pm.Model() as model:
     # # DENV-4 counts observed versus modeled
     # ax[5].plot(Y_obs.eval()[:, cluster, 3], color='blue', label='DENV-4')
     # ax[5].plot(Y_multinomial[:, cluster, 3], color='black', label='DENV-4')
+    # # DENV_total
+    # ax[6].plot(DENV_total[:, cluster], color='black')
     # plt.show()
     # plt.close()
 
@@ -351,9 +356,9 @@ with pm.Model() as model:
 
 
 # NUTS
-draws=50
+draws=250
 with model:
-    trace = pm.sample(draws, tune=100, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}) #, initvals=chains*[{'gamma': gamma_0, 'kappa': kappa_0, 'f_S0': f_S0_0},])
+    trace = pm.sample(draws, tune=250, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True}, initvals=chains*[{'gamma': gamma_0, 'kappa': kappa_0, 'f_S0': f_S0_0, 'sigma': 0.05},])
 
 #######################
 ## Running the model ##
@@ -373,7 +378,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                 'gamma_s', 'gamma_cluster_sigma_shrinkage', 'gamma_cluster_sigma', 'gamma', 'kappa_mu_logit', 'kappa_s_logit', 'kappa_c_logit', 'kappa_s_OR', 'kappa_c_OR', 'kappa', 'f_S0_mu_s', 'f_S0_cluster_sigma_shrinkage', 'f_S0_cluster_sigma', 'f_S0', 'sigma', 'beta'
+                 'gamma_s', 'gamma_cluster_sigma_shrinkage', 'gamma_cluster_sigma', 'gamma', 'kappa', 'kappa_s_OR', 'kappa_c_OR', 'f_S0_mu_s', 'f_S0_cluster_sigma_shrinkage', 'f_S0_cluster_sigma', 'f_S0', 'sigma', 'beta'
                 ]
 
 # Save traces
