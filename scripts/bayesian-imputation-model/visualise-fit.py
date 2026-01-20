@@ -8,7 +8,9 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 
 # analysis startdate
-startdate = datetime(1900,1,1)
+start_year = 2001
+end_year = 2024
+assert start_year >= 2001, "demography data before 2001 is missing."
 
 # helper function for argument parsing
 def str_to_bool(value):
@@ -20,19 +22,19 @@ def str_to_bool(value):
 parser = argparse.ArgumentParser()
 parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
-parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
-parser.add_argument("-q", type=int, help="Order of MA(q) process.", default=1)
+#parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
+#parser.add_argument("-q", type=int, help="Order of MA(q) process.", default=1)
 args = parser.parse_args()
 
 # assign to desired variables
 spatial_aggregation = args.spatial_aggregation
 ID = args.ID
-p = args.p
-q = args.q
+#p = args.p
+#q = args.q
 
 # pipeline output folder
 abs_dir = os.path.dirname(__file__) # make sure all referenced paths are relative to the lcoation of this file and not the terminal's pwd
-output_folder = os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/bayesian-imputation-model_output/ARMA({p},{q})/')
+output_folder = os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/bayesian-imputation-model_output/new_model/')
 # check if output dir exists, if not, raise an error
 if not os.path.exists(output_folder):
     raise ValueError('result not found.')
@@ -79,8 +81,8 @@ assert all(col in df.columns for col in required_cols)
 # 2. Sort for safety
 df = df.sort_values(["CD_MUN", "date"]).reset_index(drop=True)
 
-# 3. Take only from startdate
-df = df[df['date'] > startdate]
+# 3. Take only from start_year to end_year
+df = df[((df['date'] > datetime(start_year,1,1)) & (df['date'] <= datetime(end_year,12,31)))]
 
 # 4. Remove within-sample validation municipalities
 ## Save validation data
@@ -140,6 +142,9 @@ df["delta"] = df["delta"].clip(lower=1e-12, upper=1 - 1e-12)
 df["year"] = pd.to_datetime(df["date"]).dt.year
 df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
+
+# only do first X clusters
+df = df[df['cluster'].isin([1,2,3])]
 
 # 9. Build PyMC arrays
 # --- For Multinomial model (subtypes, only when typed) ---
