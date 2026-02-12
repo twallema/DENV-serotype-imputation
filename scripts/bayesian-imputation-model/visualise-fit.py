@@ -8,7 +8,9 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 
 # analysis startdate
-startdate = datetime(1900,1,1)
+start_year = 2001
+end_year = 2024
+assert start_year >= 2001, "demography data before 2001 is missing."
 
 # helper function for argument parsing
 def str_to_bool(value):
@@ -20,19 +22,19 @@ def str_to_bool(value):
 parser = argparse.ArgumentParser()
 parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
-parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
-parser.add_argument("-q", type=int, help="Order of MA(q) process.", default=1)
+#parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
+#parser.add_argument("-q", type=int, help="Order of MA(q) process.", default=1)
 args = parser.parse_args()
 
 # assign to desired variables
 spatial_aggregation = args.spatial_aggregation
 ID = args.ID
-p = args.p
-q = args.q
+#p = args.p
+#q = args.q
 
 # pipeline output folder
 abs_dir = os.path.dirname(__file__) # make sure all referenced paths are relative to the lcoation of this file and not the terminal's pwd
-output_folder = os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/bayesian-imputation-model_output/ARMA({p},{q})/')
+output_folder = os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/bayesian-imputation-model_output/new_model/')
 # check if output dir exists, if not, raise an error
 if not os.path.exists(output_folder):
     raise ValueError('result not found.')
@@ -61,12 +63,20 @@ posterior_predictive = arviz.from_netcdf(f"{output_folder}/posterior_predictive.
 # Load left out spatial units
 validation_labels = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/validation_labels.csv')).squeeze()
 
-# Load mapping
-mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
-
 # Load clusters
 clusters = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/clusters_{spatial_aggregation}.csv'))
 region = clusters.columns.to_list()[0]
+
+# Load mapping
+mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
+mapping = mapping.merge(clusters[[region, 'cluster']], on=region, how='left')
+
+# Compute demography in start_year per cluster
+demo = pd.read_csv(os.path.join(abs_dir, f'../../data/raw/sprint_2025/datasus_population_2001_2024.csv'))
+demo = demo.rename(columns={'geocode': 'CD_MUN'})
+demo = demo.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
+demo = demo.groupby(['cluster', 'year'], as_index=False)['population'].sum()
+demo = demo[demo['year'] == start_year]
 
 # Fetch incidence data
 df = pd.read_csv(os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv'), parse_dates=['date'])
@@ -79,8 +89,8 @@ assert all(col in df.columns for col in required_cols)
 # 2. Sort for safety
 df = df.sort_values(["CD_MUN", "date"]).reset_index(drop=True)
 
-# 3. Take only from startdate
-df = df[df['date'] > startdate]
+# 3. Take only from start_year to end_year
+df = df[((df['date'] > datetime(start_year,1,1)) & (df['date'] <= datetime(end_year,12,31)))]
 
 # 4. Remove within-sample validation municipalities
 ## Save validation data
@@ -141,6 +151,9 @@ df["year"] = pd.to_datetime(df["date"]).dt.year
 df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
 
+# only do first X clusters
+#df = df[df['cluster'].isin([1,2,3,4,5])]
+
 # 9. Build PyMC arrays
 # --- For Multinomial model (subtypes, only when typed) ---
 # Total number of typed cases
@@ -160,7 +173,6 @@ n_clusters = int(len(df['cluster'].unique()))
 n_months = int(len(df["month_idx"].unique()))
 n_years = int(df["year_idx"].max() + 1)
 n_serotypes = len(sero_cols)
-
 
 
 ################################
@@ -265,6 +277,20 @@ p_upper = df[['cluster','date']]
 p_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['p'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
 p_upper = p_upper.set_index(['cluster','date'])
 
+# Get number of susceptibles
+## Mean
+S_mean = df[['cluster','date']]
+S_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['S'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters, n_serotypes))
+S_mean = S_mean.set_index(['cluster','date'])
+## Lower
+S_lower = df[['cluster','date']]
+S_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['S'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
+S_lower = S_lower.set_index(['cluster','date'])
+## Upper
+S_upper = df[['cluster','date']]
+S_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['S'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
+S_upper = S_upper.set_index(['cluster','date'])
+
 # Get overdispersion
 ## Mean
 phi_mean = df[['cluster','date']]
@@ -282,63 +308,61 @@ phi_upper = phi_upper.set_index(['cluster','date'])
 # Get timepoints
 time = df['date'].unique()
 
-
-
 ###################
 ## Visualisation ##
 ###################
 
-
 for cluster in df['cluster'].unique().tolist():
-        
-    # Visualisation
-    fig,ax=plt.subplots(nrows=6, sharex=True, figsize=(8.7, 11.3))
+    
+    # demography in start_year
+    pop_start_year = demo[demo['cluster'] == cluster]['population'].values
 
-    # Step 1: total serotyped cases
-    ax[0].plot(time, N_typed.loc[cluster, slice(None)].values, marker='o', markersize=2, linewidth=0.5, color='black')
-    ax[0].set_ylim([0,200])
-    ax[0].set_ylabel('Total serotyped (-)')
+    # Visualisation
+    fig,ax=plt.subplots(nrows=8, sharex=True, figsize=(8.7, 11.3))
+
+    # 1: Total dengue cases
+    ax[0].plot(time, df[df['cluster']==cluster]['DENV_total'].values/pop_start_year*100, marker='o', markersize=2, linewidth=0.5, color='black')
+    ax[0].set_ylabel('Total DENV (%)', fontsize=9)
+    ax[0].set_ylim([-0.5,5])
     ax[0].set_title(f'Brasil (Cluster: {cluster})')
 
-    # Step 2: serotype fractions vs data
-    ## DENV 1
-    ax[1].plot(time, Y_obs.loc[(cluster, slice(None)), 'p_1'].values*100, marker='o', markersize=2, linewidth=1, color='black')
-    ax[1].plot(time, p_mean.loc[cluster, 'DENV_1']*100, color='red')
-    ax[1].fill_between(time, p_lower.loc[cluster, 'DENV_1']*100, p_upper.loc[cluster, 'DENV_1']*100, alpha=0.2, color='red')
-    ax[1].set_ylabel('DENV 1 (%)')
-    ax[1].set_ylim([-3,103])
-    ## DENV 2
-    ax[2].plot(time, Y_obs.loc[(cluster, slice(None)), 'p_2'].values*100, marker='o', markersize=2, linewidth=1, color='black')
-    ax[2].plot(time, p_mean.loc[cluster, 'DENV_2']*100, color='red')
-    ax[2].fill_between(time, p_lower.loc[cluster, 'DENV_2']*100, p_upper.loc[cluster, 'DENV_2']*100, alpha=0.2, color='red')
-    ax[2].set_ylabel('DENV 2 (%)')
-    ax[2].set_ylim([-3,103])
-    ## DENV 3
-    ax[3].plot(time, Y_obs.loc[(cluster, slice(None)), 'p_3'].values*100, marker='o', markersize=2, linewidth=1, color='black')
-    ax[3].plot(time, p_mean.loc[cluster, 'DENV_3']*100, color='red')
-    ax[3].fill_between(time, p_lower.loc[cluster, 'DENV_3']*100, p_upper.loc[cluster, 'DENV_3']*100, alpha=0.2, color='red')
-    ax[3].set_ylabel('DENV 3 (%)')
-    ax[3].set_ylim([-3,103])
-    ## DENV 4
-    ax[4].plot(time, Y_obs.loc[(cluster, slice(None)), 'p_4'].values*100, marker='o', markersize=2, linewidth=1, color='black', label='data')
-    ax[4].plot(time, p_mean.loc[cluster, 'DENV_4']*100, color='red', label='model')
-    ax[4].fill_between(time, p_lower.loc[cluster, 'DENV_4']*100, p_upper.loc[cluster, 'DENV_4']*100, alpha=0.2, color='red')
-    ax[4].set_ylabel('DENV 4 (%)')
-    ax[4].set_ylim([-3,103])
-    ax[4].legend(framealpha=1)
+    # 2: total serotyped cases
+    ax[1].plot(time, N_typed.loc[cluster, slice(None)].values, marker='o', markersize=2, linewidth=0.5, color='black')
+    ax[1].set_ylim([0,300])
+    ax[1].set_ylabel('Total serotyped (-)', fontsize=9)
 
-    # Step 3: modeled serotype fractions
+    # 3: serotype fractions vs data
+    colors = ['black', 'red', 'green', 'blue']
+    for i in range(1,5):
+        ax[1+i].plot(time, Y_obs.loc[(cluster, slice(None)), f'p_{i}'].values*100, marker='o', markersize=2, linewidth=1, color='black')
+        ax[1+i].plot(time, p_mean.loc[cluster, f'DENV_{i}']*100, color=colors[i-1])
+        ax[1+i].fill_between(time, p_lower.loc[cluster, f'DENV_{i}']*100, p_upper.loc[cluster, f'DENV_{i}']*100, alpha=0.2, color=colors[i-1])
+        ax[1+i].set_ylabel(f'DENV {i} (%)', fontsize=9)
+        ax[1+i].set_ylim([-3,103])
+
+    # 4: susceptibles
     # Filter data for a single UF
+    df_star_mean = S_mean.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    df_star_lower = S_lower.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    df_star_upper = S_upper.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    # Plot
+    colors = ['black', 'red', 'green', 'blue']
+    for i in range(1,5):
+        ax[6].plot(df_star_mean.index, df_star_mean[f'DENV_{i}']/pop_start_year*100, label='1', color=colors[i-1], alpha=1)
+        ax[6].fill_between(df_star_mean.index, df_star_lower[f'DENV_{i}']/pop_start_year*100, df_star_upper[f'DENV_{i}']/pop_start_year*100, label=f'{i}', color=colors[i-1], alpha=0.1)
+        ax[6].set_ylim([-3,103])
+    ax[6].set_ylabel('Susceptibles (%)', fontsize=9)
+
+    # 5: modeled serotype fractions
     df_star = p_mean.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
-    # Plot manually
-    ax[5].stackplot(
+    ax[7].stackplot(
         df_star.index, [df_star['DENV_1']*100, df_star['DENV_2']*100, df_star['DENV_3']*100, df_star['DENV_4']*100],
         labels=['1', '2', '3', '4'],
         colors=['black', 'red', 'green', 'blue'],
         alpha=0.9
     )
-    ax[5].legend(framealpha=1, loc=3)
-    ax[5].set_ylabel('Serotypes (%)')
+    ax[7].legend(framealpha=1, loc=3)
+    ax[7].set_ylabel('Serotypes (%)', fontsize=9)
 
     os.makedirs(f'{output_folder}/fig/posterior_predictive', exist_ok=True)
     plt.savefig(f'{output_folder}/fig/posterior_predictive/{cluster}_total_serotyped.pdf')
