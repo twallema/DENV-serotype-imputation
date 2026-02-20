@@ -213,7 +213,7 @@ with pm.Model() as model:
 
     # Parameters 
     ## intrinsic fitness (serotype x None)
-    beta = pm.Lognormal("beta", mu=pt.log(0.1), sigma=0.1)                                                                          # serotype cycling speed scale
+    beta = pm.Lognormal("beta", mu=pt.log(1), sigma=0.1)                                                                            # serotype cycling speed scale
     gamma_s = pm.Normal("gamma_s", mu=1.0, sigma=0.1, shape=n_serotypes)                                                            # serotypes have independent means
     
     ## reported fraction (serotype x cluster)
@@ -243,10 +243,10 @@ with pm.Model() as model:
     lambda_t = pm.Deterministic("lambda_t", pt.exp(log_lambda).T) # months x clusters
 
     ## Residual (RW(1); serotype x cluster)
-    rho_residual = pm.Beta("rho_residual", alpha=1, beta=2)
     sigma_residual = pm.HalfNormal("sigma_residual", sigma=0.01)
     eta =  pm.Normal("eta", mu=0.0, sigma=sigma_residual, shape=(n_months-1, n_clusters, n_serotypes))  # pt.as_tensor_variable(np.zeros(shape=(n_months-1, n_clusters, n_serotypes))) --> eliminate residual
     eps0 = pt.zeros((n_clusters, n_serotypes))
+    beta_f0 = pt.zeros((n_clusters, n_serotypes))
 
     ## Initial states
     S0 = pm.Deterministic("S0", demo[:, None] * f_S0)  # susceptibles (n_clusters, n_serotypes)
@@ -255,7 +255,7 @@ with pm.Model() as model:
     # (Logit) Replicator equation integrated using Euler's method with dt=1
     # ---------------------------------------------------------------------
 
-    def step(births_t, deaths_t, lambda_t, eta_t, S_prev, z_prev, eps_prev, rho, gamma, beta):
+    def step(births_t, deaths_t, lambda_t, eta_t, S_prev, z_prev, beta_f_prev, eps_prev, gamma, beta):
         
         p_prev = pm.math.softmax(z_prev, axis=1)                # reconstruct p
 
@@ -268,15 +268,15 @@ with pm.Model() as model:
         f_t = gamma * pt.log(S_t / S_ref)
 
         # RW(1) on residual (way to add spatial correlation?)
-        eps_t = rho*eps_prev + eta_t
+        eps_t = eps_prev + eta_t
 
         # 3. Replicator update + residual
         z_t = z_prev + beta * f_t + eps_t
 
-        return S_t, z_t, eps_t
+        return S_t, z_t, beta*f_t, eps_t
 
     # run step sequence
-    (S_seq, z_seq, eps_seq), _ = pytensor.scan(
+    (S_seq, z_seq, beta_f_seq, eps_seq), _ = pytensor.scan(
         fn=step,
         sequences=[
             pt.as_tensor_variable(births),
@@ -284,13 +284,14 @@ with pm.Model() as model:
             lambda_t,
             eta,
         ],
-        outputs_info=[S0, pt.log(p0), eps0],
-        non_sequences=[rho_residual, gamma_s[None, :], beta],
+        outputs_info=[S0, pt.log(p0), beta_f0, eps0],
+        non_sequences=[gamma_s[None, :], beta],
     )
 
     # attach initial states
     S = pm.Deterministic("S", pt.concatenate([S0[None, :, :], S_seq], axis=0))
     z = pm.Deterministic("z", pt.concatenate([pt.log(p0)[None, :, :], z_seq], axis=0))
+    beta_f = pm.Deterministic("beta_f", pt.concatenate([beta_f0[None, :, :], beta_f_seq], axis=0))
     p = pm.Deterministic("p", pm.math.softmax(z, axis=2))
     eps = pm.Deterministic("eps", pt.concatenate([eps0[None, :, :], eps_seq], axis=0))
 
@@ -315,9 +316,9 @@ with pm.Model() as model:
 
 
 # NUTS
-draws=250
+draws=100
 with model:
-    trace = pm.sample(draws, tune=250, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(draws, tune=200, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 #######################
 ## Running the model ##
@@ -337,7 +338,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                 'beta', 'gamma_s', 'kappa', 'kappa_mu', 'kappa_s_OR', 'kappa_c_OR', 'f_S0', 'f_S0_mu_s', 'f_S0_cluster_sigma_shrinkage', 'f_S0_cluster_sigma', 'rho_residual', 'sigma_residual', 'mu_lambda', 'sigma_lambda', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
+                 'beta', 'gamma_s', 'kappa', 'kappa_mu', 'kappa_s_OR', 'kappa_c_OR', 'f_S0', 'f_S0_mu_s', 'f_S0_cluster_sigma_shrinkage', 'f_S0_cluster_sigma', 'sigma_residual', 'mu_lambda', 'sigma_lambda', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 # Save traces
