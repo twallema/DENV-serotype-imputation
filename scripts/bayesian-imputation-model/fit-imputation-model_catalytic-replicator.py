@@ -243,6 +243,7 @@ with pm.Model() as model:
     lambda_t = pm.Deterministic("lambda_t", pt.exp(log_lambda).T) # months x clusters
 
     ## Residual (RW(1); serotype x cluster)
+    rho_residual = pm.Beta("rho_residual", alpha=3, beta=1)
     sigma_residual = pm.HalfNormal("sigma_residual", sigma=0.01)
     eta =  pm.Normal("eta", mu=0.0, sigma=sigma_residual, shape=(n_months-1, n_clusters, n_serotypes))  # pt.as_tensor_variable(np.zeros(shape=(n_months-1, n_clusters, n_serotypes))) --> eliminate residual
     eps0 = pt.zeros((n_clusters, n_serotypes))
@@ -255,7 +256,7 @@ with pm.Model() as model:
     # (Logit) Replicator equation integrated using Euler's method with dt=1
     # ---------------------------------------------------------------------
 
-    def step(births_t, deaths_t, lambda_t, eta_t, S_prev, z_prev, beta_f_prev, eps_prev, gamma, beta):
+    def step(births_t, deaths_t, lambda_t, eta_t, S_prev, z_prev, beta_f_prev, eps_prev, rho, gamma, beta):
         
         p_prev = pm.math.softmax(z_prev, axis=1)                # reconstruct p
 
@@ -268,7 +269,7 @@ with pm.Model() as model:
         f_t = gamma * pt.log(S_t / S_ref)
 
         # RW(1) on residual (way to add spatial correlation?)
-        eps_t = eps_prev + eta_t
+        eps_t = rho*eps_prev + eta_t
 
         # 3. Replicator update + residual
         z_t = z_prev + beta * f_t + eps_t
@@ -285,7 +286,7 @@ with pm.Model() as model:
             eta,
         ],
         outputs_info=[S0, pt.log(p0), beta_f0, eps0],
-        non_sequences=[gamma_s[None, :], beta],
+        non_sequences=[rho_residual, gamma_s[None, :], beta],
     )
 
     # attach initial states
@@ -304,7 +305,9 @@ with pm.Model() as model:
     d_cluster_hierarch = pm.HalfNormal("d_cluster_hierarch", sigma=1/3)    # --> phi ~ 1000 --> low overdispersion
     d_cluster = pm.HalfNormal("d_cluster", sigma=d_cluster_hierarch, shape=n_clusters)
     phi = pm.Deterministic("phi", pt.repeat((1.0 / pm.math.maximum(d_cluster, 1e-12))[None, :], n_months, axis=0))
-    alpha = phi[:, :, None] * p # Broadcast phi over serotypes
+    p_detect = kappa[None, :, :] * p
+    p_detect = p_detect / pt.sum(p_detect, axis=2, keepdims=True)
+    alpha = phi[:, :, None] * p_detect
     VIF = pm.Deterministic("VIF", (N_typed + phi) / (1 + phi)) # variance inflation of dirichlet multinomial compared to multinomial
 
     # --- Observed subtyped incidences ---
@@ -338,7 +341,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                 'beta', 'gamma_s', 'kappa', 'kappa_mu', 'kappa_s_OR', 'kappa_c_OR', 'f_S0', 'f_S0_mu_s', 'f_S0_cluster_sigma_shrinkage', 'f_S0_cluster_sigma', 'sigma_residual', 'mu_lambda', 'sigma_lambda', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
+                 'beta', 'gamma_s', 'kappa', 'kappa_mu', 'kappa_s_OR', 'kappa_c_OR', 'f_S0', 'f_S0_mu_s', 'f_S0_cluster_sigma_shrinkage', 'f_S0_cluster_sigma', 'rho_residual', 'sigma_residual', 'mu_lambda', 'sigma_lambda', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 # Save traces
