@@ -448,23 +448,28 @@ def build_initial_crossprotection(demo, f_P, pi_d, f_P2):
 
     return f_P * demo[:, None] * P_frac[None, :]
 
-
+# ideas:
+# bounded influence of susceptibility differences on fitness through tanh structure
+# shift domain kappa to [0.002, 1] (hard lower bound to prevent bad geometries)
+# introduction mask for DENV-4
 
 with pm.Model() as model:
 
     # Parameters 
     ## intrinsic fitness (serotype,)
-    beta = pm.Lognormal("beta", mu=pt.log(0.1), sigma=0.2)                                                                                  # serotype cycling speed scale
-    gamma_s = pm.Normal("gamma_s", mu=1.0, sigma=0.1, shape=n_serotypes)                                                                    # serotypes have independent means
-    
+    beta = pm.Lognormal("beta", mu=pt.log(0.1), sigma=0.2)                          # serotype cycling speed scale
+  
     ## reported fraction (cluster x degree x serotype)
-    kappa_c_logit = pm.Normal("kappa_c_logit", mu=0.0, sigma=1/3, shape=n_clusters)                                                       # cluster effect
-    kappa_d_logit = pm.Normal("kappa_d_logit", mu=[pm.math.logit(0.05), pm.math.logit(0.25), pm.math.logit(0.05), pm.math.logit(0.05)], sigma=1/3, shape=4)     # degree of infection
-    kappa_s_logit = pm.Normal("kappa_s_logit", mu=0.0, sigma=1/3, shape=n_serotypes)                                                      # serotype effect
-    mu_kappa_logit = kappa_c_logit[:, None, None] + kappa_d_logit[None, :, None] + kappa_s_logit[None, None, :]                                # additive linear model
-    mu_kappa = pm.Deterministic("mu_kappa", pm.math.sigmoid(mu_kappa_logit))                                                                         # back-transform variables
-    phi_kappa = pm.Gamma("phi_kappa", alpha=100, beta=1) # concentration
-    kappa = pm.Beta("kappa", alpha=mu_kappa * phi_kappa, beta=(1 - mu_kappa) * phi_kappa, shape=(n_clusters, 4, n_serotypes))
+    kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(0.02), sigma=1.0)     # intercept
+    is_secondary = pt.as_tensor([0, 1, 0, 0])
+    log_or_secondary = pm.Normal("log_or_secondary", mu=1, sigma=1)                 # OR detecting secondary infection (vs. prim, tert, quart)
+    log_or_serotype = pm.Normal("log_or_serotype", mu=0, sigma=1/3, shape=3)        # OR detecting serotypes (vs. DENV-1)
+    log_or_serotype_full = pt.concatenate([pt.zeros(1), log_or_serotype])
+    logit_kappa_ds = (kappa0_logit + log_or_secondary * is_secondary[:, None] + log_or_serotype_full[None, :])
+    logit_kappa = pt.repeat(logit_kappa_ds[None, :, :], n_clusters, axis=0)
+    kappa = pm.Deterministic("kappa", pm.math.sigmoid(logit_kappa))
+    or_secondary = pm.Deterministic("or_secondary", pt.exp(log_or_secondary))
+    or_serotype = pm.Deterministic("or_serotype", pt.exp(log_or_serotype_full))
 
     ## initial susceptible and cross-protected states (cluster x state_idx)
     f_P = pm.Beta("f_P", alpha=8, beta=32)      # first division of cluster population happens based on amount in a cross-protected state
@@ -476,7 +481,7 @@ with pm.Model() as model:
 
     ## Total FOI (RW(1); time x cluster)
     sigma_lambda = pm.HalfNormal("sigma_lambda", sigma=1.0)
-    mu_lambda = pm.Normal("mu_lambda", mu=-3.0, sigma=1.0, shape=n_clusters)
+    mu_lambda = pm.Normal("mu_lambda", mu=-3.0, sigma=1.0, shape=n_clusters)                    # long-term average roughly 5%
     eps_lambda = pm.Normal("eps_lambda", mu=0.0, sigma=1.0, shape=(n_clusters, n_months))
     u_lambda = sigma_lambda * pt.cumsum(eps_lambda, axis=1)
     log_lambda = mu_lambda[:, None] + u_lambda
@@ -495,7 +500,7 @@ with pm.Model() as model:
     # (Logit) Replicator equation integrated using Euler's method with dt=1
     # ---------------------------------------------------------------------
 
-    def step(births_t, deaths_t, lambda_t, eta_t, S_prev, P_prev, z_prev, beta_f_prev, eps_prev, gamma_s, beta, omega):
+    def step(births_t, deaths_t, lambda_t, eta_t, S_prev, P_prev, z_prev, beta_f_prev, eps_prev, beta, omega):
         
         p_prev = pm.math.softmax(z_prev, axis=1)                # reconstruct p
 
@@ -509,7 +514,7 @@ with pm.Model() as model:
         S_serotype = get_susceptibles_serotype(S_t)
 
         # 3. Compute fitness
-        f_t = gamma_s * pt.log(S_serotype / pt.mean(S_serotype, axis=1, keepdims=True))
+        f_t = pt.log(S_serotype / pt.mean(S_serotype, axis=1, keepdims=True))
 
         # 4. RW(1) residual
         eps_t = eps_prev + eta_t
@@ -529,7 +534,7 @@ with pm.Model() as model:
             eta,
         ],
         outputs_info=[S0, P0, pt.log(p0), beta_f0, eps0], # start_year = 2001 means first datapoint = 2001-01-31 --> The state '0' is 2000-12-31
-        non_sequences=[gamma_s[None, :], beta, omega],
+        non_sequences=[beta, omega],
     )
 
     # attach initial states
@@ -588,7 +593,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                 'beta', 'gamma_s', 'kappa', 'kappa_d_logit', 'kappa_s_logit', 'kappa_c_logit', 'mu_kappa', 'phi_kappa', 'pi_d', 'f_P', 'omega', 'sigma_residual', 'mu_lambda', 'sigma_lambda', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
+                 'beta', 'kappa', 'kappa0_logit', 'or_secondary', 'or_serotype', 'pi_d', 'f_P', 'omega', 'sigma_residual', 'mu_lambda', 'sigma_lambda', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 # Save traces
