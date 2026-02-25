@@ -278,18 +278,18 @@ p_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['p'].quan
 p_upper = p_upper.set_index(['cluster','date'])
 
 # Get number of susceptibles
-## Mean
-S_mean = df[['cluster','date']]
-S_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['S'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters, n_serotypes))
-S_mean = S_mean.set_index(['cluster','date'])
-## Lower
-S_lower = df[['cluster','date']]
-S_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['S'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
-S_lower = S_lower.set_index(['cluster','date'])
-## Upper
-S_upper = df[['cluster','date']]
-S_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['S'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
-S_upper = S_upper.set_index(['cluster','date'])
+# ## Mean
+# S_mean = df[['cluster','date']]
+# S_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['S'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters, n_serotypes))
+# S_mean = S_mean.set_index(['cluster','date'])
+# ## Lower
+# S_lower = df[['cluster','date']]
+# S_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['S'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
+# S_lower = S_lower.set_index(['cluster','date'])
+# ## Upper
+# S_upper = df[['cluster','date']]
+# S_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['S'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
+# S_upper = S_upper.set_index(['cluster','date'])
 
 # Get total dengue cases
 ## Mean
@@ -429,16 +429,16 @@ for cluster in df['cluster'].unique().tolist():
 
     # 5: susceptibles
     # Filter data for a single UF
-    df_star_mean = S_mean.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
-    df_star_lower = S_lower.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
-    df_star_upper = S_upper.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
-    # Plot
-    colors = ['black', 'red', 'green', 'blue']
-    for i in range(1,5):
-        ax[7].plot(df_star_mean.index, df_star_mean[f'DENV_{i}']/pop_start_year*100, label='1', color=colors[i-1], alpha=1)
-        ax[7].fill_between(df_star_mean.index, df_star_lower[f'DENV_{i}']/pop_start_year*100, df_star_upper[f'DENV_{i}']/pop_start_year*100, label=f'{i}', color=colors[i-1], alpha=0.1)
-        ax[7].set_ylim([-3,110])
-    ax[7].set_ylabel('Susceptibles (%)', fontsize=7)
+    # df_star_mean = S_mean.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    # df_star_lower = S_lower.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    # df_star_upper = S_upper.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    # # Plot
+    # colors = ['black', 'red', 'green', 'blue']
+    # for i in range(1,5):
+    #     ax[7].plot(df_star_mean.index, df_star_mean[f'DENV_{i}']/pop_start_year*100, label='1', color=colors[i-1], alpha=1)
+    #     ax[7].fill_between(df_star_mean.index, df_star_lower[f'DENV_{i}']/pop_start_year*100, df_star_upper[f'DENV_{i}']/pop_start_year*100, label=f'{i}', color=colors[i-1], alpha=0.1)
+    #     ax[7].set_ylim([-3,110])
+    # ax[7].set_ylabel('Susceptibles (%)', fontsize=7)
 
     # 6: beta * f_i
     # Filter data for a single UF

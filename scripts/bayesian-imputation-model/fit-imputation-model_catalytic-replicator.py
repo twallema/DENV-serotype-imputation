@@ -334,6 +334,21 @@ def get_susceptibles_serotype(S):
 
     return pt.stack([S1, S2, S3, S4], axis=1)
 
+def get_susceptibles_serotype_time(S):
+    """
+    S: TensorVariable of shape (n_times, n_clusters, state_idx)
+
+    Returns
+    -------
+    TensorVariable of shape (n_times, n_clusters, n_serotypes)
+    """
+
+    S1 = pt.sum(S[:, :, [0, 2, 3, 4, 8, 9, 10, 11]], axis=2)
+    S2 = pt.sum(S[:, :, [0, 1, 3, 4, 6, 7, 10, 12]], axis=2)
+    S3 = pt.sum(S[:, :, [0, 1, 2, 4, 5, 7, 9, 13]], axis=2)
+    S4 = pt.sum(S[:, :, [0, 1, 2, 3, 5, 6, 8, 14]], axis=2)
+
+    return pt.stack([S1, S2, S3, S4], axis=-1)
 
 
 def get_susceptibles_by_degree_serotype(S):
@@ -474,25 +489,25 @@ with pm.Model() as model:
 
     # Parameters 
     ## intrinsic fitness (serotype,)
-    beta = pm.Lognormal("beta", mu=pt.log(1), sigma=0.1)                                                                                    # serotype cycling speed scale
+    beta = pm.Lognormal("beta", mu=pt.log(0.1), sigma=0.2)                                                                                  # serotype cycling speed scale
     gamma_s = pm.Normal("gamma_s", mu=1.0, sigma=0.1, shape=n_serotypes)                                                                    # serotypes have independent means
     
     ## reported fraction (cluster x degree x serotype)
-    kappa_c_logit = pm.Normal("kappa_c_logit", mu=0.0, sigma=1.0/3, shape=n_clusters)                                                       # cluster effect
-    kappa_d_logit = pm.Normal("kappa_mu_logit", mu=[pm.math.logit(0.05), pm.math.logit(0.25), pm.math.logit(0.05)], sigma=1.0, shape=3)     # degree of infection
-    kappa_s_logit = pm.Normal("kappa_s_logit", mu=0.0, sigma=1.0/3, shape=n_serotypes)                                                      # serotype effect
+    kappa_c_logit = pm.Normal("kappa_c_logit", mu=0.0, sigma=1/3, shape=n_clusters)                                                       # cluster effect
+    kappa_d_logit = pm.Normal("kappa_d_logit", mu=[pm.math.logit(0.05), pm.math.logit(0.25), pm.math.logit(0.05), pm.math.logit(0.05)], sigma=1, shape=4)     # degree of infection
+    kappa_s_logit = pm.Normal("kappa_s_logit", mu=0.0, sigma=1/3, shape=n_serotypes)                                                      # serotype effect
     kappa_logit = kappa_c_logit[:, None, None] + kappa_d_logit[None, :, None] + kappa_s_logit[None, None, :]                                # additive linear model
     kappa = pm.Deterministic("kappa", pm.math.sigmoid(kappa_logit))                                                                         # back-transform variables
 
     ## initial susceptible states (cluster x state_idx)
-    pi_degree = pm.Dirichlet("pi_degree", a=[6, 4, 1], shape=(n_clusters,3))
+    pi_d = pm.Dirichlet("pi_d", a=[6, 4, 1], shape=(n_clusters,3))
     pi_mono12 = pm.Dirichlet("pi_mono12", a=[2, 2], shape=(n_clusters, 2))
-    S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, pi_degree, pi_mono12))
+    S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, pi_d, pi_mono12))
     
     ## initial cross-protected states (cluster x state_idx)
     f_P = pm.Beta("f_P", alpha=8, beta=32, shape=n_clusters)
-    share_d2 = pm.Beta("share_d2", alpha=7, beta=3)
-    P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_degree, share_d2))
+    share_d2 = pm.Beta("share_d2", alpha=3, beta=3)
+    P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, share_d2))
 
     ## Total FOI (AR(1); time x cluster)
     sigma_lambda = pm.HalfNormal("sigma_lambda", sigma=1.0)
@@ -505,9 +520,9 @@ with pm.Model() as model:
     ## average duration cross-protection
     omega = pm.Lognormal("omega", mu=2.4, sigma=0.5)
 
-    ## Residual (RW(1); time x cluster x cluster)
-    rho_residual = pm.Beta("rho_residual", alpha=3, beta=1)
-    sigma_residual = pm.HalfNormal("sigma_residual", sigma=0.01)
+    ## Residual (AR(1); time x cluster x cluster)
+    rho_residual = 1 #pm.Beta("rho_residual", alpha=1, beta=2)
+    sigma_residual = pm.HalfNormal("sigma_residual", sigma=0.01/3)
     eta =  pm.Normal("eta", mu=0.0, sigma=sigma_residual, shape=(n_months-1, n_clusters, n_serotypes))  
     eps0 = pt.zeros((n_clusters, n_serotypes))
     beta_f0 = pt.zeros((n_clusters, n_serotypes))
@@ -523,7 +538,9 @@ with pm.Model() as model:
         # 1. Catalytic model
         S_t = update_susceptibles(S_prev, P_prev, lambda_t, p_prev, births_t, deaths_t, omega)
         P_t = update_cross_protection(S_prev, P_prev, lambda_t, p_prev, deaths_t, omega)
-        
+        S_t = 1 + pt.softplus(S_t - 1)
+        P_t = 1 + pt.softplus(P_t - 1)
+
         # 2. Get susceptibles per serotype and cluster
         S_serotype = get_susceptibles_serotype(S_t)
 
@@ -559,10 +576,6 @@ with pm.Model() as model:
     p = pm.Deterministic("p", pm.math.softmax(z, axis=2))
     eps = pm.Deterministic("eps", pt.concatenate([eps0[None, :, :], eps_seq], axis=0))
 
-    print(S.eval()[:,0,:])
-    import sys
-    sys.exit()
-
     # Observed cases
     alpha_inv = pm.HalfNormal("alpha_inv", sigma=1/100)
     S_degree_serotype = get_susceptibles_by_degree_serotype(S)
@@ -591,7 +604,7 @@ with pm.Model() as model:
 # NUTS
 draws=100
 with model:
-    trace = pm.sample(draws, tune=200, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(draws, tune=250, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 #######################
 ## Running the model ##
@@ -611,7 +624,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                 'beta', 'gamma_s', 'kappa', 'kappa_d', 'kappa_s', 'kappa_c', 'f_S0', 'f_S0_mu_s', 'f_S0_cluster_sigma_shrinkage', 'f_S0_cluster_sigma', 'rho_residual', 'sigma_residual', 'mu_lambda', 'sigma_lambda', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
+                 'beta', 'gamma_s', 'kappa', 'kappa_d_logit', 'kappa_s_logit', 'kappa_c_logit', 'pi_d', 'pi_mono12', 'f_P', 'share_d2', 'omega', 'sigma_residual', 'mu_lambda', 'sigma_lambda', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 # Save traces
