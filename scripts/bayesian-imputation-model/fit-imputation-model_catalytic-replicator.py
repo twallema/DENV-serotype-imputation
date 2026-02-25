@@ -199,7 +199,16 @@ cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4"]
 alpha = 1/2
 p0 = (d[cols] + alpha).div(d[cols].sum(axis=1) + len(cols) * alpha, axis=0)
 
+# Make a serotype introduction mask; shape: (n_months, n_serotypes)
+intro_mask = np.column_stack([
+    np.ones(len(df["year"].values)),            # column 1: all 1s
+    np.ones(len(df["year"].values)),            # column 2: all 1s
+    (df["year"].values >= 1998).astype(float),  # column 3: 0 before 1998, 1 from 1998 on
+    (df["year"].values >= 2006).astype(float)   # column 4: 0 before 2006, 1 from 2006 on
+])
 
+
+# Tutorials that helped build this model (step function)
 # https://www.youtube.com/watch?v=G9VWXZdbtKQ
 # https://pytensor.readthedocs.io/en/latest/library/scan.html 
 # https://gist.github.com/ricardoV94/a49b2cc1cf0f32a5f6dc31d6856ccb63#file-pymc_timeseries_ma-ipynb
@@ -334,6 +343,8 @@ def get_susceptibles_serotype(S):
 
     return pt.stack([S1, S2, S3, S4], axis=1)
 
+
+
 def get_susceptibles_serotype_time(S):
     """
     S: TensorVariable of shape (n_times, n_clusters, state_idx)
@@ -349,6 +360,7 @@ def get_susceptibles_serotype_time(S):
     S4 = pt.sum(S[:, :, [0, 1, 2, 3, 5, 6, 8, 14]], axis=2)
 
     return pt.stack([S1, S2, S3, S4], axis=-1)
+
 
 
 def get_susceptibles_by_degree_serotype(S):
@@ -390,7 +402,9 @@ def get_susceptibles_by_degree_serotype(S):
 
     return pt.stack([deg0, deg1, deg2, deg3], axis=2)
 
-def build_initial_susceptibles(demo, pi_degree, pi_mono12):
+
+
+def build_initial_susceptibles(demo, f_P, pi_d, pi_mono2):
     """
     Construct initial susceptibles for 1999 (only DENV-1 and DENV-2)
 
@@ -399,14 +413,15 @@ def build_initial_susceptibles(demo, pi_degree, pi_mono12):
     demo : np.ndarray
         shape (n_clusters,)
 
-    pi_degree : TensorVariable
-        shape (n_clusters, 3)
-        Dirichlet over degree of infection:
-        columns = [naive, mono, double]
+    f_P: float
+        fraction of total population in cross-protected state
 
-    pi_mono12 : TensorVariable
-        shape (n_clusters, 2)
-        Dirichlet splitting mono across DENV-1 DENV-2 [mono_1, mono_2]
+    pi_d : TensorVariable
+        shape (3,)
+        dirichlet over degree of infection: [naive, mono, double]
+
+    pi_mono12 : float
+        splitting mono across DENV-1 DENV-2 [mono_1, mono_2]
 
     Returns
     -------
@@ -414,76 +429,26 @@ def build_initial_susceptibles(demo, pi_degree, pi_mono12):
         shape (n_clusters, 16)
     """
 
-    # --- split degrees ---
-    pi0 = pi_degree[:, 0]           # naive
-    pi1 = pi_degree[:, 1]           # mono
-    pi2 = pi_degree[:, 2]           # double
+    S_frac = pt.stack([pi_d[0], pi_d[1]*(1-pi_mono2), pi_d[1]*pi_mono2, 0, 0, pi_d[2], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
 
-    # split mono into DENV-1 and DENV-2
-    pi1_1 = pi1 * pi_mono12[:, 0]   # mono 1
-    pi1_2 = pi1 * pi_mono12[:, 1]   # mono 2
+    return (1-f_P) * demo[:, None] * S_frac[None, :]
 
-    # all doubles are 1&2 in 1999
-    pi12 = pi2
 
-    zero = pt.zeros_like(pi0)
 
-    # --- construct 16-state vector ---
-    S_frac = pt.stack([
-        pi0,        # 0: naive
-        pi1_1,      # 1: immune 1
-        pi1_2,      # 2: immune 2
-        zero,       # 3
-        zero,       # 4
-        pi12,       # 5: immune 1&2
-        zero,       # 6
-        zero,       # 7
-        zero,       # 8
-        zero,       # 9
-        zero,       # 10
-        zero,       # 11
-        zero,       # 12
-        zero,       # 13
-        zero,       # 14
-        zero        # 15
-    ], axis=1)
+def build_initial_crossprotection(demo, f_P, pi_d, f_P2):
+    """ See `build_initial_susceptibles` """
 
-    # convert fractions → counts
-    S0 = demo[:, None] * S_frac
+    # normalize pi_degree for degree of infection 1 and 2
+    pi_sum = pi_d[0] + pi_d[1] + 1e-12  # prevent division by zero
+    deg1_frac = pi_d[0] / pi_sum
+    deg2_frac = pi_d[1] / pi_sum
 
-    return S0
+    # set fractions
+    P_frac = pt.stack([deg1_frac*(1-f_P2), deg1_frac*f_P2, 0, 0, deg2_frac * f_P2, 0, 0, deg2_frac * (1-f_P2), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
 
-def build_initial_crossprotection(demo, f_P, pi_degree, share_d2):
-    """
+    return f_P * demo[:, None] * P_frac[None, :]
 
-    """
 
-    P0 = pt.zeros((demo.shape[0], 28))
-
-    # Total cross-protected population per cluster
-    total_cp = demo * f_P  # (n_clusters,)
-
-    # Normalize pi_degree for degree 1 and 2
-    pi_sum = pi_degree[:,0] + pi_degree[:,1] + 1e-12  # prevent division by zero
-    deg1_frac = pi_degree[:,0] / pi_sum
-    deg2_frac = pi_degree[:,1] / pi_sum
-
-    # Split by degree
-    cp_deg1 = total_cp * deg1_frac
-    cp_deg2 = total_cp * deg2_frac
-
-    # ---- degree 1 ----
-    cp1_d1 = cp_deg1 * (1.0 - share_d2)
-    cp1_d2 = cp_deg1 * share_d2
-
-    P0 = pt.set_subtensor(P0[:, 0], cp1_d1)  # first infection DENV-1
-    P0 = pt.set_subtensor(P0[:, 1], cp1_d2)  # first infection DENV-2
-
-    # ---- degree 2 (second infection) ----
-    P0 = pt.set_subtensor(P0[:, 4], cp_deg2 * (1.0 - share_d2))  # first infection DENV-1, second DENV-2
-    P0 = pt.set_subtensor(P0[:, 7], cp_deg2 * share_d2)          # first infection DENV-2, second DENV-1
-
-    return P0
 
 with pm.Model() as model:
 
@@ -494,22 +459,22 @@ with pm.Model() as model:
     
     ## reported fraction (cluster x degree x serotype)
     kappa_c_logit = pm.Normal("kappa_c_logit", mu=0.0, sigma=1/3, shape=n_clusters)                                                       # cluster effect
-    kappa_d_logit = pm.Normal("kappa_d_logit", mu=[pm.math.logit(0.05), pm.math.logit(0.25), pm.math.logit(0.05), pm.math.logit(0.05)], sigma=1, shape=4)     # degree of infection
+    kappa_d_logit = pm.Normal("kappa_d_logit", mu=[pm.math.logit(0.05), pm.math.logit(0.25), pm.math.logit(0.05), pm.math.logit(0.05)], sigma=1/3, shape=4)     # degree of infection
     kappa_s_logit = pm.Normal("kappa_s_logit", mu=0.0, sigma=1/3, shape=n_serotypes)                                                      # serotype effect
-    kappa_logit = kappa_c_logit[:, None, None] + kappa_d_logit[None, :, None] + kappa_s_logit[None, None, :]                                # additive linear model
-    kappa = pm.Deterministic("kappa", pm.math.sigmoid(kappa_logit))                                                                         # back-transform variables
+    mu_kappa_logit = kappa_c_logit[:, None, None] + kappa_d_logit[None, :, None] + kappa_s_logit[None, None, :]                                # additive linear model
+    mu_kappa = pm.Deterministic("mu_kappa", pm.math.sigmoid(mu_kappa_logit))                                                                         # back-transform variables
+    phi_kappa = pm.Gamma("phi_kappa", alpha=100, beta=1) # concentration
+    kappa = pm.Beta("kappa", alpha=mu_kappa * phi_kappa, beta=(1 - mu_kappa) * phi_kappa, shape=(n_clusters, 4, n_serotypes))
 
-    ## initial susceptible states (cluster x state_idx)
-    pi_d = pm.Dirichlet("pi_d", a=[6, 4, 1], shape=(n_clusters,3))
-    pi_mono12 = pm.Dirichlet("pi_mono12", a=[2, 2], shape=(n_clusters, 2))
-    S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, pi_d, pi_mono12))
-    
-    ## initial cross-protected states (cluster x state_idx)
-    f_P = pm.Beta("f_P", alpha=8, beta=32, shape=n_clusters)
-    share_d2 = pm.Beta("share_d2", alpha=3, beta=3)
-    P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, share_d2))
+    ## initial susceptible and cross-protected states (cluster x state_idx)
+    f_P = pm.Beta("f_P", alpha=8, beta=32)      # first division of cluster population happens based on amount in a cross-protected state
+    f_P2 = 0.5                                  # fraction cross-protected after DENV-2 infection
+    pi_d = pm.Dirichlet("pi_d", a=[2, 4, 4])    # divide the non-cross-protected across naive, mono, double
+    pi_mono2 = 0.5                              # divide the mono between DENV-1 and DENV-2
+    S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, f_P, pi_d, pi_mono2))
+    P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, f_P2))
 
-    ## Total FOI (AR(1); time x cluster)
+    ## Total FOI (RW(1); time x cluster)
     sigma_lambda = pm.HalfNormal("sigma_lambda", sigma=1.0)
     mu_lambda = pm.Normal("mu_lambda", mu=-3.0, sigma=1.0, shape=n_clusters)
     eps_lambda = pm.Normal("eps_lambda", mu=0.0, sigma=1.0, shape=(n_clusters, n_months))
@@ -518,10 +483,9 @@ with pm.Model() as model:
     lambda_t = pm.Deterministic("lambda_t", pt.exp(log_lambda).T) # months x clusters
 
     ## average duration cross-protection
-    omega = pm.Lognormal("omega", mu=2.4, sigma=0.5)
+    omega = pm.Lognormal("omega", mu=2.85, sigma=0.25)
 
-    ## Residual (AR(1); time x cluster x cluster)
-    rho_residual = 1 #pm.Beta("rho_residual", alpha=1, beta=2)
+    ## Residual (RW(1); time x cluster x cluster)
     sigma_residual = pm.HalfNormal("sigma_residual", sigma=0.01/3)
     eta =  pm.Normal("eta", mu=0.0, sigma=sigma_residual, shape=(n_months-1, n_clusters, n_serotypes))  
     eps0 = pt.zeros((n_clusters, n_serotypes))
@@ -531,7 +495,7 @@ with pm.Model() as model:
     # (Logit) Replicator equation integrated using Euler's method with dt=1
     # ---------------------------------------------------------------------
 
-    def step(births_t, deaths_t, lambda_t, eta_t, S_prev, P_prev, z_prev, beta_f_prev, eps_prev, rho, gamma_s, beta, omega):
+    def step(births_t, deaths_t, lambda_t, eta_t, S_prev, P_prev, z_prev, beta_f_prev, eps_prev, gamma_s, beta, omega):
         
         p_prev = pm.math.softmax(z_prev, axis=1)                # reconstruct p
 
@@ -547,8 +511,8 @@ with pm.Model() as model:
         # 3. Compute fitness
         f_t = gamma_s * pt.log(S_serotype / pt.mean(S_serotype, axis=1, keepdims=True))
 
-        # 4. AR(1) residual
-        eps_t = rho*eps_prev + eta_t
+        # 4. RW(1) residual
+        eps_t = eps_prev + eta_t
 
         # 5. Replicator update + residual
         z_t = z_prev + beta * f_t + eps_t
@@ -565,7 +529,7 @@ with pm.Model() as model:
             eta,
         ],
         outputs_info=[S0, P0, pt.log(p0), beta_f0, eps0], # start_year = 2001 means first datapoint = 2001-01-31 --> The state '0' is 2000-12-31
-        non_sequences=[rho_residual, gamma_s[None, :], beta, omega],
+        non_sequences=[gamma_s[None, :], beta, omega],
     )
 
     # attach initial states
@@ -602,9 +566,9 @@ with pm.Model() as model:
 
 
 # NUTS
-draws=100
+draws=10
 with model:
-    trace = pm.sample(draws, tune=250, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(draws, tune=20, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 #######################
 ## Running the model ##
@@ -624,7 +588,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                 'beta', 'gamma_s', 'kappa', 'kappa_d_logit', 'kappa_s_logit', 'kappa_c_logit', 'pi_d', 'pi_mono12', 'f_P', 'share_d2', 'omega', 'sigma_residual', 'mu_lambda', 'sigma_lambda', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
+                 'beta', 'gamma_s', 'kappa', 'kappa_d_logit', 'kappa_s_logit', 'kappa_c_logit', 'mu_kappa', 'phi_kappa', 'pi_d', 'f_P', 'omega', 'sigma_residual', 'mu_lambda', 'sigma_lambda', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 # Save traces
