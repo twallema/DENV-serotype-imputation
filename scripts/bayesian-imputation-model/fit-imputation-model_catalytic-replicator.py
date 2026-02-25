@@ -455,10 +455,26 @@ def build_initial_crossprotection(demo, f_P, pi_d, f_P2):
 
 with pm.Model() as model:
 
+    # ----------------
+    # Parameterisation
+    # ----------------
+
+    # initial states
+    ## initial susceptible and cross-protected states (cluster x state_idx)
+    f_P = pm.Beta("f_P", alpha=8, beta=32)      # first division of cluster population happens based on amount in a cross-protected state
+    f_P2 = 0.5                                  # fraction cross-protected after DENV-2 infection
+    pi_d = pm.Dirichlet("pi_d", a=[2, 4, 4])    # divide the non-cross-protected across naive, mono, double
+    pi_mono2 = 0.5                              # divide the mono between DENV-1 and DENV-2
+    S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, f_P, pi_d, pi_mono2))
+    P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, f_P2))
+
     # Parameters 
     ## intrinsic fitness (serotype,)
     beta = pm.Lognormal("beta", mu=pt.log(0.1), sigma=0.2)                          # serotype cycling speed scale
   
+    ## average duration cross-protection
+    omega = pm.Lognormal("omega", mu=2.85, sigma=0.25)
+
     ## reported fraction (cluster x degree x serotype)
     kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(0.02), sigma=1.0)     # intercept
     is_secondary = pt.as_tensor([0, 1, 0, 0])
@@ -471,14 +487,6 @@ with pm.Model() as model:
     or_secondary = pm.Deterministic("or_secondary", pt.exp(log_or_secondary))
     or_serotype = pm.Deterministic("or_serotype", pt.exp(log_or_serotype_full))
 
-    ## initial susceptible and cross-protected states (cluster x state_idx)
-    f_P = pm.Beta("f_P", alpha=8, beta=32)      # first division of cluster population happens based on amount in a cross-protected state
-    f_P2 = 0.5                                  # fraction cross-protected after DENV-2 infection
-    pi_d = pm.Dirichlet("pi_d", a=[2, 4, 4])    # divide the non-cross-protected across naive, mono, double
-    pi_mono2 = 0.5                              # divide the mono between DENV-1 and DENV-2
-    S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, f_P, pi_d, pi_mono2))
-    P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, f_P2))
-
     ## Total FOI (RW(1); time x cluster)
     sigma_lambda = pm.HalfNormal("sigma_lambda", sigma=1.0)
     mu_lambda = pm.Normal("mu_lambda", mu=-3.0, sigma=1.0, shape=n_clusters)                    # long-term average roughly 5%
@@ -487,10 +495,7 @@ with pm.Model() as model:
     log_lambda = mu_lambda[:, None] + u_lambda
     lambda_t = pm.Deterministic("lambda_t", pt.exp(log_lambda).T) # months x clusters
 
-    ## average duration cross-protection
-    omega = pm.Lognormal("omega", mu=2.85, sigma=0.25)
-
-    ## Residual (RW(1); time x cluster x cluster)
+    ## Residual (RW(1); time x cluster)
     sigma_residual = pm.HalfNormal("sigma_residual", sigma=0.01/3)
     eta =  pm.Normal("eta", mu=0.0, sigma=sigma_residual, shape=(n_months-1, n_clusters, n_serotypes))  
     eps0 = pt.zeros((n_clusters, n_serotypes))
@@ -545,6 +550,10 @@ with pm.Model() as model:
     p = pm.Deterministic("p", pm.math.softmax(z, axis=2))
     eps = pm.Deterministic("eps", pt.concatenate([eps0[None, :, :], eps_seq], axis=0))
 
+    # -----------
+    # Observation
+    # -----------
+
     # Observed cases
     alpha_inv = pm.HalfNormal("alpha_inv", sigma=1/100)
     S_degree_serotype = get_susceptibles_by_degree_serotype(S)
@@ -552,7 +561,7 @@ with pm.Model() as model:
     reported = infections * kappa[None, :, :, :]
     D_obs = pm.NegativeBinomial("D_obs", mu=pt.sum(reported, axis=(2, 3)), alpha=1/alpha_inv, observed=DENV_total)
 
-    # Overdispersion models
+    # Observed serotyped cases
     ## Hierarchical overdispersion (per cluster)
     d_cluster_hierarch = pm.HalfNormal("d_cluster_hierarch", sigma=1/3)    # --> phi ~ 1000 --> low overdispersion
     d_cluster = pm.HalfNormal("d_cluster", sigma=d_cluster_hierarch, shape=n_clusters)
