@@ -468,7 +468,7 @@ with pm.Model() as model:
     # Parameters 
     ## fitness model
     beta = pm.Lognormal("beta", mu=pt.log(0.1), sigma=0.2)                          # serotype cycling speed scale
-    gamma_s = 
+    gamma_s = pm.Normal("gamma_s", mu=1.0, sigma=0.1, shape=n_serotypes)            # intrinsic serotype fitness 
   
     ## average duration cross-protection
     omega = pm.Lognormal("omega", mu=2.85, sigma=0.25)
@@ -488,16 +488,16 @@ with pm.Model() as model:
     or_serotype = pm.Deterministic("or_serotype", pt.exp(log_or_serotype_full))
 
     ## Total FOI (RW(1); time x cluster)
-    #sigma_lambda = pm.HalfNormal("sigma_lambda", sigma=1.0)
-    #mu_lambda = pm.Normal("mu_lambda", mu=-3.0, sigma=1.0, shape=n_clusters)                    # long-term average roughly 5%
-    #eps_lambda = pm.Normal("eps_lambda", mu=0.0, sigma=1.0, shape=(n_clusters, n_months))
-    #u_lambda = sigma_lambda * pt.cumsum(eps_lambda, axis=1)
-    #log_lambda = mu_lambda[:, None] + u_lambda
-    #lambda_t = pm.Deterministic("lambda_t", pt.exp(log_lambda).T) # months x clusters
+    sigma_lambda = pm.HalfNormal("sigma_lambda", sigma=1.0)
+    mu_lambda = pm.Normal("mu_lambda", mu=-3.0, sigma=1.0, shape=n_clusters)                    # long-term average roughly 5%
+    eps_lambda = pm.Normal("eps_lambda", mu=0.0, sigma=1.0, shape=(n_clusters, n_months))
+    u_lambda = sigma_lambda * pt.cumsum(eps_lambda, axis=1)
+    log_lambda = mu_lambda[:, None] + u_lambda
+    lambda_t = pm.Deterministic("lambda_t", pt.exp(log_lambda).T) # months x clusters
 
     ## Total FOI (time-invariant; time x cluster)
-    log_lambda_c = pm.Normal("log_lambda_c", mu=-3.0, sigma=1.0, shape=n_clusters)
-    lambda_t = pm.Deterministic("lambda_t", pt.repeat(pt.exp(log_lambda_c)[None, :], n_months, axis=0))
+    #log_lambda_c = pm.Normal("log_lambda_c", mu=-3.0, sigma=1.0, shape=n_clusters)
+    #lambda_t = pm.Deterministic("lambda_t", pt.repeat(pt.exp(log_lambda_c)[None, :], n_months, axis=0))
 
     ## Residual (RW(1); time x cluster)
     sigma_residual = pm.HalfNormal("sigma_residual", sigma=0.01/3)
@@ -607,7 +607,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                 'beta', 'kappa', 'kappa0_logit', 'or_cluster', 'or_secondary', 'or_serotype', 'pi_d', 'f_P', 'omega', 'log_lambda_c', 'sigma_residual', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
+                 'beta', 'kappa', 'kappa0_logit', 'or_cluster', 'or_secondary', 'or_serotype', 'pi_d', 'f_P', 'omega', 'mu_lambda', 'sigma_lambda', 'sigma_residual', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 # Save traces
