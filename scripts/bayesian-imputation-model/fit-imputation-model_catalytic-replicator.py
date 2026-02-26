@@ -468,8 +468,9 @@ with pm.Model() as model:
     # Parameters 
     ## fitness model
     beta = pm.Lognormal("beta", mu=pt.log(0.1), sigma=0.2)                          # serotype cycling speed scale
-    gamma_s = pm.Normal("gamma_s", mu=1.0, sigma=0.1, shape=n_serotypes)            # intrinsic serotype fitness 
-  
+    gamma_s = pm.Normal("gamma_s", mu=1.0, sigma=0.1, shape=n_serotypes - 1)        # intrinsic serotype fitness (relative to DENV-1)
+    gamma_s_full = pm.Deterministic("gamma_s_full", pt.concatenate([pt.ones(1), gamma_s])) 
+
     ## average duration cross-protection
     omega = pm.Lognormal("omega", mu=2.85, sigma=0.25)
 
@@ -500,7 +501,7 @@ with pm.Model() as model:
     #lambda_t = pm.Deterministic("lambda_t", pt.repeat(pt.exp(log_lambda_c)[None, :], n_months, axis=0))
 
     ## Residual (RW(1); time x cluster)
-    sigma_residual = pm.HalfNormal("sigma_residual", sigma=0.01/3)
+    sigma_residual = pm.HalfNormal("sigma_residual", sigma=0.01)
     eta =  pm.Normal("eta", mu=0.0, sigma=sigma_residual, shape=(n_months-1, n_clusters, n_serotypes))  
     eps0 = pt.zeros((n_clusters, n_serotypes))
     beta_f0 = pt.zeros((n_clusters, n_serotypes))
@@ -509,7 +510,7 @@ with pm.Model() as model:
     # (Logit) Replicator equation integrated using Euler's method with dt=1
     # ---------------------------------------------------------------------
 
-    def step(births_t, deaths_t, lambda_t, eta_t, intro_mask_t, S_prev, P_prev, z_prev, beta_f_prev, eps_prev, beta, omega):
+    def step(births_t, deaths_t, lambda_t, eta_t, intro_mask_t, S_prev, P_prev, z_prev, beta_f_prev, eps_prev, beta, gamma_s, omega):
         
         p_prev = pm.math.softmax(z_prev, axis=1)                # reconstruct p
 
@@ -523,7 +524,7 @@ with pm.Model() as model:
         S_serotype = get_susceptibles_serotype(S_t)
 
         # 3. Compute fitness
-        f_t = intro_mask_t * pt.log(S_serotype / pt.mean(S_serotype, axis=1, keepdims=True))
+        f_t = intro_mask_t * gamma_s * pt.log(S_serotype / pt.mean(S_serotype, axis=1, keepdims=True))
 
         # 4. RW(1) residual
         eps_t = eps_prev + eta_t
@@ -544,7 +545,7 @@ with pm.Model() as model:
             pt.as_tensor_variable(intro_mask)
         ],
         outputs_info=[S0, P0, pt.log(p0), beta_f0, eps0], # start_year = 2001 means first datapoint = 2001-01-31 --> The state '0' is 2000-12-31
-        non_sequences=[beta, omega],
+        non_sequences=[beta, gamma_s_full[None, :], omega],
     )
 
     # attach initial states
@@ -585,9 +586,9 @@ with pm.Model() as model:
 
 
 # NUTS
-draws=10
+draws=25
 with model:
-    trace = pm.sample(draws, tune=10, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(draws, tune=50, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 #######################
 ## Running the model ##
@@ -607,7 +608,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                 'beta', 'kappa', 'kappa0_logit', 'or_cluster', 'or_secondary', 'or_serotype', 'pi_d', 'f_P', 'omega', 'mu_lambda', 'sigma_lambda', 'sigma_residual', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
+                 'beta', 'gamma_s_full', 'kappa', 'kappa0_logit', 'or_cluster', 'or_secondary', 'or_serotype', 'pi_d', 'f_P', 'omega', 'mu_lambda', 'sigma_lambda', 'sigma_residual', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 # Save traces
