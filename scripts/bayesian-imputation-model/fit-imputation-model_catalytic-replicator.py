@@ -155,7 +155,7 @@ df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
 
 # only do first X clusters
-df = df[df['cluster'].isin([1,2,3,4,5])]
+df = df[df['cluster'].isin([4,5])]
 
 # 9. Build PyMC arrays
 # --- For DirichletMultinomial model ---
@@ -179,7 +179,7 @@ df_expanded["estimated_death_rate"] = df_expanded["estimated_deaths"] / df_expan
 births = df_expanded.pivot(index="date", columns="cluster", values="estimated_births").to_numpy().astype(int) # (n_months, n_clusters)
 death_rate = df_expanded.pivot(index="date", columns="cluster", values="estimated_death_rate").to_numpy() # (n_months, n_clusters)
 # Initial demography
-demo = demo[((demo['year'] == start_year) & (demo['cluster'].isin([1,2,3,4,5])))]['population'].values 
+demo = demo[((demo['year'] == start_year) & (demo['cluster'].isin([4,5])))]['population'].values 
 
 # --- Indices ---
 cluster_idx = df["cluster"].to_numpy().astype(int)
@@ -472,12 +472,12 @@ with pm.Model() as model:
     gamma_s_full = pm.Deterministic("gamma_s_full", pt.concatenate([pt.ones(1), gamma_s])) 
 
     ## average duration cross-protection
-    omega = pm.Lognormal("omega", mu=2.85, sigma=0.25)
+    omega = pm.Lognormal("omega", mu=1.65, sigma=0.5)
 
     ## reported fraction (cluster x degree x serotype)
-    kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(1/30), sigma=1.0)             # intercept
+    kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1.0)             # intercept
     is_secondary = pt.as_tensor([0, 1, 0, 0])                                               # indicator of secondary infection
-    log_or_secondary = pm.Normal("log_or_secondary", mu=0.0, sigma=1.0)                     # OR detecting secondary heterologous infection (vs. prim, tert, quart)
+    log_or_secondary = pm.Normal("log_or_secondary", mu=0.0, sigma=1/3)                     # OR detecting secondary heterologous infection (vs. prim, tert, quart)
     log_or_serotype = pm.Normal("log_or_serotype", mu=0.0, sigma=1.0, shape=n_serotypes-1)  # OR detecting serotypes (vs. DENV-1)
     log_or_serotype_full = pt.concatenate([pt.zeros(1), log_or_serotype])
     log_or_cluster = pm.Normal("log_or_cluster", mu=0.0, sigma=1.0, shape=n_clusters-1)     # OR detecting in a cluster (vs. cluster 1)
@@ -501,7 +501,7 @@ with pm.Model() as model:
     #lambda_t = pm.Deterministic("lambda_t", pt.repeat(pt.exp(log_lambda_c)[None, :], n_months, axis=0))
 
     ## Residual (RW(1); time x cluster)
-    sigma_residual = pm.HalfNormal("sigma_residual", sigma=0.01)
+    sigma_residual = pm.HalfNormal("sigma_residual", sigma=0.001)
     eta =  pm.Normal("eta", mu=0.0, sigma=sigma_residual, shape=(n_months-1, n_clusters, n_serotypes))  
     eps0 = pt.zeros((n_clusters, n_serotypes))
     beta_f0 = pt.zeros((n_clusters, n_serotypes))
@@ -584,11 +584,10 @@ with pm.Model() as model:
 ## Running the model ##
 #######################
 
-
 # NUTS
-draws=25
+draws=10
 with model:
-    trace = pm.sample(draws, tune=50, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(draws, tune=10, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 #######################
 ## Running the model ##
