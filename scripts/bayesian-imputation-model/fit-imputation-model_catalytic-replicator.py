@@ -446,6 +446,10 @@ def build_initial_crossprotection(demo, f_P, pi_d, f_P2):
 
     return f_P * demo[:, None] * P_frac[None, :]
 
+def ar1_step(eps_t, u_prev, rho, sigma_ar):
+    u_t = rho * u_prev + sigma_ar * eps_t
+    return u_t
+
 # ideas:
 # bounded influence of susceptibility differences on fitness through a tanh structure
 # shift domain kappa to [0.002, 1] (hard lower bound to prevent bad geometries for NUTS sampler)
@@ -458,19 +462,21 @@ with pm.Model() as model:
 
     # initial states
     ## initial susceptible and cross-protected states (cluster x state_idx)
-    f_P = pm.Beta("f_P", alpha=10, beta=20)     # first division of cluster population happens based on amount in a cross-protected state
-    f_P2 = pm.Beta("f_P2", alpha=30, beta=1)     # fraction cross-protected after DENV-2 infection
-    pi_d = pm.Dirichlet("pi_d", a=[1.5, 2.5, 6])    # divide the non-cross-protected across naive, mono, double
-    pi_mono2 = pm.Beta("pi_mono2", alpha=30, beta=1) # divide the mono between DENV-1 and DENV-2
+    f_P = pm.Beta("f_P", alpha=10, beta=20)             # first division of cluster population happens based on amount in a cross-protected state
+    f_P2 = pm.Beta("f_P2", alpha=30, beta=1)            # fraction cross-protected after DENV-2 infection
+    pi_d = pm.Dirichlet("pi_d", a=[1, 3, 6])            # divide the non-cross-protected across naive, mono, double
+    pi_mono2 = pm.Beta("pi_mono2", alpha=30, beta=1)    # divide the mono between DENV-1 and DENV-2
     S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, f_P, pi_d, pi_mono2))
     P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, f_P2))
+
     ## initial gap between DENV-4 and the rest in z-transformed space 
     zgap_DENV4 = pm.Normal("zgap_DENV4", mu=-15, sigma=3, shape=n_clusters)
     z0 = pt.set_subtensor(pt.log(p0)[:, 3], pt.min(pt.log(p0)[:, :3], axis=1) + zgap_DENV4)
 
+
     # Parameters 
     ## fitness model
-    beta = pm.Lognormal("beta", mu=pt.log(0.1), sigma=0.2)                          # serotype cycling speed scale
+    beta = pm.Lognormal("beta", mu=pt.log(0.1), sigma=0.2)
 
     ## average duration cross-protection
     omega = pm.Lognormal("omega", mu=1.65, sigma=0.5)
@@ -490,13 +496,19 @@ with pm.Model() as model:
     or_serotype = pm.Deterministic("or_serotype", pt.exp(log_or_serotype_full))
 
     ## Total FOI (seasonal + AR(1); time x cluster)
+    ### seasonal component
     mu_lambda = pm.Normal("mu_lambda", mu=-3, sigma=1/3, shape=n_clusters)
     A_lambda = pm.HalfNormal("A_lambda", sigma=1, shape=n_clusters)
     phi_lambda = pm.Normal("phi_lambda", mu=pt.pi/3, sigma=1, shape=n_clusters) # peaks March
-    season = A_lambda[:, None] * pt.cos(
-        2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_lambda[:, None]
-    )
-    log_lambda = mu_lambda[:, None] + season
+    season = A_lambda[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_lambda[:, None])
+    ### AR(1) component (non-centered)
+    rho_lambda = pm.Beta("rho_lambda", alpha=1, beta=2)                 # persistence
+    sigma_ar = pm.HalfNormal("sigma_ar", sigma=1/3)                     # freedom
+    eps_raw = pm.Normal("eps_raw", mu=0, sigma=1, shape=(n_months, n_clusters))
+    u_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_raw[1:], outputs_info=pt.zeros(n_clusters), non_sequences=[rho_lambda, sigma_ar])
+    u = pt.concatenate([ pt.zeros(n_clusters)[None, :], u_seq], axis=0)
+    #### Combine
+    log_lambda = mu_lambda[:, None] + season + u.T
     lambda_t = pm.Deterministic("lambda_t", pt.exp(log_lambda).T)
 
     ## Residual (RW(1); time x cluster)
@@ -584,9 +596,9 @@ with pm.Model() as model:
 #######################
 
 # NUTS
-draws=20
+draws=10
 with model:
-    trace = pm.sample(draws, tune=20, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(draws, tune=10, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 #######################
 ## Running the model ##
@@ -606,7 +618,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                 'zgap_DENV4', 'beta', 'gamma_s_full', 'kappa', 'kappa0_logit', 'or_cluster', 'or_12', 'or_serotype', 'pi_d', 'f_P', 'f_P2', 'pi_mono2', 'omega', 'mu_lambda', 'A_lambda', 'phi_lambda', 'sigma_residual', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
+                 'zgap_DENV4', 'beta', 'kappa', 'kappa0_logit', 'or_cluster', 'or_12', 'or_serotype', 'pi_d', 'f_P', 'f_P2', 'pi_mono2', 'omega', 'mu_lambda', 'A_lambda', 'phi_lambda', 'sigma_residual', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 # Save traces
