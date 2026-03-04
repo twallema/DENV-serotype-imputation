@@ -459,11 +459,14 @@ with pm.Model() as model:
     # initial states
     ## initial susceptible and cross-protected states (cluster x state_idx)
     f_P = pm.Beta("f_P", alpha=10, beta=20)     # first division of cluster population happens based on amount in a cross-protected state
-    f_P2 = 0.5                                  # fraction cross-protected after DENV-2 infection
-    pi_d = pm.Dirichlet("pi_d", a=[2, 2, 6])    # divide the non-cross-protected across naive, mono, double
-    pi_mono2 = 0.5                              # divide the mono between DENV-1 and DENV-2
+    f_P2 = pm.Beta("f_P2", alpha=30, beta=1)     # fraction cross-protected after DENV-2 infection
+    pi_d = pm.Dirichlet("pi_d", a=[1.5, 2.5, 6])    # divide the non-cross-protected across naive, mono, double
+    pi_mono2 = pm.Beta("pi_mono2", alpha=30, beta=1) # divide the mono between DENV-1 and DENV-2
     S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, f_P, pi_d, pi_mono2))
     P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, f_P2))
+    ## initial gap between DENV-4 and the rest in z-transformed space 
+    zgap_DENV4 = pm.Normal("zgap_DENV4", mu=-15, sigma=3, shape=n_clusters)
+    z0 = pt.set_subtensor(pt.log(p0)[:, 3], pt.min(pt.log(p0)[:, :3], axis=1) + zgap_DENV4)
 
     # Parameters 
     ## fitness model
@@ -476,32 +479,42 @@ with pm.Model() as model:
 
     ## reported fraction (cluster x degree x serotype)
     kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1.0)             # intercept
-    is_secondary = pt.as_tensor([0, 1, 0, 0])                                               # indicator of secondary infection
-    log_or_secondary = pm.Normal("log_or_secondary", mu=0.0, sigma=1/3)                     # OR detecting secondary heterologous infection (vs. prim, tert, quart)
+    is_12 = pt.as_tensor([1, 1, 0, 0])                                                      # indicator of prim./sec. infection
+    log_or_12 = pm.Normal("log_or_12", mu=0.0, sigma=1/3)                                   # OR detecting prim./sec. heterologous infection (vs. tert, quart)
     log_or_serotype = pm.Normal("log_or_serotype", mu=0.0, sigma=1.0, shape=n_serotypes-1)  # OR detecting serotypes (vs. DENV-1)
     log_or_serotype_full = pt.concatenate([pt.zeros(1), log_or_serotype])
     log_or_cluster = pm.Normal("log_or_cluster", mu=0.0, sigma=1.0, shape=n_clusters-1)     # OR detecting in a cluster (vs. cluster 1)
     log_or_cluster_full = pt.concatenate([pt.zeros(1), log_or_cluster])                     
-    logit_kappa = (kappa0_logit + log_or_cluster_full[:, None, None] + log_or_secondary * is_secondary[None, :, None] + log_or_serotype_full[None, None, :])
+    logit_kappa = (kappa0_logit + log_or_cluster_full[:, None, None] + log_or_12 * is_12[None, :, None] + log_or_serotype_full[None, None, :])
     kappa = pm.Deterministic("kappa", pm.math.sigmoid(logit_kappa))
     or_cluster = pm.Deterministic("or_cluster", pt.exp(log_or_cluster_full))
-    or_secondary = pm.Deterministic("or_secondary", pt.exp(log_or_secondary))
+    or_12 = pm.Deterministic("or_12", pt.exp(log_or_12))
     or_serotype = pm.Deterministic("or_serotype", pt.exp(log_or_serotype_full))
 
     ## Total FOI (RW(1); time x cluster)
-    sigma_lambda = pm.HalfNormal("sigma_lambda", sigma=1.0)
-    mu_lambda = pm.Normal("mu_lambda", mu=-3.0, sigma=1.0, shape=n_clusters)                    # long-term average roughly 5%
-    eps_lambda = pm.Normal("eps_lambda", mu=0.0, sigma=1.0, shape=(n_clusters, n_months))
-    u_lambda = sigma_lambda * pt.cumsum(eps_lambda, axis=1)
-    log_lambda = mu_lambda[:, None] + u_lambda
-    lambda_t = pm.Deterministic("lambda_t", pt.exp(log_lambda).T) # months x clusters
+    #sigma_lambda = pm.HalfNormal("sigma_lambda", sigma=1.0)
+    #mu_lambda = pm.Normal("mu_lambda", mu=-3.0, sigma=1.0, shape=n_clusters)                    # long-term average roughly 5%
+    #eps_lambda = pm.Normal("eps_lambda", mu=0.0, sigma=1.0, shape=(n_clusters, n_months))
+    #u_lambda = sigma_lambda * pt.cumsum(eps_lambda, axis=1)
+    #log_lambda = mu_lambda[:, None] + u_lambda
+    #lambda_t = pm.Deterministic("lambda_t", pt.exp(log_lambda).T) # months x clusters
 
     ## Total FOI (time-invariant; time x cluster)
     #log_lambda_c = pm.Normal("log_lambda_c", mu=-3.0, sigma=1.0, shape=n_clusters)
     #lambda_t = pm.Deterministic("lambda_t", pt.repeat(pt.exp(log_lambda_c)[None, :], n_months, axis=0))
 
+    ## Total FOI (seasonal + AR(1); time x cluster)
+    mu_lambda = pm.Normal("mu_lambda", mu=-3, sigma=1/3, shape=n_clusters)
+    A_lambda = pm.HalfNormal("A_lambda", sigma=1, shape=n_clusters)
+    phi_lambda = pm.Normal("phi_lambda", mu=pt.pi/3, sigma=1, shape=n_clusters) # peaks March
+    season = A_lambda[:, None] * pt.cos(
+        2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_lambda[:, None]
+    )
+    log_lambda = mu_lambda[:, None] + season
+    lambda_t = pm.Deterministic("lambda_t", pt.exp(log_lambda).T)
+
     ## Residual (RW(1); time x cluster)
-    sigma_residual = pm.HalfNormal("sigma_residual", sigma=0.001)
+    sigma_residual = pm.HalfNormal("sigma_residual", sigma=0.0001)
     eta =  pm.Normal("eta", mu=0.0, sigma=sigma_residual, shape=(n_months-1, n_clusters, n_serotypes))  
     eps0 = pt.zeros((n_clusters, n_serotypes))
     beta_f0 = pt.zeros((n_clusters, n_serotypes))
@@ -527,7 +540,7 @@ with pm.Model() as model:
         f_t = intro_mask_t * gamma_s * pt.log(S_serotype / pt.mean(S_serotype, axis=1, keepdims=True))
 
         # 4. RW(1) residual
-        eps_t = eps_prev + eta_t
+        eps_t = eps_prev + intro_mask_t * eta_t
 
         # 5. Replicator update + residual
         z_t = z_prev + beta * f_t + eps_t
@@ -544,7 +557,7 @@ with pm.Model() as model:
             eta,
             pt.as_tensor_variable(intro_mask)
         ],
-        outputs_info=[S0, P0, pt.log(p0), beta_f0, eps0], # start_year = 2001 means first datapoint = 2001-01-31 --> The state '0' is 2000-12-31
+        outputs_info=[S0, P0, z0, beta_f0, eps0], # start_year = 2001 means first datapoint = 2001-01-31 --> The state '0' is 2000-12-31
         non_sequences=[beta, gamma_s_full[None, :], omega],
     )
 
@@ -561,7 +574,7 @@ with pm.Model() as model:
     # -----------
 
     # Observed cases
-    alpha_inv = pm.HalfNormal("alpha_inv", sigma=1/100)
+    alpha_inv = pm.HalfNormal("alpha_inv", sigma=1/10)
     S_degree_serotype = get_susceptibles_by_degree_serotype(S)
     infections = lambda_t[:, :, None, None] * p[:, :, None, :] * S_degree_serotype
     reported = infections * kappa[None, :, :, :]
@@ -585,9 +598,9 @@ with pm.Model() as model:
 #######################
 
 # NUTS
-draws=10
+draws=20
 with model:
-    trace = pm.sample(draws, tune=10, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(draws, tune=20, target_accept=0.99, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
 
 #######################
 ## Running the model ##
@@ -607,7 +620,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                 'beta', 'gamma_s_full', 'kappa', 'kappa0_logit', 'or_cluster', 'or_secondary', 'or_serotype', 'pi_d', 'f_P', 'omega', 'mu_lambda', 'sigma_lambda', 'sigma_residual', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
+                 'zgap_DENV4', 'beta', 'gamma_s_full', 'kappa', 'kappa0_logit', 'or_cluster', 'or_12', 'or_serotype', 'pi_d', 'f_P', 'f_P2', 'pi_mono2', 'omega', 'mu_lambda', 'A_lambda', 'phi_lambda', 'sigma_residual', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 # Save traces
