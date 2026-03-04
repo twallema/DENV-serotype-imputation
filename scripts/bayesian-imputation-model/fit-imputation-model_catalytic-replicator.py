@@ -471,8 +471,6 @@ with pm.Model() as model:
     # Parameters 
     ## fitness model
     beta = pm.Lognormal("beta", mu=pt.log(0.1), sigma=0.2)                          # serotype cycling speed scale
-    gamma_s = pm.Normal("gamma_s", mu=1.0, sigma=0.1, shape=n_serotypes - 1)        # intrinsic serotype fitness (relative to DENV-1)
-    gamma_s_full = pm.Deterministic("gamma_s_full", pt.concatenate([pt.ones(1), gamma_s])) 
 
     ## average duration cross-protection
     omega = pm.Lognormal("omega", mu=1.65, sigma=0.5)
@@ -490,18 +488,6 @@ with pm.Model() as model:
     or_cluster = pm.Deterministic("or_cluster", pt.exp(log_or_cluster_full))
     or_12 = pm.Deterministic("or_12", pt.exp(log_or_12))
     or_serotype = pm.Deterministic("or_serotype", pt.exp(log_or_serotype_full))
-
-    ## Total FOI (RW(1); time x cluster)
-    #sigma_lambda = pm.HalfNormal("sigma_lambda", sigma=1.0)
-    #mu_lambda = pm.Normal("mu_lambda", mu=-3.0, sigma=1.0, shape=n_clusters)                    # long-term average roughly 5%
-    #eps_lambda = pm.Normal("eps_lambda", mu=0.0, sigma=1.0, shape=(n_clusters, n_months))
-    #u_lambda = sigma_lambda * pt.cumsum(eps_lambda, axis=1)
-    #log_lambda = mu_lambda[:, None] + u_lambda
-    #lambda_t = pm.Deterministic("lambda_t", pt.exp(log_lambda).T) # months x clusters
-
-    ## Total FOI (time-invariant; time x cluster)
-    #log_lambda_c = pm.Normal("log_lambda_c", mu=-3.0, sigma=1.0, shape=n_clusters)
-    #lambda_t = pm.Deterministic("lambda_t", pt.repeat(pt.exp(log_lambda_c)[None, :], n_months, axis=0))
 
     ## Total FOI (seasonal + AR(1); time x cluster)
     mu_lambda = pm.Normal("mu_lambda", mu=-3, sigma=1/3, shape=n_clusters)
@@ -523,7 +509,7 @@ with pm.Model() as model:
     # (Logit) Replicator equation integrated using Euler's method with dt=1
     # ---------------------------------------------------------------------
 
-    def step(births_t, deaths_t, lambda_t, eta_t, intro_mask_t, S_prev, P_prev, z_prev, beta_f_prev, eps_prev, beta, gamma_s, omega):
+    def step(births_t, deaths_t, lambda_t, eta_t, intro_mask_t, S_prev, P_prev, z_prev, beta_f_prev, eps_prev, beta, omega):
         
         p_prev = pm.math.softmax(z_prev, axis=1)                # reconstruct p
 
@@ -537,7 +523,7 @@ with pm.Model() as model:
         S_serotype = get_susceptibles_serotype(S_t)
 
         # 3. Compute fitness
-        f_t = intro_mask_t * gamma_s * pt.log(S_serotype / pt.mean(S_serotype, axis=1, keepdims=True))
+        f_t = intro_mask_t * pt.log(S_serotype / pt.mean(S_serotype, axis=1, keepdims=True))
 
         # 4. RW(1) residual
         eps_t = eps_prev + intro_mask_t * eta_t
@@ -558,7 +544,7 @@ with pm.Model() as model:
             pt.as_tensor_variable(intro_mask)
         ],
         outputs_info=[S0, P0, z0, beta_f0, eps0], # start_year = 2001 means first datapoint = 2001-01-31 --> The state '0' is 2000-12-31
-        non_sequences=[beta, gamma_s_full[None, :], omega],
+        non_sequences=[beta, omega],
     )
 
     # attach initial states
