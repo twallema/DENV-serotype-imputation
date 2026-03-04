@@ -502,10 +502,10 @@ with pm.Model() as model:
     phi_lambda = pm.Normal("phi_lambda", mu=pt.pi/3, sigma=1, shape=n_clusters) # peaks March
     season = A_lambda[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_lambda[:, None])
     ### AR(1) component (non-centered)
-    rho_lambda = pm.Beta("rho_lambda", alpha=1, beta=2)                 # persistence
-    sigma_ar = pm.HalfNormal("sigma_ar", sigma=1/3)                     # freedom
+    rho_ar_lambda = pm.Beta("rho_ar_lambda", alpha=1, beta=2)                 # persistence
+    sigma_ar_lambda = pm.HalfNormal("sigma_ar_lambda", sigma=1/3)             # freedom
     eps_raw = pm.Normal("eps_raw", mu=0, sigma=1, shape=(n_months, n_clusters))
-    u_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_raw[1:], outputs_info=pt.zeros(n_clusters), non_sequences=[rho_lambda, sigma_ar])
+    u_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_raw[1:], outputs_info=pt.zeros(n_clusters), non_sequences=[rho_ar_lambda, sigma_ar_lambda])
     u = pt.concatenate([ pt.zeros(n_clusters)[None, :], u_seq], axis=0)
     #### Combine
     log_lambda = mu_lambda[:, None] + season + u.T
@@ -618,7 +618,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                 'zgap_DENV4', 'beta', 'kappa', 'kappa0_logit', 'or_cluster', 'or_12', 'or_serotype', 'pi_d', 'f_P', 'f_P2', 'pi_mono2', 'omega', 'mu_lambda', 'A_lambda', 'phi_lambda', 'sigma_residual', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
+                 'zgap_DENV4', 'beta', 'kappa', 'kappa0_logit', 'or_cluster', 'or_12', 'or_serotype', 'pi_d', 'f_P', 'f_P2', 'pi_mono2', 'omega', 'mu_lambda', 'A_lambda', 'phi_lambda', 'rho_ar_lambda', 'sigma_ar_lambda', 'sigma_residual', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 # Save traces
