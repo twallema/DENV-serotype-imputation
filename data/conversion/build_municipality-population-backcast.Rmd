@@ -12,181 +12,18 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(dplyr)
 
-uf <- read.csv("../interim/IBGE_population-projections/IBGE_births-deaths_UF.csv")
-uf
-
 ```
 
 ```{r}
 
 muni <- read.csv("../interim/IBGE_population-projections/IBGE_births-deaths_mun-estimated.csv")
-muni # get the real 2000 data, readme in data folder
+muni 
 
 ```
 
-```{r}
-# create explicit birth and death rate columns for each state in brazil
-uf <- uf %>%
-  mutate(
-    birth_rate = births/population,
-    death_rate = deaths/population
-  )
-
-# create a subset with the years we want
-uf.subset <- uf %>%
-  filter(year >= 2000 & year <= 2003)
-
-```
-
-```{r}
-# using 2000-2003 rates, predict the rates for 1996-1999 for each state
-
-states <- unique(uf.subset$CD_UF)
-states # 27
-
-pred.rates <- data.frame()
-
-for (s in states) {
-  df.state <- uf.subset %>% filter(CD_UF == s) # just filter for the state we're at in the loop
-  
-  # fit models - very very small linregs
-  fit.birth <- lm(birth_rate ~ year, data = df.state)
-  fit.death <- lm(death_rate ~ year, data = df.state)
-  
-  newdata <- data.frame(year = 1996:1999)
-  
-  # use betahat to birth rates for prev years
-  birth.pred <- predict(fit.birth, newdata)
-  death.pred <- predict(fit.death, newdata)
-  
-  # temp df to append
-  t <- data.frame(
-    CD_UF = s,
-    year = 1996:1999,
-    birth_rate = birth.pred,
-    death_rate = death.pred
-  )
-  
-  pred.rates <- rbind(pred.rates, t) # append to that empty df
-}
-
-# add all pops for muni --> uf
-# migration
-```
-
-
-```{r}
-# combine the predicted rates w the observed ones
-
-uf.rates.full <- uf %>%
-  select(CD_UF, year, birth_rate, death_rate) %>%
-  bind_rows(pred.rates) %>%
-  arrange(CD_UF, year)
-
-```
-
-```{r}
-# add a col to the muni data for state/UF ID so we can join easier
-
-muni <- muni %>%
-  mutate(
-    CD_UF = as.numeric(substr(CD_MUN,1,2))
-  )
-```
-
-```{r}
-# left join?
-
-muni.full <- muni %>%
-  left_join(uf.rates.full, by = c("CD_UF", "year"))
-
-```
-
-```{r}
-
-start.year <- min(muni$year) # 2001
-
-# baseline for back calculating - starting pop
-muni.back <-muni %>%
-  filter(year == start.year) %>%
-  select(CD_MUN, CD_UF, population)
-
-backcast <- list()
-
-years.back <- seq(start.year -1, 1996, by = -1)
-
-current.pop <- muni.back
-
-# loop backwards thru each year
-for (yr in years.back) {
-  rates.yr <- uf.rates.full %>%
-    filter(year == yr) %>%
-    select(CD_UF, birth_rate, death_rate)
-  
-  # join rates to muni pops using their state code
-  # then estimate the previous years pop using those rates
-  current.pop <- current.pop %>%
-    left_join(rates.yr, by = "CD_UF") %>%
-    mutate(
-      population = population * (1 + birth_rate - death_rate),
-      year = yr
-    ) %>%
-    select(CD_MUN, CD_UF, year, population)
-  
-  
-  backcast[[as.character(yr)]] <- current.pop
-  
-}
-
-# combine all reconstructed years into one df
-muni.backcast <- bind_rows(backcast)
-
-# append reconstructed to our observed dataset
-muni.final <- bind_rows(
-  muni,
-  muni.backcast
-) %>%
-  arrange(CD_MUN, year)
-
-# join birth/death rates
-muni.final <- muni.final %>%
-  left_join(
-    uf.rates.full,
-    by = c("CD_UF", "year")
-  )
-
-# use those birth/death rates to get estimated num of births and deaths
-muni.final <- muni.final %>%
-  mutate(
-    estimated_births = population * birth_rate,
-    estimated_deaths = population * death_rate
-  ) 
-
-```
-
-
-```{r}
-sample.plot <- muni.final %>% filter(CD_MUN == 1100064)
-plot(sample.plot$year, sample.plot$population)
-
-```
-
-```{r}
-sample.plot <- muni.final %>% filter(CD_MUN == 3524402
-)
-plot(sample.plot$year, sample.plot$population)
-
-
-
-```
 
 ```{r}
 # regress directly on pop counts
-# migration
-# put new files in the README
-# commit slides in the data folder
-
-# should we do exponential?
 
 muni.ids <- unique(muni$CD_MUN)
 
@@ -195,18 +32,26 @@ predicted.pops <- data.frame()
 for (muni.id in muni.ids) {
   
   muni.data <- muni %>%
-    filter(CD_MUN == muni.id)
+    filter(CD_MUN == muni.id,
+           year >= 2001,
+           year <= 2006)
   
   pop.model <- lm(population ~ year, data = muni.data)
+  birth.model <- lm(estimated_births ~ year, data = muni.data)
+  death.model <- lm(estimated_deaths ~ year, data = muni.data)
   
   years <- data.frame(year = 1996:2000)
   
   pop.preds <- predict(pop.model, years)
+  birth.preds <- predict(birth.model, years)
+  death.preds <- predict(death.model, years)
   
   temp.df <- data.frame(
     CD_MUN = muni.id,
     year = 1996:2000,
-    population = pop.preds
+    population = pop.preds,
+    estimated_births = birth.preds,
+    estimated_deaths = death.preds
   )
   
   predicted.pops <- rbind(predicted.pops, temp.df)
@@ -219,15 +64,28 @@ muni.new <- bind_rows(
   arrange(CD_MUN, year)
 
 muni.new <- muni.new %>%
-  mutate(population = round(population))
+  mutate(
+    population = round(population),
+    estimated_births = round(estimated_births),
+    estimated_deaths = round(estimated_deaths))
 
 ```
-
 
 ```{r}
 
 sample.plot <- muni.new %>% filter(CD_MUN == 3524402)
 plot(sample.plot$year, sample.plot$population)
+
+plot(sample.plot$year, sample.plot$estimated_births)
+plot(sample.plot$year, sample.plot$estimated_deaths)
+
+
+```
+
+```{r}
+write.csv(muni.new,
+          "../interim/IBGE_population-projections/municipality_population_1996-2024_estimated.csv",
+          row.names = FALSE)
 
 ```
 

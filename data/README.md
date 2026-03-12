@@ -79,6 +79,8 @@ These data are partly confidential and can be found on the Bento lab box.
 
 `IBGE_births-deaths_mun-estimated.csv`: Contains the births, deaths and population of Brazil's municipalities from 2001-2024, assuming the birth and death rate in municipalities is the same as the average of the federative unit. Created using `~/data/conversion/build_births-deaths.py` using `~/data/interim/IBGE_population-projections/IBGE_births-deaths_uf.csv` and `~/data/raw/sprint_2025/datasus_population_2001_2024.csv`.
 
+`municipality_population_1996-2024_estimated`: Extension of `IBGE_births-deaths_mun-estimated.csv`, adding the predicted population, birth, and death count for 1996-2000 for every municipality.
+
 ### DTW-MDS-embeddings
 
 Subfolders contain the output of performing DTW on the following timeseries and projecting them down using MDS.
@@ -113,4 +115,4 @@ Contains all output of the Bayesian serotype imputation model `~/scripts/bayesia
 
 + `build_indexP.py`: A script to aggregate the municipality level index P per month to the immediate and intermediate Brazilian regions.
 
-+ `build_municipality-population-backcast.Rmd`: Script used to estimate municipality populations for 1996-2000 by fitting municipality-specific linear regressions, predicting backwards in time. 
++ `build_municipality-population-backcast.Rmd`: Script used to estimate municipality populations, births, and deaths for 1996-2000 by fitting municipality-specific linear regressions, predicting backwards in time. 
