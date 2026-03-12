@@ -112,3 +112,5 @@ Contains all output of the Bayesian serotype imputation model `~/scripts/bayesia
 + `build_dengue-incidence-100k.py`: A script to convert the formatted linelist data in `data/interim/datasus_DENV-linelist` to the total dengue incidence per 100K inhabitants at the municipality/immediate/intermediate region level.
 
 + `build_indexP.py`: A script to aggregate the municipality level index P per month to the immediate and intermediate Brazilian regions.
+
++ `build_municipality-population-backcast.Rmd`: Script used to estimate municipality populations for 1996-2000 by fitting municipality-specific linear regressions, predicting backwards in time. 
