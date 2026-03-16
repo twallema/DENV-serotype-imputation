@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 # analysis startdate
 start_year = 2001
 end_year = 2024
-assert start_year >= 2001, "demography data before 2001 is missing."
+assert start_year >= 1996, "earliest start_year is 1996."
 
 # helper function for argument parsing
 def str_to_bool(value):
@@ -72,7 +72,9 @@ mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_m
 mapping = mapping.merge(clusters[[region, 'cluster']], on=region, how='left')
 
 # Compute demography in start_year per cluster
-demo = pd.read_csv(os.path.join(abs_dir, f'../../data/raw/sprint_2025/datasus_population_2001_2024.csv'))
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+demo = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/IBGE_population-projections/pop-births-deaths_mun_1996-2024.csv'))
 demo = demo.rename(columns={'geocode': 'CD_MUN'})
 demo = demo.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
 demo = demo.groupby(['cluster', 'year'], as_index=False)['population'].sum()
@@ -152,7 +154,7 @@ df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
 
 # only do first X clusters
-#df = df[df['cluster'].isin([1,2,3,4,5])]
+df = df[df['cluster'].isin([4,5])]
 
 # 9. Build PyMC arrays
 # --- For Multinomial model (subtypes, only when typed) ---
@@ -277,19 +279,137 @@ p_upper = df[['cluster','date']]
 p_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['p'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
 p_upper = p_upper.set_index(['cluster','date'])
 
-# Get number of susceptibles
+# Get number of susceptibility slots per serotype
+def get_susceptibles_serotype_time(S):
+    """
+    S: numpy array of shape (n_times, n_clusters, state_idx)
+
+    Returns
+    -------
+    numpy array of shape (n_times, n_clusters, n_serotypes)
+    """
+
+    S1 = np.sum(S[:, :, [0, 2, 3, 4, 8, 9, 10, 11]], axis=2)
+    S2 = np.sum(S[:, :, [0, 1, 3, 4, 6, 7, 10, 12]], axis=2)
+    S3 = np.sum(S[:, :, [0, 1, 2, 4, 5, 7, 9, 13]], axis=2)
+    S4 = np.sum(S[:, :, [0, 1, 2, 3, 5, 6, 8, 14]], axis=2)
+
+    return np.stack([S1, S2, S3, S4], axis=-1)
+
 ## Mean
 S_mean = df[['cluster','date']]
-S_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['S'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters, n_serotypes))
+S_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = get_susceptibles_serotype_time(trace['posterior']['S'].mean(dim=['chain','draw']).values).reshape((n_months*n_clusters, n_serotypes))
 S_mean = S_mean.set_index(['cluster','date'])
 ## Lower
 S_lower = df[['cluster','date']]
-S_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['S'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
+S_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = get_susceptibles_serotype_time(trace['posterior']['S'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values).reshape((n_months*n_clusters, n_serotypes))
 S_lower = S_lower.set_index(['cluster','date'])
 ## Upper
 S_upper = df[['cluster','date']]
-S_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['S'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
+S_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = get_susceptibles_serotype_time(trace['posterior']['S'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values).reshape((n_months*n_clusters, n_serotypes))
 S_upper = S_upper.set_index(['cluster','date'])
+
+# Get fraction of population per infection degree
+def get_susceptibles_degree_time(S):
+    """
+    S: numpy array of shape (n_times, n_clusters, state_idx)
+
+    Returns
+    -------
+    numpy array of shape (n_times, n_clusters, n_degrees)
+    """
+
+    S1 = S[:, :, 0]
+    S2 = np.sum(S[:, :, [1, 2, 3, 4]], axis=2)
+    S3 = np.sum(S[:, :, [5, 6, 7, 8, 9, 10]], axis=2)
+    S4 = np.sum(S[:, :, [11, 12, 13, 14]], axis=2)
+    S5 = S[:, :, 15]
+
+    return np.stack([S1, S2, S3, S4, S5], axis=-1)
+
+## Mean
+d_mean = df[['cluster','date']]
+d_mean[['0', '1', '2', '3', '4']] = get_susceptibles_degree_time(trace['posterior']['S'].mean(dim=['chain','draw']).values).reshape((n_months*n_clusters, 5))
+d_mean = d_mean.set_index(['cluster','date'])
+## Lower
+d_lower = df[['cluster','date']]
+d_lower[['0', '1', '2', '3', '4']] = get_susceptibles_degree_time(trace['posterior']['S'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values).reshape((n_months*n_clusters, 5))
+d_lower = d_lower.set_index(['cluster','date'])
+## Upper
+d_upper = df[['cluster','date']]
+d_upper[['0', '1', '2', '3', '4']] = get_susceptibles_degree_time(trace['posterior']['S'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values).reshape((n_months*n_clusters, 5))
+d_upper = d_upper.set_index(['cluster','date'])
+
+
+# Get total dengue cases
+## Mean
+D_mean = df[['cluster','date']]
+D_mean['DENV_total'] = posterior_predictive['posterior_predictive']['D_obs'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters))
+D_mean = D_mean.set_index(['cluster','date'])
+## Lower
+D_lower = df[['cluster','date']]
+D_lower['DENV_total'] = posterior_predictive['posterior_predictive']['D_obs'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months*n_clusters))
+D_lower = D_lower.set_index(['cluster','date'])
+## Upper
+D_upper = df[['cluster','date']]
+D_upper['DENV_total'] = posterior_predictive['posterior_predictive']['D_obs'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters))
+D_upper = D_upper.set_index(['cluster','date'])
+
+# Get total FOI
+## Mean
+FOI_mean = df[['cluster','date']]
+FOI_mean['FOI'] = trace['posterior']['lambda_t'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters))
+FOI_mean = FOI_mean.set_index(['cluster','date'])
+## Lower
+FOI_lower = df[['cluster','date']]
+FOI_lower['FOI'] = trace['posterior']['lambda_t'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months*n_clusters))
+FOI_lower = FOI_lower.set_index(['cluster','date'])
+## Upper
+FOI_upper = df[['cluster','date']]
+FOI_upper['FOI'] = trace['posterior']['lambda_t'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters))
+FOI_upper = FOI_upper.set_index(['cluster','date'])
+
+# Get z trajectory
+## Mean
+z_mean = df[['cluster','date']]
+z_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['z'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters, n_serotypes))
+z_mean = z_mean.set_index(['cluster','date'])
+## Lower
+z_lower = df[['cluster','date']]
+z_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['z'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
+z_lower = z_lower.set_index(['cluster','date'])
+## Upper
+z_upper = df[['cluster','date']]
+z_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['z'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
+z_upper = z_upper.set_index(['cluster','date'])
+
+# Get beta_f trajectory
+## Mean
+beta_f_mean = df[['cluster','date']]
+beta_f_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['beta_f'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters, n_serotypes))
+beta_f_mean = beta_f_mean.set_index(['cluster','date'])
+## Lower
+beta_f_lower = df[['cluster','date']]
+beta_f_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['beta_f'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
+beta_f_lower = beta_f_lower.set_index(['cluster','date'])
+## Upper
+beta_f_upper = df[['cluster','date']]
+beta_f_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['beta_f'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
+beta_f_upper = beta_f_upper.set_index(['cluster','date'])
+
+# Get residual trajectory
+## Mean
+eps_mean = df[['cluster','date']]
+eps_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['eps'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters, n_serotypes))
+eps_mean = eps_mean.set_index(['cluster','date'])
+## Lower
+eps_lower = df[['cluster','date']]
+eps_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['eps'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
+eps_lower = eps_lower.set_index(['cluster','date'])
+## Upper
+eps_upper = df[['cluster','date']]
+eps_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['eps'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
+eps_upper = eps_upper.set_index(['cluster','date'])
 
 # Get overdispersion
 ## Mean
@@ -318,18 +438,24 @@ for cluster in df['cluster'].unique().tolist():
     pop_start_year = demo[demo['cluster'] == cluster]['population'].values
 
     # Visualisation
-    fig,ax=plt.subplots(nrows=8, sharex=True, figsize=(8.7, 11.3))
+    fig,ax=plt.subplots(nrows=13, sharex=True, figsize=(8.7, 11.3*1.25))
 
     # 1: Total dengue cases
+    # Filter data for a single UF
+    df_star_mean = D_mean.loc[cluster, ['DENV_total']]
+    df_star_lower = D_lower.loc[cluster, ['DENV_total']]
+    df_star_upper = D_upper.loc[cluster, ['DENV_total']]
     ax[0].plot(time, df[df['cluster']==cluster]['DENV_total'].values/pop_start_year*100, marker='o', markersize=2, linewidth=0.5, color='black')
-    ax[0].set_ylabel('Total DENV (%)', fontsize=9)
-    ax[0].set_ylim([-0.5,5])
+    ax[0].plot(df_star_mean.index, df_star_mean[f'DENV_total']/pop_start_year*100, color='blue', alpha=1)
+    ax[0].fill_between(df_star_mean.index, df_star_lower[f'DENV_total']/pop_start_year*100, df_star_upper[f'DENV_total']/pop_start_year*100, color='blue', alpha=0.2)
+    ax[0].set_ylabel('Total DENV (%)', fontsize=7)
+    #ax[0].set_ylim([-0.5,5])
     ax[0].set_title(f'Brasil (Cluster: {cluster})')
 
     # 2: total serotyped cases
     ax[1].plot(time, N_typed.loc[cluster, slice(None)].values, marker='o', markersize=2, linewidth=0.5, color='black')
     ax[1].set_ylim([0,300])
-    ax[1].set_ylabel('Total serotyped (-)', fontsize=9)
+    ax[1].set_ylabel('Total serotyped (-)', fontsize=7)
 
     # 3: serotype fractions vs data
     colors = ['black', 'red', 'green', 'blue']
@@ -337,10 +463,21 @@ for cluster in df['cluster'].unique().tolist():
         ax[1+i].plot(time, Y_obs.loc[(cluster, slice(None)), f'p_{i}'].values*100, marker='o', markersize=2, linewidth=1, color='black')
         ax[1+i].plot(time, p_mean.loc[cluster, f'DENV_{i}']*100, color=colors[i-1])
         ax[1+i].fill_between(time, p_lower.loc[cluster, f'DENV_{i}']*100, p_upper.loc[cluster, f'DENV_{i}']*100, alpha=0.2, color=colors[i-1])
-        ax[1+i].set_ylabel(f'DENV {i} (%)', fontsize=9)
+        ax[1+i].set_ylabel(f'DENV {i} (%)', fontsize=7)
         ax[1+i].set_ylim([-3,103])
 
-    # 4: susceptibles
+    # 4: FOI
+    # Filter data for a single UF
+    df_star_mean = FOI_mean.loc[cluster, ['FOI']]
+    df_star_lower = FOI_lower.loc[cluster, ['FOI']]
+    df_star_upper = FOI_upper.loc[cluster, ['FOI']]
+    ax[6].axhline(np.mean(df_star_mean[f'FOI']*100), color='red', linewidth=0.5)
+    ax[6].plot(df_star_mean.index, df_star_mean[f'FOI']*100, color='blue', alpha=1)
+    ax[6].fill_between(df_star_mean.index, df_star_lower['FOI']*100, df_star_upper['FOI']*100, color='blue', alpha=0.2)
+    ax[6].set_ylabel('Total FOI (%)', fontsize=7)
+    ax[6].set_ylim([-0.5,30])
+
+    # 5: susceptibility slots per serotype
     # Filter data for a single UF
     df_star_mean = S_mean.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
     df_star_lower = S_lower.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
@@ -348,21 +485,74 @@ for cluster in df['cluster'].unique().tolist():
     # Plot
     colors = ['black', 'red', 'green', 'blue']
     for i in range(1,5):
-        ax[6].plot(df_star_mean.index, df_star_mean[f'DENV_{i}']/pop_start_year*100, label='1', color=colors[i-1], alpha=1)
-        ax[6].fill_between(df_star_mean.index, df_star_lower[f'DENV_{i}']/pop_start_year*100, df_star_upper[f'DENV_{i}']/pop_start_year*100, label=f'{i}', color=colors[i-1], alpha=0.1)
-        ax[6].set_ylim([-3,103])
-    ax[6].set_ylabel('Susceptibles (%)', fontsize=9)
+        ax[7].plot(df_star_mean.index, df_star_mean[f'DENV_{i}']/pop_start_year*100, label='1', color=colors[i-1], alpha=1)
+        ax[7].fill_between(df_star_mean.index, df_star_lower[f'DENV_{i}']/pop_start_year*100, df_star_upper[f'DENV_{i}']/pop_start_year*100, label=f'{i}', color=colors[i-1], alpha=0.1)
+        ax[7].set_ylim([-3,125])
+    ax[7].set_ylabel('Susc. slots (%)', fontsize=7)
 
-    # 5: modeled serotype fractions
+    # 6: modeled serotype fractions
     df_star = p_mean.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
-    ax[7].stackplot(
+    ax[8].stackplot(
         df_star.index, [df_star['DENV_1']*100, df_star['DENV_2']*100, df_star['DENV_3']*100, df_star['DENV_4']*100],
         labels=['1', '2', '3', '4'],
         colors=['black', 'red', 'green', 'blue'],
         alpha=0.9
     )
-    ax[7].legend(framealpha=1, loc=3)
-    ax[7].set_ylabel('Serotypes (%)', fontsize=9)
+    ax[8].legend(framealpha=1, loc=3, fontsize=7)
+    ax[8].set_ylabel('Serotypes (%)', fontsize=7)
+
+    # 7: susceptibles per degree of infection
+    # Filter data for a single UF
+    df_star_mean = d_mean.loc[cluster, ['0', '1', '2', '3', '4']]
+    df_star_lower = d_lower.loc[cluster, ['0', '1', '2', '3', '4']]
+    df_star_upper = d_upper.loc[cluster, ['0', '1', '2', '3', '4']]
+    # Plot
+    ax[9].stackplot(
+        df_star_mean.index, [df_star_mean['0']/pop_start_year*100, df_star_mean['1']/pop_start_year*100, df_star_mean['2']/pop_start_year*100, df_star_mean['3']/pop_start_year*100, df_star_mean['4']/pop_start_year*100],
+        labels=['0', '1', '2', '3', '4'],
+        colors=['black', 'red', 'orange', 'yellow', 'green'],
+        alpha=0.9
+    )
+    ax[9].set_ylabel('Susc. degree (%)', fontsize=7)
+
+    # 8: beta * f_i
+    # Filter data for a single UF
+    df_star_mean = beta_f_mean.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    df_star_lower = beta_f_lower.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    df_star_upper = beta_f_upper.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    # Plot
+    colors = ['black', 'red', 'green', 'blue']
+    for i in range(1,5):
+        ax[10].plot(df_star_mean.index, df_star_mean[f'DENV_{i}'], label='1', color=colors[i-1], alpha=1)
+        ax[10].fill_between(df_star_mean.index, df_star_lower[f'DENV_{i}'], df_star_upper[f'DENV_{i}'], label=f'{i}', color=colors[i-1], alpha=0.1)
+        ax[10].set_ylim([-0.2,0.2])
+    ax[10].set_ylabel('beta * f_i (-)', fontsize=7)
+
+    # 9: residual
+    # Filter data for a single UF
+    df_star_mean = eps_mean.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    df_star_lower = eps_lower.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    df_star_upper = eps_upper.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    # Plot
+    colors = ['black', 'red', 'green', 'blue']
+    for i in range(1,5):
+        ax[11].plot(df_star_mean.index, df_star_mean[f'DENV_{i}'], label='1', color=colors[i-1], alpha=1)
+        ax[11].fill_between(df_star_mean.index, df_star_lower[f'DENV_{i}'], df_star_upper[f'DENV_{i}'], label=f'{i}', color=colors[i-1], alpha=0.1)
+        ax[11].set_ylim([-0.2,0.2])
+    ax[11].set_ylabel('Residual (-)', fontsize=7)
+
+    # 10: z
+    # Filter data for a single UF
+    df_star_mean = z_mean.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    df_star_lower = z_lower.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    df_star_upper = z_upper.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    # Plot
+    colors = ['black', 'red', 'green', 'blue']
+    for i in range(1,5):
+        ax[12].plot(df_star_mean.index, df_star_mean[f'DENV_{i}'], label='1', color=colors[i-1], alpha=1)
+        ax[12].fill_between(df_star_mean.index, df_star_lower[f'DENV_{i}'], df_star_upper[f'DENV_{i}'], label=f'{i}', color=colors[i-1], alpha=0.1)
+    ax[12].set_ylabel('z (-)', fontsize=7)
+
 
     os.makedirs(f'{output_folder}/fig/posterior_predictive', exist_ok=True)
     plt.savefig(f'{output_folder}/fig/posterior_predictive/{cluster}_total_serotyped.pdf')
