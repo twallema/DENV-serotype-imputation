@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 # analysis startdate
 start_year = 2001
 end_year = 2024
-assert start_year >= 2001, "demography data before 2001 is missing."
+assert start_year >= 1996, "earliest start_year is 1996."
 
 # helper function for argument parsing
 def str_to_bool(value):
@@ -72,7 +72,9 @@ mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_m
 mapping = mapping.merge(clusters[[region, 'cluster']], on=region, how='left')
 
 # Compute demography in start_year per cluster
-demo = pd.read_csv(os.path.join(abs_dir, f'../../data/raw/sprint_2025/datasus_population_2001_2024.csv'))
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+demo = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/IBGE_population-projections/pop-births-deaths_mun_1996-2024.csv'))
 demo = demo.rename(columns={'geocode': 'CD_MUN'})
 demo = demo.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
 demo = demo.groupby(['cluster', 'year'], as_index=False)['population'].sum()
