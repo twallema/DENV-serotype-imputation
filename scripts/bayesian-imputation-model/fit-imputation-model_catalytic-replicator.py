@@ -437,9 +437,9 @@ def build_initial_crossprotection(demo, f_P, pi_d, f_P2):
     """ See `build_initial_susceptibles` """
 
     # normalize pi_degree for degree of infection 1 and 2
-    pi_sum = pi_d[0] + pi_d[1] + 1e-12  # prevent division by zero
-    deg1_frac = pi_d[0] / pi_sum
-    deg2_frac = pi_d[1] / pi_sum
+    pi_sum = pi_d[1] + pi_d[2] + 1e-12  # prevent division by zero
+    deg1_frac = pi_d[1] / pi_sum
+    deg2_frac = pi_d[2] / pi_sum
 
     # set fractions
     P_frac = pt.stack([deg1_frac*(1-f_P2), deg1_frac*f_P2, 0, 0, deg2_frac * f_P2, 0, 0, deg2_frac * (1-f_P2), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
@@ -462,10 +462,10 @@ with pm.Model() as model:
 
     # initial states
     ## initial susceptible and cross-protected states (cluster x state_idx)
-    f_P = pm.Beta("f_P", alpha=10, beta=20)             # first division of cluster population happens based on amount in a cross-protected state
-    f_P2 = pm.Beta("f_P2", alpha=30, beta=1)            # fraction cross-protected after DENV-2 infection
-    pi_d = pm.Dirichlet("pi_d", a=[1, 3, 6])            # divide the non-cross-protected across naive, mono, double
-    pi_mono2 = pm.Beta("pi_mono2", alpha=30, beta=1)    # divide the mono between DENV-1 and DENV-2
+    f_P = 0.2 # pm.Beta("f_P", alpha=10, beta=20)             # first division of cluster population happens based on amount in a cross-protected state
+    f_P2 = 1 # pm.Beta("f_P2", alpha=30, beta=1)            # fraction cross-protected after DENV-2 infection
+    pi_d = pt.as_tensor_variable(np.array([0.2, 0.8, 0])) #pm.Dirichlet("pi_d", a=10*[1, 8, 1])            # divide the non-cross-protected across naive, mono, double
+    pi_mono2 = 0.7 #pm.Beta("pi_mono2", alpha=30, beta=1)    # divide the mono between DENV-1 and DENV-2
     S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, f_P, pi_d, pi_mono2))
     P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, f_P2))
 
@@ -473,10 +473,9 @@ with pm.Model() as model:
     zgap_DENV4 = pm.Normal("zgap_DENV4", mu=-15, sigma=3, shape=n_clusters)
     z0 = pt.set_subtensor(pt.log(p0)[:, 3], pt.min(pt.log(p0)[:, :3], axis=1) + zgap_DENV4)
 
-
     # Parameters 
     ## fitness model
-    beta = pm.Lognormal("beta", mu=pt.log(0.1), sigma=0.2)
+    beta = pm.Lognormal("beta", mu=pt.log(1), sigma=0.1)
 
     ## average duration cross-protection
     omega = pm.Lognormal("omega", mu=2.45, sigma=1/3)
@@ -497,7 +496,7 @@ with pm.Model() as model:
 
     ## Total FOI (seasonal + AR(1); time x cluster)
     ### seasonal component
-    mu_lambda = pm.Normal("mu_lambda", mu=-3, sigma=1/3, shape=n_clusters)
+    mu_lambda = pm.Normal("mu_lambda", mu=-2, sigma=1/3, shape=n_clusters)
     A_lambda = pm.HalfNormal("A_lambda", sigma=1, shape=n_clusters)
     phi_lambda = pm.Normal("phi_lambda", mu=pt.pi/3, sigma=1, shape=n_clusters) # peaks March
     season = A_lambda[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_lambda[:, None])
@@ -509,7 +508,7 @@ with pm.Model() as model:
     u = pt.concatenate([ pt.zeros(n_clusters)[None, :], u_seq], axis=0)
     #### Combine
     log_lambda = mu_lambda[:, None] + season + u.T
-    lambda_t = pm.Deterministic("lambda_t", pt.exp(log_lambda).T)
+    lambda_t = pm.Deterministic("lambda_t", pt.exp(log_lambda).T/12)
 
     ## Residual (RW(1); time x cluster)
     sigma_residual = pm.HalfNormal("sigma_residual", sigma=0.0001)
@@ -595,7 +594,8 @@ with pm.Model() as model:
     ax[2].scatter(range(len(DENV_total[:,0])), DENV_total[:,0], color='black', alpha=0.6, s=5)
     ax[2].plot(D_obs.eval()[:,0], color='red')
     # force of infection
-    ax[3].plot(lambda_t.eval()[:,0], color='red')
+    ax[3].plot(lambda_t.eval()[:,0], color='black')
+    ax[3].axhline(np.mean(lambda_t.eval()[:,0]), color='red')
     plt.show()
     plt.close()
 
