@@ -512,8 +512,8 @@ with pm.Model() as model:
     lambda_t = pm.Deterministic("lambda_t", pt.exp(log_lambda).T)
 
     ## Residual (RW(1); time x cluster)
-    sigma_residual = pm.HalfNormal("sigma_residual", sigma=0.0001)
-    eta =  pm.Normal("eta", mu=0.0, sigma=sigma_residual, shape=(n_months-1, n_clusters, n_serotypes))  
+    #sigma_residual = pm.HalfNormal("sigma_residual", sigma=0.0001)
+    #eta =  pm.Normal("eta", mu=0.0, sigma=sigma_residual, shape=(n_months-1, n_clusters, n_serotypes))  
     eps0 = pt.zeros((n_clusters, n_serotypes))
     beta_f0 = pt.zeros((n_clusters, n_serotypes))
 
@@ -521,7 +521,7 @@ with pm.Model() as model:
     # (Logit) Replicator equation integrated using Euler's method with dt=1
     # ---------------------------------------------------------------------
 
-    def step(births_t, deaths_t, lambda_t, eta_t, intro_mask_t, S_prev, P_prev, z_prev, beta_f_prev, eps_prev, beta, omega):
+    def step(births_t, deaths_t, lambda_t, intro_mask_t, S_prev, P_prev, z_prev, beta_f_prev, eps_prev, beta, omega):
         
         p_prev = pm.math.softmax(z_prev, axis=1)                # reconstruct p
 
@@ -538,9 +538,9 @@ with pm.Model() as model:
         f_t = intro_mask_t * pt.log(S_serotype / pt.mean(S_serotype, axis=1, keepdims=True))
 
         # 4. RW(1) residual
-        eps_t = eps_prev + intro_mask_t * eta_t
+        eps_t = eps_prev #+ intro_mask_t * eta_t
 
-        # 5. Replicator update + residual
+        # 4. Replicator update + residual
         z_t = z_prev + beta * f_t + eps_t
 
         return S_t, P_t, z_t, beta*f_t, eps_t
@@ -552,7 +552,6 @@ with pm.Model() as model:
             pt.as_tensor_variable(births),
             pt.as_tensor_variable(death_rate),
             lambda_t,
-            eta,
             pt.as_tensor_variable(intro_mask)
         ],
         outputs_info=[S0, P0, z0, beta_f0, eps0], # start_year = 2001 means first datapoint = 2001-01-31 --> The state '0' is 2000-12-31
@@ -640,7 +639,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                 'zgap_DENV4', 'beta', 'kappa', 'kappa0_logit', 'or_cluster', 'or_12', 'or_serotype', 'pi_d', 'f_P', 'f_P2', 'pi_mono2', 'omega', 'mu_lambda', 'A_lambda', 'phi_lambda', 'rho_ar_lambda', 'sigma_ar_lambda', 'sigma_residual', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
+                 'zgap_DENV4', 'beta', 'kappa', 'kappa0_logit', 'or_cluster', 'or_12', 'or_serotype', 'pi_d', 'f_P', 'f_P2', 'pi_mono2', 'omega', 'mu_lambda', 'A_lambda', 'phi_lambda', 'rho_ar_lambda', 'sigma_ar_lambda', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 # Save traces
