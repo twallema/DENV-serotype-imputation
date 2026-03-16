@@ -31,4 +31,4 @@ pop['estimated_births'] = np.round(pop['population'] * pop['births_rel'], 0).ast
 pop['estimated_deaths'] = np.round(pop['population'] * pop['deaths_rel'], 0).astype(int)
 
 # format output
-output = pop[['CD_MUN', 'year', 'population', 'estimated_births', 'estimated_deaths']].to_csv('../interim/IBGE_population-projections/IBGE_births-deaths_mun-estimated.csv', index=False)
+output = pop[['CD_MUN', 'year', 'population', 'estimated_births', 'estimated_deaths']].to_csv('../interim/IBGE_population-projections/pop-births-deaths_mun_2001-2024.csv', index=False)

@@ -116,6 +116,7 @@ for fn,yr in zip(filenames, corresponding_years):
         # drop if date not present (very rare)
         df = df.dropna(subset=['date'])
         # filter out the discards (CON_CLASSI==5) but leave in the undocumented value '0' and inconclusive '8'
+        print(f"Discarded fraction: {len(df[df['CON_CLASSI'] == 5]) / len(df) * 100} %")
         df = df[df['CON_CLASSI'] != 5]
         # drop column 'UF'
         df = df.drop('UF', axis=1)
@@ -223,6 +224,7 @@ for fn,yr in zip(filenames, corresponding_years):
         #print(f'{yr}: Discarded status with serotype: {len(df[( ((df['CLASSI_FIN'] == '5') | (df['CLASSI_FIN'] == '8')) & (~df['SOROTIPO'].isna()))])} out of {len(df[~df['SOROTIPO'].isna()])} serotyped entries')  
         
         # filter out 'discarded' (CLASSI_FIN==5) but keep 'inconclusive' (CLASSI_FIN==8)
+        print(f"Discarded fraction: {len(df[df['CLASSI_FIN'] == 5]) / len(df) * 100} %")
         df = df[df['CLASSI_FIN'] != 5]
 
         # drop column 'UF'

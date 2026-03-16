@@ -16,7 +16,7 @@ pytensor.config.on_opt_error = "ignore"
 # analysis startdate
 start_year = 2001
 end_year = 2024
-assert start_year >= 2001, "demography data before 2001 is missing."
+assert start_year >= 1996, "earliest start_year is 1996."
 
 # helper function for argument parsing
 def str_to_bool(value):
@@ -68,7 +68,7 @@ mapping = mapping.merge(clusters[[region, 'cluster']], on=region, how='left')
 # Compute demography in start_year per cluster
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-demo = pd.read_csv(os.path.join(abs_dir, f'../../data/raw/sprint_2025/datasus_population_2001_2024.csv'))
+demo = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/IBGE_population-projections/pop-births-deaths_mun_1996-2024.csv'))
 demo = demo.rename(columns={'geocode': 'CD_MUN'})
 demo = demo.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
 demo = demo.groupby(['cluster', 'year'], as_index=False)['population'].sum()
@@ -76,9 +76,9 @@ demo = demo.groupby(['cluster', 'year'], as_index=False)['population'].sum()
 # Compute births and death rates per cluster
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-bd = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/IBGE_population-projections/IBGE_births-deaths_mun-estimated.csv'))
+bd = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/IBGE_population-projections/pop-births-deaths_mun_1996-2024.csv'))
 bd = bd.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
-bd = bd.groupby(['year', 'cluster'], as_index=False).agg(estimated_births=('estimated_births', 'sum'),estimated_deaths=('estimated_deaths', 'sum'),population=('population', 'sum'))
+bd = bd.groupby(['year', 'cluster'], as_index=False).agg(estimated_births=('estimated_births', 'sum'),estimated_deaths=('estimated_deaths', 'sum'), population=('population', 'sum'))
 
 # Adjacency matrix
 # ~~~~~~~~~~~~~~~~
@@ -577,6 +577,26 @@ with pm.Model() as model:
     infections = lambda_t[:, :, None, None] * p[:, :, None, :] * S_degree_serotype
     reported = infections * kappa[None, :, :, :]
     D_obs = pm.NegativeBinomial("D_obs", mu=pt.sum(reported, axis=(2, 3)), alpha=1/alpha_inv, observed=DENV_total)
+
+
+    S_star = get_susceptibles_serotype_time(S)
+    fig,ax=plt.subplots(nrows=3)
+    # serotype proportions
+    ax[0].plot(p.eval()[:,0,0], color='black')
+    ax[0].plot(p.eval()[:,0,1], color='red')
+    ax[0].plot(p.eval()[:,0,2], color='green')
+    ax[0].plot(p.eval()[:,0,3], color='blue')
+    # susceptibles
+    ax[1].plot(S_star.eval()[:,0,0], color='black')
+    ax[1].plot(S_star.eval()[:,0,1], color='red')
+    ax[1].plot(S_star.eval()[:,0,2], color='green')
+    ax[1].plot(S_star.eval()[:,0,3], color='blue')
+    # observed cases
+    ax[2].scatter(range(len(DENV_total[:,0])), DENV_total[:,0], color='black', alpha=0.6, s=5)
+    ax[2].plot(D_obs.eval()[:,0], color='red')
+    plt.show()
+    plt.close()
+
 
     # Observed serotyped cases
     ## Hierarchical overdispersion (per cluster)
