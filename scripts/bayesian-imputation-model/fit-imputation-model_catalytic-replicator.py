@@ -14,7 +14,7 @@ pytensor.config.cxx = '/usr/bin/clang++'
 pytensor.config.on_opt_error = "ignore"
 
 # analysis startdate
-start_year = 2001
+start_year = 1999
 end_year = 2024
 assert start_year >= 1996, "earliest start_year is 1996."
 
@@ -479,13 +479,13 @@ with pm.Model() as model:
     beta = pm.Lognormal("beta", mu=pt.log(0.1), sigma=0.2)
 
     ## average duration cross-protection
-    omega = pm.Lognormal("omega", mu=1.65, sigma=0.5)
+    omega = pm.Lognormal("omega", mu=2.45, sigma=1/3)
 
     ## reported fraction (cluster x degree x serotype)
     kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1.0)             # intercept
     is_12 = pt.as_tensor([1, 1, 0, 0])                                                      # indicator of prim./sec. infection
     log_or_12 = pm.Normal("log_or_12", mu=0.0, sigma=1/3)                                   # OR detecting prim./sec. heterologous infection (vs. tert, quart)
-    log_or_serotype = pm.Normal("log_or_serotype", mu=0.0, sigma=1.0, shape=n_serotypes-1)  # OR detecting serotypes (vs. DENV-1)
+    log_or_serotype = pm.Normal("log_or_serotype", mu=[0, -2, 0], sigma=1.0, shape=n_serotypes-1)  # OR detecting serotypes (vs. DENV-1)
     log_or_serotype_full = pt.concatenate([pt.zeros(1), log_or_serotype])
     log_or_cluster = pm.Normal("log_or_cluster", mu=0.0, sigma=1.0, shape=n_clusters-1)     # OR detecting in a cluster (vs. cluster 1)
     log_or_cluster_full = pt.concatenate([pt.zeros(1), log_or_cluster])                     
@@ -580,7 +580,7 @@ with pm.Model() as model:
 
 
     S_star = get_susceptibles_serotype_time(S)
-    fig,ax=plt.subplots(nrows=3)
+    fig,ax=plt.subplots(nrows=4)
     # serotype proportions
     ax[0].plot(p.eval()[:,0,0], color='black')
     ax[0].plot(p.eval()[:,0,1], color='red')
@@ -594,6 +594,8 @@ with pm.Model() as model:
     # observed cases
     ax[2].scatter(range(len(DENV_total[:,0])), DENV_total[:,0], color='black', alpha=0.6, s=5)
     ax[2].plot(D_obs.eval()[:,0], color='red')
+    # force of infection
+    ax[3].plot(lambda_t.eval()[:,0], color='red')
     plt.show()
     plt.close()
 

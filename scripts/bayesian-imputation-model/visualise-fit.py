@@ -8,7 +8,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 
 # analysis startdate
-start_year = 2001
+start_year = 1999
 end_year = 2024
 assert start_year >= 1996, "earliest start_year is 1996."
 
