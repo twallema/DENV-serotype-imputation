@@ -358,15 +358,15 @@ D_upper = D_upper.set_index(['cluster','date'])
 # Get total FOI
 ## Mean
 FOI_mean = df[['cluster','date']]
-FOI_mean['FOI'] = trace['posterior']['lambda_t'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters))
+FOI_mean['FOI'] = trace['posterior']['lambda_t'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters)) * 12
 FOI_mean = FOI_mean.set_index(['cluster','date'])
 ## Lower
 FOI_lower = df[['cluster','date']]
-FOI_lower['FOI'] = trace['posterior']['lambda_t'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months*n_clusters))
+FOI_lower['FOI'] = trace['posterior']['lambda_t'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months*n_clusters)) * 12
 FOI_lower = FOI_lower.set_index(['cluster','date'])
 ## Upper
 FOI_upper = df[['cluster','date']]
-FOI_upper['FOI'] = trace['posterior']['lambda_t'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters))
+FOI_upper['FOI'] = trace['posterior']['lambda_t'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters)) * 12
 FOI_upper = FOI_upper.set_index(['cluster','date'])
 
 # Get z trajectory

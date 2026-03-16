@@ -493,8 +493,8 @@ with pm.Model() as model:
 
     ## Fixed components of the FOI: transmission coefficient beta (seasonal + AR(1); time x cluster)
     ### seasonal component
-    mu_beta = 0 * pt.ones(n_clusters) # pm.Normal("mu_beta", mu=0, sigma=1/3, shape=n_clusters)
-    A_beta = pt.ones(n_clusters) # pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
+    mu_beta = -1 * pt.ones(n_clusters) # pm.Normal("mu_beta", mu=0, sigma=1/3, shape=n_clusters)
+    A_beta = 1 * pt.ones(n_clusters) # pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
     phi_beta = pm.Normal("phi_beta", mu=pt.pi/3, sigma=1, shape=n_clusters) # peaks March
     season = A_beta[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_beta[:, None])
     ### AR(1) component (non-centered)
@@ -508,17 +508,12 @@ with pm.Model() as model:
 
     fig,ax=plt.subplots()
     ax.plot(beta_t.eval())
+    ax.axhline(np.mean(beta_t.eval()))
     plt.show()
     plt.close()
 
     ### Initial condition for the number of infected
     I0 = DENV_total[0,:][:, None] * p0.values / kappa
-
-    print((pt.sum(S0, axis=1) + pt.sum(P0, axis=1)).eval())
-
-    print(demo)
-    import sys
-    sys.exit()
 
     # ---------------------------------------------------------------------
     # (Logit) Replicator equation integrated using Euler's method with dt=1
@@ -529,7 +524,7 @@ with pm.Model() as model:
         # 1. Compute infections and FOI
         pop = pt.sum(S_prev, axis=1) + pt.sum(P_prev, axis=1)               # compute population per cluster      
         S_serotype_prev = get_susceptibles_serotype(S_prev)                 # reconstruct S_{t-1}
-        I_t = beta_t[:,None] * S_serotype_prev * (I_prev / pop[:, None])    # update infections
+        I_t = beta_t[:,None] * S_serotype_prev * (pt.sum(I_prev, axis=1) / pop)[:, None]    # update infections
         lambda_t = pt.sum(I_t, axis=1) / pop                                # update FOI
 
         # 2. Update the catalytic model
