@@ -203,7 +203,7 @@ p0['DENV_4'] = 0
 p0 = p0.div(p0.sum(axis=1), axis=0)
 
 # Rolling-window version for seeding
-window = 12
+window = 3
 # Aggregate by month and cluster
 df_monthly = df.groupby(['date', 'cluster'])[cols].sum().reset_index()
 # Get sorted list of clusters and months
@@ -510,7 +510,7 @@ with pm.Model() as model:
     ## initial susceptible and cross-protected states (cluster x state_idx)
     f_P = 0.2 # pm.Beta("f_P", alpha=10, beta=20)               # first division of cluster population happens based on amount in a cross-protected state
     f_P2 = 0.75 # pm.Beta("f_P2", alpha=30, beta=1)                # fraction cross-protected after DENV-2 infection
-    pi_d = pt.as_tensor_variable(np.array([0.1, 0.4, 0.4]))       #pm.Dirichlet("pi_d", a=10*[1, 8, 1])            # divide the non-cross-protected across naive, mono, double
+    pi_d = pt.as_tensor_variable(np.array([0.2, 0.6, 0.2]))       #pm.Dirichlet("pi_d", a=10*[1, 8, 1])            # divide the non-cross-protected across naive, mono, double
     pi_mono2 = 0.75 #pm.Beta("pi_mono2", alpha=30, beta=1)       # divide the mono between DENV-1 and DENV-2
     S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, f_P, pi_d, pi_mono2))
     P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, f_P2))
@@ -518,7 +518,7 @@ with pm.Model() as model:
     # Parameters 
 
     ## average duration cross-protection
-    omega = 12 #pm.Lognormal("omega", mu=2.45, sigma=1/3)
+    omega = pm.Lognormal("omega", mu=2.45, sigma=1/3)
 
     ## reported fraction (cluster x degree x serotype)
     kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1.0)             # intercept
@@ -533,7 +533,7 @@ with pm.Model() as model:
 
     ## Fixed components of the FOI: transmission coefficient beta (seasonal + AR(1); time x cluster)
     ### seasonal component
-    mu_beta = np.log(1) * pt.ones(n_clusters) # pm.Normal("mu_beta", mu=0.3, sigma=1/3, shape=n_clusters)
+    mu_beta = np.log(0.8) * pt.ones(n_clusters) # pm.Normal("mu_beta", mu=0.3, sigma=1/3, shape=n_clusters)
     A_beta = 1 * pt.ones(n_clusters) # pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
     phi_beta = pt.pi/3 * pt.ones(n_clusters) # pm.Normal("phi_beta", mu=pt.pi/4, sigma=1, shape=n_clusters) # peaks March
     season = A_beta[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_beta[:, None])
@@ -563,7 +563,7 @@ with pm.Model() as model:
         
         # 1. Compute FOI per serotype
         pop_prev = pt.sum(S_prev, axis=1) + pt.sum(P_prev, axis=1)                          # compute population per cluster      
-        lambda_s_prev = beta_t[:, None] * (I_prev / pop_prev[:, None])                      # compute FOI per serotype
+        lambda_s_prev = 0.1 * pt.tanh(beta_t[:, None] * (I_prev / pop_prev[:, None]) / 0.1)                      # compute FOI per serotype
 
         # 2. Update the catalytic model
         S_t = update_susceptibles(S_prev, P_prev, lambda_s_prev, births_t, deaths_t, omega)
@@ -597,7 +597,7 @@ with pm.Model() as model:
     P = pm.Deterministic("P", P_seq)
 
     # compute FOI trajectory
-    lambda_t = pm.Deterministic("lambda_t", beta_t * pt.sum(I_new, axis=2) / (pt.sum(S, axis=2) + pt.sum(P, axis=2)))
+    lambda_t = pm.Deterministic("lambda_t", 0.1 * pt.tanh(beta_t * pt.sum(I, axis=2) / (pt.sum(S, axis=2) + pt.sum(P, axis=2)) / 0.1))
 
     # compute serotype proportions
     p = pm.Deterministic("p", I_new / pt.sum(I_new, axis=2, keepdims=True))
@@ -639,7 +639,7 @@ with pm.Model() as model:
     d_cluster_hierarch = pm.HalfNormal("d_cluster_hierarch", sigma=1/3)    # --> phi ~ 1000 --> low overdispersion
     d_cluster = pm.HalfNormal("d_cluster", sigma=d_cluster_hierarch, shape=n_clusters)
     phi = pm.Deterministic("phi", pt.repeat((1.0 / pm.math.maximum(d_cluster, 1e-12))[None, :], n_months, axis=0))
-    reported_serotype = p * I[:, :, None] * kappa[None, :, :]
+    reported_serotype = I * kappa
     p_detect = reported_serotype / pt.sum(reported_serotype, axis=2, keepdims=True)
     alpha = phi[:, :, None] * p_detect
     VIF = pm.Deterministic("VIF", (N_typed + phi) / (1 + phi)) # variance inflation of dirichlet multinomial compared to multinomial
