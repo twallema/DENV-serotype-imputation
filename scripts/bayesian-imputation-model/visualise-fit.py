@@ -8,7 +8,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 
 # analysis startdate
-start_year = 2001
+start_year = 1999
 end_year = 2024
 assert start_year >= 1996, "earliest start_year is 1996."
 
@@ -383,33 +383,33 @@ z_upper = df[['cluster','date']]
 z_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['z'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
 z_upper = z_upper.set_index(['cluster','date'])
 
-# Get beta_f trajectory
-## Mean
-beta_f_mean = df[['cluster','date']]
-beta_f_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['beta_f'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters, n_serotypes))
-beta_f_mean = beta_f_mean.set_index(['cluster','date'])
-## Lower
-beta_f_lower = df[['cluster','date']]
-beta_f_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['beta_f'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
-beta_f_lower = beta_f_lower.set_index(['cluster','date'])
-## Upper
-beta_f_upper = df[['cluster','date']]
-beta_f_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['beta_f'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
-beta_f_upper = beta_f_upper.set_index(['cluster','date'])
+# # Get beta_f trajectory
+# ## Mean
+# beta_f_mean = df[['cluster','date']]
+# beta_f_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['beta_f'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters, n_serotypes))
+# beta_f_mean = beta_f_mean.set_index(['cluster','date'])
+# ## Lower
+# beta_f_lower = df[['cluster','date']]
+# beta_f_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['beta_f'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
+# beta_f_lower = beta_f_lower.set_index(['cluster','date'])
+# ## Upper
+# beta_f_upper = df[['cluster','date']]
+# beta_f_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['beta_f'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
+# beta_f_upper = beta_f_upper.set_index(['cluster','date'])
 
-# Get residual trajectory
-## Mean
-eps_mean = df[['cluster','date']]
-eps_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['eps'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters, n_serotypes))
-eps_mean = eps_mean.set_index(['cluster','date'])
-## Lower
-eps_lower = df[['cluster','date']]
-eps_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['eps'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
-eps_lower = eps_lower.set_index(['cluster','date'])
-## Upper
-eps_upper = df[['cluster','date']]
-eps_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['eps'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
-eps_upper = eps_upper.set_index(['cluster','date'])
+# # Get residual trajectory
+# ## Mean
+# eps_mean = df[['cluster','date']]
+# eps_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['eps'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters, n_serotypes))
+# eps_mean = eps_mean.set_index(['cluster','date'])
+# ## Lower
+# eps_lower = df[['cluster','date']]
+# eps_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['eps'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
+# eps_lower = eps_lower.set_index(['cluster','date'])
+# ## Upper
+# eps_upper = df[['cluster','date']]
+# eps_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['eps'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters, n_serotypes))
+# eps_upper = eps_upper.set_index(['cluster','date'])
 
 # Get overdispersion
 ## Mean
@@ -515,31 +515,31 @@ for cluster in df['cluster'].unique().tolist():
     )
     ax[9].set_ylabel('Susc. degree (%)', fontsize=7)
 
-    # 8: beta * f_i
-    # Filter data for a single UF
-    df_star_mean = beta_f_mean.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
-    df_star_lower = beta_f_lower.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
-    df_star_upper = beta_f_upper.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
-    # Plot
-    colors = ['black', 'red', 'green', 'blue']
-    for i in range(1,5):
-        ax[10].plot(df_star_mean.index, df_star_mean[f'DENV_{i}'], label='1', color=colors[i-1], alpha=1)
-        ax[10].fill_between(df_star_mean.index, df_star_lower[f'DENV_{i}'], df_star_upper[f'DENV_{i}'], label=f'{i}', color=colors[i-1], alpha=0.1)
-        ax[10].set_ylim([-0.2,0.2])
-    ax[10].set_ylabel('beta * f_i (-)', fontsize=7)
+    # # 8: beta * f_i
+    # # Filter data for a single UF
+    # df_star_mean = beta_f_mean.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    # df_star_lower = beta_f_lower.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    # df_star_upper = beta_f_upper.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    # # Plot
+    # colors = ['black', 'red', 'green', 'blue']
+    # for i in range(1,5):
+    #     ax[10].plot(df_star_mean.index, df_star_mean[f'DENV_{i}'], label='1', color=colors[i-1], alpha=1)
+    #     ax[10].fill_between(df_star_mean.index, df_star_lower[f'DENV_{i}'], df_star_upper[f'DENV_{i}'], label=f'{i}', color=colors[i-1], alpha=0.1)
+    #     ax[10].set_ylim([-0.2,0.2])
+    # ax[10].set_ylabel('beta * f_i (-)', fontsize=7)
 
-    # 9: residual
-    # Filter data for a single UF
-    df_star_mean = eps_mean.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
-    df_star_lower = eps_lower.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
-    df_star_upper = eps_upper.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
-    # Plot
-    colors = ['black', 'red', 'green', 'blue']
-    for i in range(1,5):
-        ax[11].plot(df_star_mean.index, df_star_mean[f'DENV_{i}'], label='1', color=colors[i-1], alpha=1)
-        ax[11].fill_between(df_star_mean.index, df_star_lower[f'DENV_{i}'], df_star_upper[f'DENV_{i}'], label=f'{i}', color=colors[i-1], alpha=0.1)
-        ax[11].set_ylim([-0.2,0.2])
-    ax[11].set_ylabel('Residual (-)', fontsize=7)
+    # # 9: residual
+    # # Filter data for a single UF
+    # df_star_mean = eps_mean.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    # df_star_lower = eps_lower.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    # df_star_upper = eps_upper.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    # # Plot
+    # colors = ['black', 'red', 'green', 'blue']
+    # for i in range(1,5):
+    #     ax[11].plot(df_star_mean.index, df_star_mean[f'DENV_{i}'], label='1', color=colors[i-1], alpha=1)
+    #     ax[11].fill_between(df_star_mean.index, df_star_lower[f'DENV_{i}'], df_star_upper[f'DENV_{i}'], label=f'{i}', color=colors[i-1], alpha=0.1)
+    #     ax[11].set_ylim([-0.2,0.2])
+    # ax[11].set_ylabel('Residual (-)', fontsize=7)
 
     # 10: z
     # Filter data for a single UF
