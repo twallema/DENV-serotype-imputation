@@ -203,7 +203,7 @@ p0['DENV_4'] = 0
 p0 = p0.div(p0.sum(axis=1), axis=0)
 
 # Rolling-window version for seeding
-window = 3
+window = 12
 # Aggregate by month and cluster
 df_monthly = df.groupby(['date', 'cluster'])[cols].sum().reset_index()
 # Get sorted list of clusters and months
@@ -321,6 +321,56 @@ def compute_new_infections_per_serotype(S, lambd):
     col3 = lambd[:, 3] * pt.sum(S[:, (0, 1, 2, 3, 5, 6, 8, 14)], axis=1)  # DENV 4
 
     return pt.stack([col0, col1, col2, col3], axis=1)
+
+def compute_new_infections_per_degree_serotype(S, lambd):
+    """
+    input
+    -----
+
+    S: TensorVariable
+        shape: (n_clusters, state_idx)
+    
+    lambd(a): TensorVariable
+        shape: (n_clusters,)
+
+    p: TensorVariable
+        shape: (n_clusters, n_infection_degrees, n_serotypes)
+    """
+
+    # ---- degree 0 (naive) ----
+    deg0 = pt.stack([
+        lambd[:, 0] * S[:, 0],
+        lambd[:, 1] * S[:, 0],
+        lambd[:, 2] * S[:, 0],
+        lambd[:, 3] * S[:, 0],
+                    ], axis=-1)
+
+    # ---- degree 1 ----
+    deg1 = pt.stack([
+        lambd[:, 0] * pt.sum(S[:, (2,3,4)], axis=1),
+        lambd[:, 1] * pt.sum(S[:, (1,3,4)], axis=1),
+        lambd[:, 2] * pt.sum(S[:, (1,2,4)], axis=1),
+        lambd[:, 3] * pt.sum(S[:, (1,2,3)], axis=1),
+    ], axis=-1)
+
+    # ---- degree 2 ----
+    deg2 = pt.stack([
+        lambd[:, 0] * pt.sum(S[:, (8,9,10)], axis=1),   
+        lambd[:, 1] * pt.sum(S[:, (6,7,10)], axis=1),   
+        lambd[:, 2] * pt.sum(S[:, (5,7,9)], axis=1),    
+        lambd[:, 3] * pt.sum(S[:, (5,6,8)], axis=1),   
+    ], axis=-1)
+
+    # ---- degree 3 ----
+    deg3 = pt.stack([
+        lambd[:, 0] * S[:, 11],
+        lambd[:, 1] * S[:, 12],
+        lambd[:, 2] * S[:, 13],
+        lambd[:, 3] * S[:, 14],
+    ], axis=-1)
+
+    return pt.stack([deg0, deg1, deg2, deg3], axis=1)
+
 
 def update_cross_protection(S, P, lambd, deaths, omega):
     """See `update_susceptibles` """
@@ -509,8 +559,8 @@ with pm.Model() as model:
     # initial states
     ## initial susceptible and cross-protected states (cluster x state_idx)
     f_P = 0.2 # pm.Beta("f_P", alpha=10, beta=20)               # first division of cluster population happens based on amount in a cross-protected state
-    f_P2 = 0.75 # pm.Beta("f_P2", alpha=30, beta=1)                # fraction cross-protected after DENV-2 infection
-    pi_d = pt.as_tensor_variable(np.array([0.2, 0.6, 0.2]))       #pm.Dirichlet("pi_d", a=10*[1, 8, 1])            # divide the non-cross-protected across naive, mono, double
+    f_P2 = 1 # pm.Beta("f_P2", alpha=30, beta=1)                # fraction cross-protected after DENV-2 infection
+    pi_d = pt.as_tensor_variable(np.array([0.2, 0.4, 0.4]))       #pm.Dirichlet("pi_d", a=10*[1, 8, 1])            # divide the non-cross-protected across naive, mono, double
     pi_mono2 = 0.75 #pm.Beta("pi_mono2", alpha=30, beta=1)       # divide the mono between DENV-1 and DENV-2
     S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, f_P, pi_d, pi_mono2))
     P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, f_P2))
@@ -518,28 +568,31 @@ with pm.Model() as model:
     # Parameters 
 
     ## average duration cross-protection
-    omega = pm.Lognormal("omega", mu=2.45, sigma=1/3)
+    omega = 60 # pm.Lognormal("omega", mu=2.45, sigma=1/3)
 
     ## reported fraction (cluster x degree x serotype)
-    kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1.0)             # intercept
-    log_or_serotype = pm.Normal("log_or_serotype", mu=[0, 0, 0], sigma=1.0/3, shape=n_serotypes-1)  # OR detecting serotypes (vs. DENV-1)
+    kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1.0)                 # intercept
+    is_34 = pt.as_tensor([0,0,1,1])                                                             # indicator prim/sec versus tert/quart
+    log_or_34 = pm.Normal("log_or_34", mu=-1, sigma=1/3)                                         # OR detecting prim/sec versus tert/quart
+    log_or_serotype = pm.Normal("log_or_serotype", mu=0.0, sigma=1.0/3, shape=n_serotypes-1)    # OR detecting serotypes (vs. DENV-1)
     log_or_serotype_full = pt.concatenate([pt.zeros(1), log_or_serotype])
-    log_or_cluster = pm.Normal("log_or_cluster", mu=0.0, sigma=1.0, shape=n_clusters-1)     # OR detecting in a cluster (vs. cluster 1)
+    log_or_cluster = pm.Normal("log_or_cluster", mu=0.0, sigma=1.0, shape=n_clusters-1)         # OR detecting in a cluster (vs. cluster 1)
     log_or_cluster_full = pt.concatenate([pt.zeros(1), log_or_cluster])                     
-    logit_kappa = (kappa0_logit + log_or_cluster_full[:, None] + log_or_serotype_full[None, :])
+    logit_kappa = kappa0_logit + log_or_cluster_full[:, None, None] + log_or_34*is_34[None, :, None] + log_or_serotype_full[None, None, :]
     kappa = pm.Deterministic("kappa", pm.math.sigmoid(logit_kappa))
+    or_34 = pm.Deterministic("or_34", pt.exp(log_or_34))
     or_cluster = pm.Deterministic("or_cluster", pt.exp(log_or_cluster_full))
     or_serotype = pm.Deterministic("or_serotype", pt.exp(log_or_serotype_full))
 
     ## Fixed components of the FOI: transmission coefficient beta (seasonal + AR(1); time x cluster)
     ### seasonal component
-    mu_beta = np.log(0.8) * pt.ones(n_clusters) # pm.Normal("mu_beta", mu=0.3, sigma=1/3, shape=n_clusters)
+    mu_beta = np.log(0.7) * pt.ones(n_clusters) # pm.Normal("mu_beta", mu=0.3, sigma=1/3, shape=n_clusters)
     A_beta = 1 * pt.ones(n_clusters) # pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
     phi_beta = pt.pi/3 * pt.ones(n_clusters) # pm.Normal("phi_beta", mu=pt.pi/4, sigma=1, shape=n_clusters) # peaks March
     season = A_beta[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_beta[:, None])
     ### AR(1) component (non-centered)
     rho_ar_beta = pm.Beta("rho_ar_beta", alpha=1, beta=2)                 # persistence
-    sigma_ar_beta = pm.HalfNormal("sigma_ar_beta", sigma=1/5)             # freedom
+    sigma_ar_beta = pm.HalfNormal("sigma_ar_beta", sigma=1/3)             # freedom
     eps_raw = pm.Normal("eps_raw", mu=0, sigma=1, shape=(n_months, n_clusters))
     u_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_raw[1:], outputs_info=pt.zeros(n_clusters), non_sequences=[rho_ar_beta, sigma_ar_beta])
     u = pt.concatenate([ pt.zeros(n_clusters)[None, :], u_seq], axis=0)
@@ -553,7 +606,7 @@ with pm.Model() as model:
     # plt.close()
 
     ### Initial condition for the number of infected
-    I0 = DENV_total[0,:][:, None] * p0.values / kappa
+    I0 = (DENV_total[0,:][:, None] * p0.values / kappa[:, 0, :])[:, None, :] * pt.as_tensor([pi_d[0] / (pi_d[0] + pi_d[1]), pi_d[1] / (pi_d[0] + pi_d[1]), 0, 0])[None, :, None]  # in 1999, all are prim/sec
 
     # ---------------------------------------------------------------------
     # (Logit) Replicator equation integrated using Euler's method with dt=1
@@ -562,16 +615,16 @@ with pm.Model() as model:
     def step(births_t, deaths_t, beta_t, intro_mask_t, estimated_prop_t, S_prev, I_new_prev, I_prev, P_prev, omega):
         
         # 1. Compute FOI per serotype
-        pop_prev = pt.sum(S_prev, axis=1) + pt.sum(P_prev, axis=1)                          # compute population per cluster      
-        lambda_s_prev = 0.1 * pt.tanh(beta_t[:, None] * (I_prev / pop_prev[:, None]) / 0.1)                      # compute FOI per serotype
+        pop_prev = pt.sum(S_prev, axis=1) + pt.sum(P_prev, axis=1)          # + I?                # compute population per cluster      
+        lambda_s_prev = beta_t[:, None] * (pt.sum(I_prev, axis=1) / pop_prev[:, None])     # compute FOI per serotype
 
         # 2. Update the catalytic model
         S_t = update_susceptibles(S_prev, P_prev, lambda_s_prev, births_t, deaths_t, omega)
         P_t = update_cross_protection(S_prev, P_prev, lambda_s_prev, deaths_t, omega)
 
         # 3. Update the infectious state
-        I_new_t = compute_new_infections_per_serotype(S_prev, lambda_s_prev)
-        I_new_t = I_new_t + 1e-5 * (pt.sum(S_prev, axis=1) + pt.sum(P_prev, axis=1))[:, None] * intro_mask_t[None, :] * estimated_prop_t
+        I_new_t = compute_new_infections_per_degree_serotype(S_prev, lambda_s_prev)
+        I_new_t = I_new_t + 1e-5 * (pt.sum(S_prev, axis=1) + pt.sum(P_prev, axis=1))[:, None, None] * intro_mask_t[None, None, :] * estimated_prop_t[:, None, :]
         I_t = (1 - 1/2) * I_prev + I_new_t
 
         return S_t, I_new_t, I_t, P_t
@@ -596,14 +649,15 @@ with pm.Model() as model:
     I = pm.Deterministic("I_seq", I_seq)
     P = pm.Deterministic("P", P_seq)
 
-    # compute FOI trajectory
-    lambda_t = pm.Deterministic("lambda_t", 0.1 * pt.tanh(beta_t * pt.sum(I, axis=2) / (pt.sum(S, axis=2) + pt.sum(P, axis=2)) / 0.1))
 
-    # compute serotype proportions
-    p = pm.Deterministic("p", I_new / pt.sum(I_new, axis=2, keepdims=True))
+    # compute FOI trajectory
+    lambda_t = pm.Deterministic("lambda_t", beta_t * pt.sum(I, axis=(2,3)) / (pt.sum(S, axis=2) + pt.sum(P, axis=2)))
+
+    # compute proportions
+    p = pm.Deterministic("p", (pt.sum(I_new, axis=2) / pt.sum(I_new, axis=(2,3))[:, :, None]))
 
     # compute reported number of cases
-    reported = pt.sum(I_new * kappa, axis=2)
+    reported = pt.sum(I_new * kappa, axis=(2,3))
 
     # -----------
     # Observation
