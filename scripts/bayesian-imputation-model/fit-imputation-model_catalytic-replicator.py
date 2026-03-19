@@ -568,7 +568,7 @@ with pm.Model() as model:
     # Parameters 
 
     ## average duration cross-protection
-    omega = 60 # pm.Lognormal("omega", mu=2.45, sigma=1/3)
+    omega = 18 # pm.Lognormal("omega", mu=2.45, sigma=1/3)
 
     ## reported fraction (cluster x degree x serotype)
     kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1.0)                 # intercept
