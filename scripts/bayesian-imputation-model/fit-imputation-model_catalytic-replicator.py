@@ -300,28 +300,6 @@ def update_susceptibles(S, P, lambd, births, deaths, omega):
 
     return  pt.stack([col0, col1, col2, col3, col4, col5, col6, col7, col8, col9, col10, col11, col12, col13, col14, col15], axis=1)
 
-def compute_new_infections_per_serotype(S, lambd):
-    """
-    input
-    -----
-
-    S: TensorVariable
-        shape: (n_clusters, state_idx)
-    
-    lambd(a): TensorVariable
-        shape: (n_clusters,)
-
-    p: TensorVariable
-        shape: (n_clusters, n_serotypes)
-    """
-
-    col0 = lambd[:, 0] * pt.sum(S[:, (0, 2, 3, 4, 8, 9, 10, 11)], axis=1)  # DENV 1
-    col1 = lambd[:, 1] * pt.sum(S[:, (0, 1, 3, 4, 6, 7, 10, 12)], axis=1)  # DENV 2
-    col2 = lambd[:, 2] * pt.sum(S[:, (0, 1, 2, 4, 5, 7, 9, 13)], axis=1)  # DENV 3
-    col3 = lambd[:, 3] * pt.sum(S[:, (0, 1, 2, 3, 5, 6, 8, 14)], axis=1)  # DENV 4
-
-    return pt.stack([col0, col1, col2, col3], axis=1)
-
 def compute_new_infections_per_degree_serotype(S, lambd):
     """
     input
@@ -568,7 +546,7 @@ with pm.Model() as model:
     # Parameters 
 
     ## average duration cross-protection
-    omega = 18 # pm.Lognormal("omega", mu=2.45, sigma=1/3)
+    omega = 6 # pm.Lognormal("omega", mu=2.45, sigma=1/3)
 
     ## reported fraction (cluster x degree x serotype)
     kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1.0)                 # intercept
@@ -586,8 +564,8 @@ with pm.Model() as model:
 
     ## Fixed components of the FOI: transmission coefficient beta (seasonal + AR(1); time x cluster)
     ### seasonal component
-    mu_beta = np.log(0.7) * pt.ones(n_clusters) # pm.Normal("mu_beta", mu=0.3, sigma=1/3, shape=n_clusters)
-    A_beta = 1 * pt.ones(n_clusters) # pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
+    mu_beta = np.log(1) * pt.ones(n_clusters) # pm.Normal("mu_beta", mu=0.3, sigma=1/3, shape=n_clusters)
+    A_beta = 0.3 * pt.ones(n_clusters) # pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
     phi_beta = pt.pi/3 * pt.ones(n_clusters) # pm.Normal("phi_beta", mu=pt.pi/4, sigma=1, shape=n_clusters) # peaks March
     season = A_beta[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_beta[:, None])
     ### AR(1) component (non-centered)
@@ -599,12 +577,6 @@ with pm.Model() as model:
     #### Combine
     beta_t = pm.Deterministic("beta_t", pt.exp(mu_beta[:, None] + season).T) #+ u.T
 
-    # fig,ax=plt.subplots()
-    # ax.plot(beta_t.eval())
-    # ax.axhline(np.mean(beta_t.eval()))
-    # plt.show()
-    # plt.close()
-
     ### Initial condition for the number of infected
     I0 = (DENV_total[0,:][:, None] * p0.values / kappa[:, 0, :])[:, None, :] * pt.as_tensor([pi_d[0] / (pi_d[0] + pi_d[1]), pi_d[1] / (pi_d[0] + pi_d[1]), 0, 0])[None, :, None]  # in 1999, all are prim/sec
 
@@ -612,11 +584,13 @@ with pm.Model() as model:
     # (Logit) Replicator equation integrated using Euler's method with dt=1
     # ---------------------------------------------------------------------
 
-    def step(births_t, deaths_t, beta_t, intro_mask_t, estimated_prop_t, S_prev, I_new_prev, I_prev, P_prev, omega):
+    beta_sero = pm.Deterministic("beta_sero", pt.as_tensor_variable(np.array([2, 1, 1, 1])))
+
+    def step(births_t, deaths_t, beta_t, intro_mask_t, estimated_prop_t, S_prev, I_new_prev, I_prev, P_prev, omega, beta_sero):
         
         # 1. Compute FOI per serotype
         pop_prev = pt.sum(S_prev, axis=1) + pt.sum(P_prev, axis=1)          # + I?                # compute population per cluster      
-        lambda_s_prev = beta_t[:, None] * (pt.sum(I_prev, axis=1) / pop_prev[:, None])     # compute FOI per serotype
+        lambda_s_prev = beta_sero[None, :] * beta_t[:, None] * (pt.sum(I_prev, axis=1) / pop_prev[:, None])     # compute FOI per serotype
 
         # 2. Update the catalytic model
         S_t = update_susceptibles(S_prev, P_prev, lambda_s_prev, births_t, deaths_t, omega)
@@ -640,7 +614,7 @@ with pm.Model() as model:
             pt.as_tensor_variable(estimated_proportions),
         ],
         outputs_info=[S0, I0, I0, P0], # start_year = 2001 means first datapoint = 2001-01-31 --> The state '0' is 2000-12-31
-        non_sequences=[omega, ],
+        non_sequences=[omega, beta_sero],
     )
 
     # attach initial states
@@ -667,6 +641,7 @@ with pm.Model() as model:
     alpha_inv = pm.HalfNormal("alpha_inv", sigma=1/10)
     D_obs = pm.NegativeBinomial("D_obs", mu=reported, alpha=1/alpha_inv, observed=DENV_total)
 
+
     S_star = get_susceptibles_serotype_time(S)
     fig,ax=plt.subplots(nrows=4)
     # serotype proportions
@@ -687,6 +662,7 @@ with pm.Model() as model:
     ax[3].axhline(np.mean(lambda_t.eval()[:,0]), color='red')
     plt.show()
     plt.close()
+
 
     # Observed serotyped cases
     ## Hierarchical overdispersion (per cluster)
