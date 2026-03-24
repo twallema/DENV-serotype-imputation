@@ -279,22 +279,17 @@ birth_vec_t = pt.constant(birth_vec)
 ## Bayesian imputation model ##
 ###############################
 
-
-from pytensor import printing as pyp
-
-def step(S_t, I_t, P_t,
-         beta_t, births_t, deaths_t,
+def step(beta_t, births_t, deaths_t,
+         S_t, I_t, P_t,
          C, W, H_het, H_hom,
          sero_idx, het_idx, hom_idx,
-         f_per_I, gamma, omega, birth_vec):
+         f, f_per_I, gamma, omega, birth_vec):
 
     # --- Total population ---
-    pyp.Print("S_t")
-
     N_t = pt.sum(S_t, axis=1) + pt.sum(I_t, axis=1) + pt.sum(P_t, axis=1)
     
     # --- FOI ---
-    lambda_t = beta_t * (I_t @ C) / N_t[:, None]   # (clusters, serotypes)
+    lambda_t = beta_t[:, None] * (I_t @ C) / N_t[:, None]   # (clusters, serotypes)
     # TODO: add seeding here
 
     # --- Susceptibles ---
@@ -451,7 +446,7 @@ with pm.Model() as model:
     ## Fixed components of the FOI: transmission coefficient beta (seasonal + AR(1); time x cluster)
     ### seasonal component
     mu_beta = np.log(1) * pt.ones(n_clusters) # pm.Normal("mu_beta", mu=0.3, sigma=1/3, shape=n_clusters)
-    A_beta = 0.3 * pt.ones(n_clusters) # pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
+    A_beta = 0 * pt.ones(n_clusters) # pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
     phi_beta = pt.pi/3 * pt.ones(n_clusters) # pm.Normal("phi_beta", mu=pt.pi/4, sigma=1, shape=n_clusters) # peaks March
     season = A_beta[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_beta[:, None])
     ### AR(1) component (non-centered)
@@ -470,13 +465,6 @@ with pm.Model() as model:
     # Integrate transmission model using Euler's method with dt=1
     # -----------------------------------------------------------
 
-    # print(beta_t.eval().shape)
-    # print(births.shape)
-    # print(death_rate.shape)
-    # print(S0.eval().shape)
-    # print(I0.eval().shape)
-    # print(P0.eval().shape)
-
     (S, I, P, flow_het, flow_hom), _ = pytensor.scan(
         fn=step,
         sequences=[beta_t, pt.as_tensor_variable(births), pt.as_tensor_variable(death_rate)],
@@ -484,7 +472,7 @@ with pm.Model() as model:
         non_sequences=[
             C, W, H_het, H_hom,
             sero_idx, het_idx, hom_idx,
-            f_per_I, gamma, omega, birth_vec
+            f, f_per_I, gamma, omega, birth_vec
         ]
     )
 
@@ -493,18 +481,23 @@ with pm.Model() as model:
     I = pm.Deterministic("I", I)
     P = pm.Deterministic("P", P)
 
-    # compute FOI trajectory
-    lambda_t = pm.Deterministic("lambda_t", beta_t * pt.sum(I, axis=(2,3)) / (pt.sum(S, axis=2) + pt.sum(P, axis=2)))
-
-    # TODO: write function computing I per cluster, degree, serotype and hom/het infection 
-
     print(S.eval().shape)
     print(I.eval().shape)
     print(P.eval().shape)
 
+    # compute FOI trajectory
+    lambda_t = pm.Deterministic("lambda_t", beta_t * pt.sum(I, axis=2) / (pt.sum(S, axis=2) + pt.sum(P, axis=2)))
+
+    print(lambda_t.eval().shape)
+    
+    # TODO: write function computing I per cluster, degree, serotype and hom/het infection 
+
+
+
     fig,ax=plt.subplots()
-    ax.plot(lambda_t.eval()[:,0], color='black')
-    ax.axhline(np.mean(lambda_t.eval()[:,0]), color='red')
+    ax.plot(S.eval()[:,0,0])
+    #ax.plot(lambda_t.eval()[:,0], color='black')
+    #ax.axhline(np.mean(lambda_t.eval()[:,0]), color='red')
     plt.show()
     plt.close()
 
