@@ -16,8 +16,8 @@ pytensor.config.on_opt_error = "ignore"
 
 # analysis startdate
 start_year = 1999
-start_month = 7
-end_year = 2006
+start_month = 1
+end_year = 2000
 assert start_year >= 1996, "earliest start_year is 1996."
 
 # helper function for argument parsing
@@ -102,7 +102,6 @@ assert all(col in df.columns for col in required_cols)
 df = df.sort_values(["CD_MUN", "date"]).reset_index(drop=True)
 
 # 3. Take only from start_year to end_year
-df_nonsliceddates = df.copy()
 df = df[((df['date'] > datetime(start_year,start_month,1)) & (df['date'] <= datetime(end_year,12,31)))]
 
 # 4. Remove within-sample validation municipalities
@@ -158,7 +157,7 @@ df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
 
 # only do first X clusters
-df = df[df['cluster'].isin([4,5])]
+df = df[df['cluster'].isin([23, 24])]
 
 # 9. Build PyMC arrays
 # --- For DirichletMultinomial model ---
@@ -182,7 +181,7 @@ df_expanded["estimated_death_rate"] = df_expanded["estimated_deaths"] / df_expan
 births = df_expanded.pivot(index="date", columns="cluster", values="estimated_births").to_numpy().astype(int) # (n_months, n_clusters)
 death_rate = df_expanded.pivot(index="date", columns="cluster", values="estimated_death_rate").to_numpy() # (n_months, n_clusters)
 # Initial demography
-demo = demo[((demo['year'] == start_year) & (demo['cluster'].isin([4,5])))]['population'].values 
+demo = demo[((demo['year'] == start_year) & (demo['cluster'].isin([23, 24])))]['population'].values 
 
 # --- Indices ---
 cluster_idx = df["cluster"].to_numpy().astype(int)
@@ -298,7 +297,7 @@ def substep(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
     
     # --- FOI ---
     lambda_t = beta_t[:, None] * (I_t @ C) / (N_t[:, None] + 1)         # (clusters, serotypes)
-    lambda_t += dt * 1e-5 * intro_mask_t[None, :] * estimated_prop_t       # seeding
+    lambda_t += dt * 1e-6 * intro_mask_t[None, :] * estimated_prop_t       # seeding
 
     # --- Susceptibles ---
     effective_lambda = (lambda_t @ H_het.T + (lambda_t * f[None, :]) @ H_hom.T)     # Effective FOI acting on each susceptible state
@@ -310,7 +309,7 @@ def substep(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
     lambda_per_I = lambda_t[:, sero_idx]
     delta_I_het = lambda_per_I * S_het
     delta_I_hom = lambda_per_I * (f_per_I[None, :] * S_hom)
-    I_next = I_t + dt * (-(1/gamma) * I_t + delta_I_het + delta_I_hom)
+    I_next = I_t + dt * (-(1/gamma)* I_t + delta_I_het + delta_I_hom)
 
     # --- Cross-protection ---
     P_next = P_t + dt * (-(1/omega + deaths_t)[:, None] * P_t + (1/gamma) * I_t)
@@ -476,32 +475,33 @@ with pm.Model() as model:
 
     # initial states
     ## initial susceptible and cross-protected states (cluster x state_idx)
-    f_P = 0.2 # pm.Beta("f_P", alpha=10, beta=20)               # first division of cluster population happens based on amount in a cross-protected state
-    f_P2 = 1 # pm.Beta("f_P2", alpha=30, beta=1)                # fraction cross-protected after DENV-2 infection
-    pi_d = pt.as_tensor_variable(np.array([0.2, 0.4, 0.4]))       #pm.Dirichlet("pi_d", a=10*[1, 8, 1])            # divide the non-cross-protected across naive, mono, double
-    pi_mono2 = 0.75 #pm.Beta("pi_mono2", alpha=30, beta=1)       # divide the mono between DENV-1 and DENV-2
+    f_P = pm.Beta("f_P", alpha=10, beta=20)                 # first division of cluster population happens based on amount in a cross-protected state
+    f_P2 = pm.Beta("f_P2", alpha=10, beta=1)                # fraction cross-protected after DENV-2 infection
+    pi_d = pm.Dirichlet("pi_d", a=10*np.array([2, 4, 4]))   # divide the non-cross-protected across naive, mono, double
+    pi_mono2 = pm.Beta("pi_mono2", alpha=10, beta=1)        # divide the mono between DENV-1 and DENV-2
     S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, f_P, pi_d, pi_mono2))
     P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, f_P2))
 
     # Parameters 
-
     ## average duration of infection
     gamma = 1/2
 
     ## average duration cross-protection
-    omega = 12 # pm.Lognormal("omega", mu=2.45, sigma=1/3)
+    omega = pm.Lognormal("omega", mu=2.45, sigma=1/3)
 
     ## average FOI reduction for homologous infections
-    f = pt.as_tensor([0,0,0,0])  
+    f_1 = pm.Beta("f_1", alpha=3, beta=3)
+    f_2 = pm.Beta("f_2", alpha=1, beta=3)
+    f = pt.stack([f_1, f_2, 0, 0])
     f_per_I = f[sero_idx]
 
     ## reported fraction (cluster x degree x serotype)
-    kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1.0)                 # intercept
+    kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1)                 # intercept
     is_34 = pt.as_tensor([0,0,1,1])                                                             # indicator prim/sec versus tert/quart
     log_or_34 = pm.Normal("log_or_34", mu=-1, sigma=1/3)                                        # OR detecting prim/sec versus tert/quart
-    log_or_serotype = pm.Normal("log_or_serotype", mu=0.0, sigma=1.0/3, shape=n_serotypes-1)    # OR detecting serotypes (vs. DENV-1)
+    log_or_serotype = pm.Normal("log_or_serotype", mu=0.0, sigma=1/3, shape=n_serotypes-1)    # OR detecting serotypes (vs. DENV-1)
     log_or_serotype_full = pt.concatenate([pt.zeros(1), log_or_serotype])
-    log_or_cluster = pm.Normal("log_or_cluster", mu=0.0, sigma=1.0, shape=n_clusters-1)         # OR detecting in a cluster (vs. cluster 1)
+    log_or_cluster = pm.Normal("log_or_cluster", mu=0.0, sigma=1/3, shape=n_clusters-1)         # OR detecting in a cluster (vs. cluster 1)
     log_or_cluster_full = pt.concatenate([pt.zeros(1), log_or_cluster])
     is_hom = pt.as_tensor([0,1])                                                                # indicator for homologous infection
     log_or_hom = pm.Normal("log_or_hom", mu=0, sigma=1/3)                                      #            
@@ -515,18 +515,18 @@ with pm.Model() as model:
 
     ## Fixed components of the FOI: transmission coefficient beta (seasonal + AR(1); time x cluster)
     ### seasonal component
-    mu_beta = np.log(1.8) * pt.ones(n_clusters) # pm.Normal("mu_beta", mu=0.3, sigma=1/3, shape=n_clusters)
-    A_beta = 1 * pt.ones(n_clusters) # pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
-    phi_beta = 0 * pt.ones(n_clusters) # pm.Normal("phi_beta", mu=pt.pi/4, sigma=1, shape=n_clusters) # peaks March
+    mu_beta = pm.Normal("mu_beta", mu=np.log(2), sigma=1/3, shape=n_clusters)
+    A_beta = pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
+    phi_beta = pm.Normal("phi_beta", mu=pt.pi/3, sigma=1, shape=n_clusters) # peaks March
     season = A_beta[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_beta[:, None])
     ### AR(1) component (non-centered)
-    rho_ar_beta = pm.Beta("rho_ar_beta", alpha=1, beta=2)                 # persistence
+    rho_ar_beta = pm.Beta("rho_ar_beta", alpha=3, beta=3)                 # persistence
     sigma_ar_beta = pm.HalfNormal("sigma_ar_beta", sigma=1/3)             # freedom
     eps_raw = pm.Normal("eps_raw", mu=0, sigma=1, shape=(n_months, n_clusters))
     u_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_raw[1:], outputs_info=pt.zeros(n_clusters), non_sequences=[rho_ar_beta, sigma_ar_beta])
     u = pt.concatenate([ pt.zeros(n_clusters)[None, :], u_seq], axis=0)
     #### Combine
-    beta_t = pm.Deterministic("beta_t", pt.exp(mu_beta[:, None] + season).T) #+ u.T
+    beta_t = pm.Deterministic("beta_t", pt.exp(mu_beta[:, None] + season + u.T).T) #+ u.T
 
     ## Initial infected
     I0 = build_initial_infected(pt.as_tensor(DENV_total[0,:]), pt.as_tensor(p0.values), kappa, pi_d)
@@ -558,12 +558,21 @@ with pm.Model() as model:
     # compute FOI trajectory
     lambda_t = pm.Deterministic("lambda_t", beta_t * pt.sum(I, axis=2) / (pt.sum(S, axis=2) + pt.sum(P, axis=2)))
 
-    # reshape Delta_I into observations per cluster, degree, serotype and hom/het infection 
-    Delta_I = pm.Deterministic("Delta_I", pt.stack([pt.einsum("tci,ids->tcds", Delta_I_hom, O), pt.einsum("tci,ids->tcds", Delta_I_het, O)], axis=-1))
+    # reshape Delta_I into observations per cluster, degree, serotype and hom/het infection
+    # + soft bottom so Delta_I can never hit zero --> else p_reported = 0 --> a = 0 in DirichletMultinomial --> logp = -inf !!
+    Delta_I = pm.Deterministic("Delta_I", 1 + pt.softplus(pt.stack([pt.einsum("tci,ids->tcds", Delta_I_hom, O), pt.einsum("tci,ids->tcds", Delta_I_het, O)], axis=-1) - 1))
 
-    # compute proportions
+    # compute serotype proportions
     I_sero = pt.dot(I, C)
     p = pm.Deterministic("p", (I_sero / pt.sum(I_sero, axis=2)[:, :, None]))
+
+    # sanity check: is mass preserved (set births and deaths to zero) -> yes!
+    # fig,ax=plt.subplots()
+    # ax.plot((pt.sum(S, axis=2) + pt.sum(I, axis=2) + pt.sum(P, axis=2)).eval()[:,1], color='black')
+    # plt.show()
+    # plt.close()
+
+    # sanity check: susceptible slots per serotype
 
     # -----------
     # Observation
@@ -574,30 +583,35 @@ with pm.Model() as model:
     alpha_inv = pm.HalfNormal("alpha_inv", sigma=1/10)
     D_obs = pm.NegativeBinomial("D_obs", mu=reported, alpha=1/alpha_inv, observed=DENV_total)
 
-    fig,ax=plt.subplots(nrows=3)
-    # serotype proportions
-    ax[0].plot(p.eval()[:,0,0], color='black')
-    ax[0].plot(p.eval()[:,0,1], color='red')
-    ax[0].plot(p.eval()[:,0,2], color='green')
-    ax[0].plot(p.eval()[:,0,3], color='blue')
-    # observed cases
-    ax[1].scatter(range(len(DENV_total[:,0])), DENV_total[:,0], color='black', alpha=0.6, s=5)
-    ax[1].plot(D_obs.eval()[:,0], color='red')
-    # force of infection
-    ax[2].plot(lambda_t.eval()[:,0], color='black')
-    ax[2].axhline(np.mean(lambda_t.eval()[:,0]), color='red')
-    plt.show()
-    plt.close()
-
     # Observed serotyped cases
     ## Hierarchical overdispersion (per cluster)
     d_cluster_hierarch = pm.HalfNormal("d_cluster_hierarch", sigma=1/3)    # --> phi ~ 1000 --> low overdispersion
     d_cluster = pm.HalfNormal("d_cluster", sigma=d_cluster_hierarch, shape=n_clusters)
     phi = pm.Deterministic("phi", pt.repeat((1.0 / pm.math.maximum(d_cluster, 1e-12))[None, :], n_months, axis=0))
-    reported_serotype = I * kappa
-    p_detect = reported_serotype / pt.sum(reported_serotype, axis=2, keepdims=True)
+    reported_serotype = pt.sum(Delta_I * kappa, axis=(2,4))
+    p_detect = pm.Deterministic("p_detect", reported_serotype / pt.sum(reported_serotype, axis=2, keepdims=True))
     alpha = phi[:, :, None] * p_detect
     VIF = pm.Deterministic("VIF", (N_typed + phi) / (1 + phi)) # variance inflation of dirichlet multinomial compared to multinomial
+
+    fig,ax=plt.subplots(nrows=4)
+    # serotype proportions
+    ax[0].plot(p.eval()[:,0,0], color='black')
+    ax[0].plot(p.eval()[:,0,1], color='red')
+    ax[0].plot(p.eval()[:,0,2], color='green')
+    ax[0].plot(p.eval()[:,0,3], color='blue')
+    # detected serotype proportions
+    ax[1].plot(p_detect.eval()[:,0,0], color='black')
+    ax[1].plot(p_detect.eval()[:,0,1], color='red')
+    ax[1].plot(p_detect.eval()[:,0,2], color='green')
+    ax[1].plot(p_detect.eval()[:,0,3], color='blue')
+    # observed cases
+    ax[2].scatter(range(len(DENV_total[:,0])), DENV_total[:,0], color='black', alpha=0.6, s=5)
+    ax[2].plot(D_obs.eval()[:,0], color='red')
+    # force of infection
+    ax[3].plot(lambda_t.eval()[:,0], color='black')
+    ax[3].axhline(np.mean(lambda_t.eval()[:,0]), color='red')
+    plt.show()
+    plt.close()
 
     # --- Observed subtyped incidences ---
     Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
@@ -607,9 +621,12 @@ with pm.Model() as model:
 #######################
 
 # NUTS
-draws=250
+draws=10
 with model:
-    trace = pm.sample(draws, tune=250, target_accept=0.8, chains=chains, cores=chains, init='adapt_diag', progressbar=True, idata_kwargs={'log_likelihood':True})
+    trace = pm.sample(draws, tune=25, target_accept=0.99,
+                     chains=chains, cores=chains, init='jitter+adapt_diag', progressbar=True,
+                     initvals=chains*[{'alpha_inv': 0.3,}],
+                     idata_kwargs={'log_likelihood':True})
 
 #######################
 ## Running the model ##
@@ -629,7 +646,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                 'zgap_DENV4', 'gamma', 'kappa', 'kappa0_logit', 'or_cluster', 'or_serotype', 'omega', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
+                 'f_P', 'f_P2', 'pi_d', 'pi_mono2', 'omega', 'f_1', 'f_2', 'kappa', 'kappa0_logit', 'or_34', 'or_cluster', 'or_serotype', 'or_homologous', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 # Save traces
@@ -639,10 +656,10 @@ for var in variables2plot:
     plt.savefig(f'{output_folder}/fig/trace/trace-{var}_typing-effort-model.pdf')
     plt.close()
 
+
 ###############################
 ## Diagnostics of dispersion ##
 ###############################
-
 
 # ---- extract posterior predictive mean overdispersion proportions ----
 # ---- phi summaries ----
