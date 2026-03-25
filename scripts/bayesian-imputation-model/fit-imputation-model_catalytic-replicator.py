@@ -15,8 +15,8 @@ pytensor.config.cxx = '/usr/bin/clang++'
 pytensor.config.on_opt_error = "ignore"
 
 # analysis startdate
-start_year = 1999
-start_month = 1
+start_year = 1998
+start_month = 8
 end_year = 2024
 assert start_year >= 1996, "earliest start_year is 1996."
 
@@ -487,12 +487,12 @@ with pm.Model() as model:
     gamma = 1/2
 
     ## average duration cross-protection
-    omega = 18 #pm.Lognormal("omega", mu=2.45, sigma=1/3)
+    omega = 12 #pm.Lognormal("omega", mu=2.45, sigma=1/3)
 
     ## average FOI reduction for homologous infections
     f_1 = pm.Beta("f_1", alpha=3, beta=3)
     f_2 = pm.Beta("f_2", alpha=1, beta=3)
-    f = pt.stack([0.9, 0.8, 0.7, 0.7])
+    f = pt.stack([0.85, 0.85, 0.60, 0.50])
     f_per_I = f[sero_idx]
 
     ## reported fraction (cluster x degree x serotype)
@@ -503,7 +503,7 @@ with pm.Model() as model:
     log_or_serotype_full = pt.concatenate([pt.zeros(1), log_or_serotype])
     log_or_cluster = pm.Normal("log_or_cluster", mu=0.0, sigma=1/10, shape=n_clusters-1)         # OR detecting in a cluster (vs. cluster 1)
     log_or_cluster_full = pt.concatenate([pt.zeros(1), log_or_cluster])
-    is_hom = pt.as_tensor([0,1])                                                                # indicator for homologous infection
+    is_hom = pt.as_tensor([1,0])                                                                # indicator for homologous infection
     log_or_hom = pm.Normal("log_or_hom", mu=-3, sigma=1/10)                                      #            
     logit_kappa = kappa0_logit + log_or_cluster_full[:, None, None, None] + log_or_34*is_34[None, :, None, None] \
         + log_or_serotype_full[None, None, :, None] + log_or_hom * is_hom[None, None, None, :]
