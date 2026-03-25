@@ -268,6 +268,13 @@ hom_idx  = pt.constant(IP_mapping["S_to_I_homol"].values)
 birth_vec = np.zeros(len(S_mapping))
 birth_vec[0] = 1.0
 birth_vec_t = pt.constant(birth_vec)
+## observation mapping
+O = np.zeros((len(IP_mapping), IP_mapping["no_prior_heterol_inf"].max() + 1, n_serotypes))
+for i, row in IP_mapping.iterrows():
+    d = int(row["no_prior_heterol_inf"])
+    s = int(row["currently_infected_with"]) - 1
+    O[i, d, s] = 1.0
+O = pt.constant(O)
 
 # Tutorials that helped build this model (step function)
 # https://www.youtube.com/watch?v=G9VWXZdbtKQ
@@ -294,20 +301,20 @@ def step(beta_t, births_t, deaths_t,
 
     # --- Susceptibles ---
     effective_lambda = (lambda_t @ H_het.T + (lambda_t * f[None, :]) @ H_hom.T)     # Effective FOI acting on each susceptible state
-    S_next = births_t[:, None] * birth_vec[None, :] + (1 - deaths_t)[:, None] * S_t + omega * (P_t @ W) - effective_lambda * S_t
+    S_next = births_t[:, None] * birth_vec[None, :] + (1 - deaths_t)[:, None] * S_t + 1/omega * (P_t @ W) - effective_lambda * S_t
 
     # --- Infectious ---
     S_het = S_t[:, het_idx]
     S_hom = S_t[:, hom_idx]
     lambda_per_I = lambda_t[:, sero_idx]
-    flow_het = lambda_per_I * S_het
-    flow_hom = lambda_per_I * (f_per_I[None, :] * S_hom)
-    I_next = (1 - gamma - deaths_t)[:, None] * I_t + flow_het + flow_hom
+    delta_I_het = lambda_per_I * S_het
+    delta_I_hom = lambda_per_I * (f_per_I[None, :] * S_hom)
+    I_next = (1 - 1/gamma - deaths_t)[:, None] * I_t + delta_I_het + delta_I_hom
 
     # --- Cross-protection ---
-    P_next = (1 - omega - deaths_t)[:, None] * P_t + gamma * I_t
+    P_next = (1 - 1/omega - deaths_t)[:, None] * P_t + (1/gamma) * I_t
 
-    return S_next, I_next, P_next, flow_het, flow_hom
+    return S_next, I_next, P_next, delta_I_hom, delta_I_het
 
 
 def build_initial_susceptibles(demo, f_P, pi_d, pi_mono2):
@@ -416,13 +423,13 @@ with pm.Model() as model:
     # Parameters 
 
     ## average duration of infection
-    gamma = 1
+    gamma = 2
 
     ## average duration cross-protection
-    omega = 6 # pm.Lognormal("omega", mu=2.45, sigma=1/3)
+    omega = 18 # pm.Lognormal("omega", mu=2.45, sigma=1/3)
 
     ## average FOI reduction for homologous infections
-    f = pt.as_tensor([0.1,0,0,0])  
+    f = pt.as_tensor([0.5,0,0,0])  
     f_per_I = f[sero_idx]
 
     ## reported fraction (cluster x degree x serotype)
@@ -446,7 +453,7 @@ with pm.Model() as model:
     ## Fixed components of the FOI: transmission coefficient beta (seasonal + AR(1); time x cluster)
     ### seasonal component
     mu_beta = np.log(1) * pt.ones(n_clusters) # pm.Normal("mu_beta", mu=0.3, sigma=1/3, shape=n_clusters)
-    A_beta = 0 * pt.ones(n_clusters) # pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
+    A_beta = 1 * pt.ones(n_clusters) # pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
     phi_beta = pt.pi/3 * pt.ones(n_clusters) # pm.Normal("phi_beta", mu=pt.pi/4, sigma=1, shape=n_clusters) # peaks March
     season = A_beta[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_beta[:, None])
     ### AR(1) component (non-centered)
@@ -465,7 +472,7 @@ with pm.Model() as model:
     # Integrate transmission model using Euler's method with dt=1
     # -----------------------------------------------------------
 
-    (S, I, P, flow_het, flow_hom), _ = pytensor.scan(
+    (S, I, P, delta_I_hom, delta_I_het), _ = pytensor.scan(
         fn=step,
         sequences=[beta_t, pt.as_tensor_variable(births), pt.as_tensor_variable(death_rate)],
         outputs_info=[S0, I0, P0, None, None],
@@ -481,34 +488,20 @@ with pm.Model() as model:
     I = pm.Deterministic("I", I)
     P = pm.Deterministic("P", P)
 
-    print(S.eval().shape)
-    print(I.eval().shape)
-    print(P.eval().shape)
-
     # compute FOI trajectory
     lambda_t = pm.Deterministic("lambda_t", beta_t * pt.sum(I, axis=2) / (pt.sum(S, axis=2) + pt.sum(P, axis=2)))
 
-    print(lambda_t.eval().shape)
-    
-    # TODO: write function computing I per cluster, degree, serotype and hom/het infection 
-
-
-
-    fig,ax=plt.subplots()
-    ax.plot(S.eval()[:,0,0])
-    #ax.plot(lambda_t.eval()[:,0], color='black')
-    #ax.axhline(np.mean(lambda_t.eval()[:,0]), color='red')
-    plt.show()
-    plt.close()
-
-    import sys
-    sys.exit()
-
+    # reshape Delta_I into observations per cluster, degree, serotype and hom/het infection 
+    delta_I = pm.Deterministic("delta_I", pt.stack([pt.einsum("tci,ids->tcds", delta_I_hom, O), pt.einsum("tci,ids->tcds", delta_I_het, O)], axis=-1))
+                               
     # compute proportions
-    p = pm.Deterministic("p", (pt.sum(I_new, axis=2) / pt.sum(I_new, axis=(2,3))[:, :, None]))
+    p = pm.Deterministic("p", (pt.sum(delta_I, axis=(2,4)) / pt.sum(delta_I, axis=(2,3,4))[:, :, None]))
 
     # compute reported number of cases
-    reported = pt.sum(I_new * kappa, axis=(2,3))
+    reported = pt.sum(delta_I * kappa, axis=(2,3,4))
+
+    # TODO: implement seeding + introduction mask
+    # TODO: implement half month timesteps
 
     # -----------
     # Observation
@@ -518,25 +511,18 @@ with pm.Model() as model:
     alpha_inv = pm.HalfNormal("alpha_inv", sigma=1/10)
     D_obs = pm.NegativeBinomial("D_obs", mu=reported, alpha=1/alpha_inv, observed=DENV_total)
 
-
-    S_star = get_susceptibles_serotype_time(S)
-    fig,ax=plt.subplots(nrows=4)
+    fig,ax=plt.subplots(nrows=3)
     # serotype proportions
     ax[0].plot(p.eval()[:,0,0], color='black')
     ax[0].plot(p.eval()[:,0,1], color='red')
     ax[0].plot(p.eval()[:,0,2], color='green')
     ax[0].plot(p.eval()[:,0,3], color='blue')
-    # susceptibles
-    ax[1].plot(S_star.eval()[:,0,0], color='black')
-    ax[1].plot(S_star.eval()[:,0,1], color='red')
-    ax[1].plot(S_star.eval()[:,0,2], color='green')
-    ax[1].plot(S_star.eval()[:,0,3], color='blue')
     # observed cases
-    ax[2].scatter(range(len(DENV_total[:,0])), DENV_total[:,0], color='black', alpha=0.6, s=5)
-    ax[2].plot(D_obs.eval()[:,0], color='red')
+    ax[1].scatter(range(len(DENV_total[:,0])), DENV_total[:,0], color='black', alpha=0.6, s=5)
+    ax[1].plot(D_obs.eval()[:,0], color='red')
     # force of infection
-    ax[3].plot(lambda_t.eval()[:,0], color='black')
-    ax[3].axhline(np.mean(lambda_t.eval()[:,0]), color='red')
+    ax[2].plot(lambda_t.eval()[:,0], color='black')
+    ax[2].axhline(np.mean(lambda_t.eval()[:,0]), color='red')
     plt.show()
     plt.close()
 
