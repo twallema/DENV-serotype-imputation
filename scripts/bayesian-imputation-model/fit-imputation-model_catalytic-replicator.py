@@ -16,8 +16,8 @@ pytensor.config.on_opt_error = "ignore"
 
 # analysis startdate
 start_year = 1999
-start_month = 1
-end_year = 2024
+start_month = 7
+end_year = 2006
 assert start_year >= 1996, "earliest start_year is 1996."
 
 # helper function for argument parsing
@@ -102,6 +102,7 @@ assert all(col in df.columns for col in required_cols)
 df = df.sort_values(["CD_MUN", "date"]).reset_index(drop=True)
 
 # 3. Take only from start_year to end_year
+df_nonsliceddates = df.copy()
 df = df[((df['date'] > datetime(start_year,start_month,1)) & (df['date'] <= datetime(end_year,12,31)))]
 
 # 4. Remove within-sample validation municipalities
@@ -243,7 +244,7 @@ for col in list_columns:
 IP_mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/raw/transmission_model/infectious_protected_states.csv'))
 
 # Generate the matrices C, W, M_{j,k} and the I-update-indices
-## C --> Maps infected states onto FOI per serotype
+## C --> Maps infected states onto serotypes
 sero_idx = IP_mapping["currently_infected_with"].values - 1   # zero-based indexing
 C = np.zeros((len(IP_mapping), n_serotypes))
 C[np.arange(len(IP_mapping)), sero_idx] = 1.0
@@ -268,7 +269,7 @@ hom_idx  = pt.constant(IP_mapping["S_to_I_homol"].values)
 birth_vec = np.zeros(len(S_mapping))
 birth_vec[0] = 1.0
 birth_vec_t = pt.constant(birth_vec)
-## observation mapping
+## Delta_I mapping
 O = np.zeros((len(IP_mapping), IP_mapping["no_prior_heterol_inf"].max() + 1, n_serotypes))
 for i, row in IP_mapping.iterrows():
     d = int(row["no_prior_heterol_inf"])
@@ -286,22 +287,22 @@ O = pt.constant(O)
 ## Bayesian imputation model ##
 ###############################
 
-def step(beta_t, births_t, deaths_t,
-         S_t, I_t, P_t,
+def substep(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+         S_t, I_t, P_t, 
          C, W, H_het, H_hom,
          sero_idx, het_idx, hom_idx,
-         f, f_per_I, gamma, omega, birth_vec):
+         f, f_per_I, gamma, omega, birth_vec, dt):
 
     # --- Total population ---
     N_t = pt.sum(S_t, axis=1) + pt.sum(I_t, axis=1) + pt.sum(P_t, axis=1)
     
     # --- FOI ---
-    lambda_t = beta_t[:, None] * (I_t @ C) / N_t[:, None]   # (clusters, serotypes)
-    # TODO: add seeding here
+    lambda_t = beta_t[:, None] * (I_t @ C) / (N_t[:, None] + 1)         # (clusters, serotypes)
+    lambda_t += dt * 1e-5 * intro_mask_t[None, :] * estimated_prop_t       # seeding
 
     # --- Susceptibles ---
     effective_lambda = (lambda_t @ H_het.T + (lambda_t * f[None, :]) @ H_hom.T)     # Effective FOI acting on each susceptible state
-    S_next = births_t[:, None] * birth_vec[None, :] + (1 - deaths_t)[:, None] * S_t + 1/omega * (P_t @ W) - effective_lambda * S_t
+    S_next = S_t + dt * (births_t[:, None] * birth_vec[None, :] - deaths_t[:, None] * S_t + (1/omega) * (P_t @ W) - effective_lambda * S_t)
 
     # --- Infectious ---
     S_het = S_t[:, het_idx]
@@ -309,12 +310,75 @@ def step(beta_t, births_t, deaths_t,
     lambda_per_I = lambda_t[:, sero_idx]
     delta_I_het = lambda_per_I * S_het
     delta_I_hom = lambda_per_I * (f_per_I[None, :] * S_hom)
-    I_next = (1 - 1/gamma - deaths_t)[:, None] * I_t + delta_I_het + delta_I_hom
+    I_next = I_t + dt * (-(1/gamma) * I_t + delta_I_het + delta_I_hom)
 
     # --- Cross-protection ---
-    P_next = (1 - 1/omega - deaths_t)[:, None] * P_t + (1/gamma) * I_t
+    P_next = P_t + dt * (-(1/omega + deaths_t)[:, None] * P_t + (1/gamma) * I_t)
 
-    return S_next, I_next, P_next, delta_I_hom, delta_I_het
+    return S_next, I_next, P_next, dt * delta_I_hom, dt * delta_I_het
+
+
+def step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+         S_t, I_t, P_t, 
+         C, W, H_het, H_hom,
+         sero_idx, het_idx, hom_idx,
+         f, f_per_I, gamma, omega, birth_vec):
+
+    # --- First substep ---
+    S1, I1, P1, d_hom1, d_het1 = substep(
+        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+        S_t, I_t, P_t,
+        C, W, H_het, H_hom,
+        sero_idx, het_idx, hom_idx,
+        f, f_per_I, gamma, omega, birth_vec,
+        0.2
+    )
+
+    # --- Second substep ---
+    S2, I2, P2, d_hom2, d_het2 = substep(
+        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+        S1, I1, P1,
+        C, W, H_het, H_hom,
+        sero_idx, het_idx, hom_idx,
+        f, f_per_I, gamma, omega, birth_vec,
+        0.2
+    )
+
+    # --- Third substep ---
+    S3, I3, P3, d_hom3, d_het3 = substep(
+        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+        S2, I2, P2,
+        C, W, H_het, H_hom,
+        sero_idx, het_idx, hom_idx,
+        f, f_per_I, gamma, omega, birth_vec,
+        0.2
+    )
+
+    # --- Fourth substep ---
+    S4, I4, P4, d_hom4, d_het4 = substep(
+        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+        S3, I3, P3,
+        C, W, H_het, H_hom,
+        sero_idx, het_idx, hom_idx,
+        f, f_per_I, gamma, omega, birth_vec,
+        0.2
+    )
+
+    # --- Fifth substep ---
+    S5, I5, P5, d_hom5, d_het5 = substep(
+        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+        S4, I4, P4,
+        C, W, H_het, H_hom,
+        sero_idx, het_idx, hom_idx,
+        f, f_per_I, gamma, omega, birth_vec,
+        0.2
+    )
+
+    # --- accumulate Delta_I over the full month ---
+    delta_hom_sum = d_hom1 + d_hom2 + d_hom3 + d_hom4 + d_hom5
+    delta_het_sum = d_het1 + d_het2 + d_het3 + d_het4 + d_het5
+
+    return S5, I5, P5, delta_hom_sum, delta_het_sum
 
 
 def build_initial_susceptibles(demo, f_P, pi_d, pi_mono2):
@@ -404,7 +468,6 @@ def ar1_step(eps_t, u_prev, rho, sigma_ar):
     u_t = rho * u_prev + sigma_ar * eps_t
     return u_t
 
-
 with pm.Model() as model:
 
     # ----------------
@@ -423,13 +486,13 @@ with pm.Model() as model:
     # Parameters 
 
     ## average duration of infection
-    gamma = 2
+    gamma = 1/2
 
     ## average duration cross-protection
-    omega = 18 # pm.Lognormal("omega", mu=2.45, sigma=1/3)
+    omega = 12 # pm.Lognormal("omega", mu=2.45, sigma=1/3)
 
     ## average FOI reduction for homologous infections
-    f = pt.as_tensor([0.5,0,0,0])  
+    f = pt.as_tensor([0,0,0,0])  
     f_per_I = f[sero_idx]
 
     ## reported fraction (cluster x degree x serotype)
@@ -441,7 +504,7 @@ with pm.Model() as model:
     log_or_cluster = pm.Normal("log_or_cluster", mu=0.0, sigma=1.0, shape=n_clusters-1)         # OR detecting in a cluster (vs. cluster 1)
     log_or_cluster_full = pt.concatenate([pt.zeros(1), log_or_cluster])
     is_hom = pt.as_tensor([0,1])                                                                # indicator for homologous infection
-    log_or_hom = pm.Normal("log_or_hom", mu=-1, sigma=1/3)                                      #            
+    log_or_hom = pm.Normal("log_or_hom", mu=0, sigma=1/3)                                      #            
     logit_kappa = kappa0_logit + log_or_cluster_full[:, None, None, None] + log_or_34*is_34[None, :, None, None] \
         + log_or_serotype_full[None, None, :, None] + log_or_hom * is_hom[None, None, None, :]
     kappa = pm.Deterministic("kappa", pm.math.sigmoid(logit_kappa))
@@ -452,9 +515,9 @@ with pm.Model() as model:
 
     ## Fixed components of the FOI: transmission coefficient beta (seasonal + AR(1); time x cluster)
     ### seasonal component
-    mu_beta = np.log(1) * pt.ones(n_clusters) # pm.Normal("mu_beta", mu=0.3, sigma=1/3, shape=n_clusters)
+    mu_beta = np.log(1.8) * pt.ones(n_clusters) # pm.Normal("mu_beta", mu=0.3, sigma=1/3, shape=n_clusters)
     A_beta = 1 * pt.ones(n_clusters) # pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
-    phi_beta = pt.pi/3 * pt.ones(n_clusters) # pm.Normal("phi_beta", mu=pt.pi/4, sigma=1, shape=n_clusters) # peaks March
+    phi_beta = 0 * pt.ones(n_clusters) # pm.Normal("phi_beta", mu=pt.pi/4, sigma=1, shape=n_clusters) # peaks March
     season = A_beta[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_beta[:, None])
     ### AR(1) component (non-centered)
     rho_ar_beta = pm.Beta("rho_ar_beta", alpha=1, beta=2)                 # persistence
@@ -472,9 +535,13 @@ with pm.Model() as model:
     # Integrate transmission model using Euler's method with dt=1
     # -----------------------------------------------------------
 
-    (S, I, P, delta_I_hom, delta_I_het), _ = pytensor.scan(
+    (S, I, P, Delta_I_hom, Delta_I_het), _ = pytensor.scan(
         fn=step,
-        sequences=[beta_t, pt.as_tensor_variable(births), pt.as_tensor_variable(death_rate)],
+        sequences=[beta_t,
+                   pt.as_tensor_variable(births),
+                   pt.as_tensor_variable(death_rate),
+                   pt.as_tensor_variable(intro_mask),
+                   pt.as_tensor_variable(estimated_proportions)],
         outputs_info=[S0, I0, P0, None, None],
         non_sequences=[
             C, W, H_het, H_hom,
@@ -492,22 +559,18 @@ with pm.Model() as model:
     lambda_t = pm.Deterministic("lambda_t", beta_t * pt.sum(I, axis=2) / (pt.sum(S, axis=2) + pt.sum(P, axis=2)))
 
     # reshape Delta_I into observations per cluster, degree, serotype and hom/het infection 
-    delta_I = pm.Deterministic("delta_I", pt.stack([pt.einsum("tci,ids->tcds", delta_I_hom, O), pt.einsum("tci,ids->tcds", delta_I_het, O)], axis=-1))
-                               
+    Delta_I = pm.Deterministic("Delta_I", pt.stack([pt.einsum("tci,ids->tcds", Delta_I_hom, O), pt.einsum("tci,ids->tcds", Delta_I_het, O)], axis=-1))
+
     # compute proportions
-    p = pm.Deterministic("p", (pt.sum(delta_I, axis=(2,4)) / pt.sum(delta_I, axis=(2,3,4))[:, :, None]))
-
-    # compute reported number of cases
-    reported = pt.sum(delta_I * kappa, axis=(2,3,4))
-
-    # TODO: implement seeding + introduction mask
-    # TODO: implement half month timesteps
+    I_sero = pt.dot(I, C)
+    p = pm.Deterministic("p", (I_sero / pt.sum(I_sero, axis=2)[:, :, None]))
 
     # -----------
     # Observation
     # -----------
 
     # Observed cases
+    reported = pt.sum(Delta_I * kappa, axis=(2,3,4))
     alpha_inv = pm.HalfNormal("alpha_inv", sigma=1/10)
     D_obs = pm.NegativeBinomial("D_obs", mu=reported, alpha=1/alpha_inv, observed=DENV_total)
 
@@ -525,7 +588,6 @@ with pm.Model() as model:
     ax[2].axhline(np.mean(lambda_t.eval()[:,0]), color='red')
     plt.show()
     plt.close()
-
 
     # Observed serotyped cases
     ## Hierarchical overdispersion (per cluster)
