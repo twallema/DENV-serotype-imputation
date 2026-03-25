@@ -17,7 +17,7 @@ pytensor.config.on_opt_error = "ignore"
 # analysis startdate
 start_year = 1999
 start_month = 1
-end_year = 2000
+end_year = 2024
 assert start_year >= 1996, "earliest start_year is 1996."
 
 # helper function for argument parsing
@@ -475,10 +475,10 @@ with pm.Model() as model:
 
     # initial states
     ## initial susceptible and cross-protected states (cluster x state_idx)
-    f_P = pm.Beta("f_P", alpha=10, beta=20)                 # first division of cluster population happens based on amount in a cross-protected state
-    f_P2 = pm.Beta("f_P2", alpha=10, beta=1)                # fraction cross-protected after DENV-2 infection
-    pi_d = pm.Dirichlet("pi_d", a=10*np.array([2, 4, 4]))   # divide the non-cross-protected across naive, mono, double
-    pi_mono2 = pm.Beta("pi_mono2", alpha=10, beta=1)        # divide the mono between DENV-1 and DENV-2
+    f_P = 0.2 #pm.Beta("f_P", alpha=10, beta=20)                 # first division of cluster population happens based on amount in a cross-protected state
+    f_P2 = 0.75 # pm.Beta("f_P2", alpha=10, beta=1)                # fraction cross-protected after DENV-2 infection
+    pi_d = pt.as_tensor([0.2, 0.4, 0.4]) #pm.Dirichlet("pi_d", a=10*np.array([2, 4, 4]))   # divide the non-cross-protected across naive, mono, double
+    pi_mono2 = 0.75 #pm.Beta("pi_mono2", alpha=10, beta=1)        # divide the mono between DENV-1 and DENV-2
     S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, f_P, pi_d, pi_mono2))
     P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, f_P2))
 
@@ -487,24 +487,24 @@ with pm.Model() as model:
     gamma = 1/2
 
     ## average duration cross-protection
-    omega = pm.Lognormal("omega", mu=2.45, sigma=1/3)
+    omega = 18 #pm.Lognormal("omega", mu=2.45, sigma=1/3)
 
     ## average FOI reduction for homologous infections
     f_1 = pm.Beta("f_1", alpha=3, beta=3)
     f_2 = pm.Beta("f_2", alpha=1, beta=3)
-    f = pt.stack([f_1, f_2, 0, 0])
+    f = pt.stack([0.9, 0.8, 0.7, 0.7])
     f_per_I = f[sero_idx]
 
     ## reported fraction (cluster x degree x serotype)
-    kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1)                 # intercept
+    kappa0_logit = 0.1 #pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1)                 # intercept
     is_34 = pt.as_tensor([0,0,1,1])                                                             # indicator prim/sec versus tert/quart
-    log_or_34 = pm.Normal("log_or_34", mu=-1, sigma=1/3)                                        # OR detecting prim/sec versus tert/quart
-    log_or_serotype = pm.Normal("log_or_serotype", mu=0.0, sigma=1/3, shape=n_serotypes-1)    # OR detecting serotypes (vs. DENV-1)
+    log_or_34 = pm.Normal("log_or_34", mu=-3, sigma=1/10)                                        # OR detecting prim/sec versus tert/quart
+    log_or_serotype = pm.Normal("log_or_serotype", mu=0.0, sigma=1/10, shape=n_serotypes-1)    # OR detecting serotypes (vs. DENV-1)
     log_or_serotype_full = pt.concatenate([pt.zeros(1), log_or_serotype])
-    log_or_cluster = pm.Normal("log_or_cluster", mu=0.0, sigma=1/3, shape=n_clusters-1)         # OR detecting in a cluster (vs. cluster 1)
+    log_or_cluster = pm.Normal("log_or_cluster", mu=0.0, sigma=1/10, shape=n_clusters-1)         # OR detecting in a cluster (vs. cluster 1)
     log_or_cluster_full = pt.concatenate([pt.zeros(1), log_or_cluster])
     is_hom = pt.as_tensor([0,1])                                                                # indicator for homologous infection
-    log_or_hom = pm.Normal("log_or_hom", mu=0, sigma=1/3)                                      #            
+    log_or_hom = pm.Normal("log_or_hom", mu=-3, sigma=1/10)                                      #            
     logit_kappa = kappa0_logit + log_or_cluster_full[:, None, None, None] + log_or_34*is_34[None, :, None, None] \
         + log_or_serotype_full[None, None, :, None] + log_or_hom * is_hom[None, None, None, :]
     kappa = pm.Deterministic("kappa", pm.math.sigmoid(logit_kappa))
@@ -515,9 +515,9 @@ with pm.Model() as model:
 
     ## Fixed components of the FOI: transmission coefficient beta (seasonal + AR(1); time x cluster)
     ### seasonal component
-    mu_beta = pm.Normal("mu_beta", mu=np.log(2), sigma=1/3, shape=n_clusters)
-    A_beta = pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
-    phi_beta = pm.Normal("phi_beta", mu=pt.pi/3, sigma=1, shape=n_clusters) # peaks March
+    mu_beta = np.log(2) * pt.ones(n_clusters) #pm.Normal("mu_beta", mu=np.log(2), sigma=1/3, shape=n_clusters)
+    A_beta = 1 * pt.ones(n_clusters) #pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
+    phi_beta = 1 * pt.ones(n_clusters) #pm.Normal("phi_beta", mu=pt.pi/3, sigma=1, shape=n_clusters) # peaks March
     season = A_beta[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_beta[:, None])
     ### AR(1) component (non-centered)
     rho_ar_beta = pm.Beta("rho_ar_beta", alpha=3, beta=3)                 # persistence
@@ -526,7 +526,7 @@ with pm.Model() as model:
     u_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_raw[1:], outputs_info=pt.zeros(n_clusters), non_sequences=[rho_ar_beta, sigma_ar_beta])
     u = pt.concatenate([ pt.zeros(n_clusters)[None, :], u_seq], axis=0)
     #### Combine
-    beta_t = pm.Deterministic("beta_t", pt.exp(mu_beta[:, None] + season + u.T).T) #+ u.T
+    beta_t = pm.Deterministic("beta_t", pt.exp(mu_beta[:, None] + season).T) #+ u.T
 
     ## Initial infected
     I0 = build_initial_infected(pt.as_tensor(DENV_total[0,:]), pt.as_tensor(p0.values), kappa, pi_d)
