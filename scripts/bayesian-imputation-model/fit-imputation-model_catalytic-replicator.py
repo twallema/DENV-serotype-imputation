@@ -656,8 +656,8 @@ with model:
     trace = pm.sample(draws, tune=25, target_accept=0.99,
                      chains=chains, cores=chains, init='adapt_diag', progressbar=True,
                      initvals=chains*[{'f_P': 0.2, 'f_P2': 0.75, 'pi_d': pt.as_tensor([0.2, 0.4, 0.4]), 'pi_mono2': 0.75,
-                                       'omega': 12, 'f1': 0.8, 'f2': 0.8, 'f3': 0.5, 'kappa0_logit': pm.math.logit(0.1),
-                                       'mu_beta': np.log(2), 'A_beta': 1 * pt.ones(n_clusters), 'phi_beta': pt.ones(n_clusters),
+                                       'omega': 12, 'f_1': 0.8, 'f_2': 0.8, 'f_3': 0.5, 'kappa0_logit': pm.math.logit(0.1),
+                                       'mu_beta': np.log(2) * pt.ones(n_clusters), 'A_beta': 1 * pt.ones(n_clusters), 'phi_beta': pt.ones(n_clusters),
                                        'alpha_inv': 0.3}],
                      idata_kwargs={'log_likelihood':True})
 
