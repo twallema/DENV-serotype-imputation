@@ -17,7 +17,7 @@ pytensor.config.on_opt_error = "ignore"
 # analysis startdate
 start_year = 1998
 start_month = 9
-end_year = 2024
+end_year = 2010
 assert start_year >= 1996, "earliest start_year is 1996."
 
 # helper function for argument parsing
@@ -303,11 +303,11 @@ R_hom = pt.constant(R_hom)
 ## Bayesian imputation model ##
 ###############################
 
-def substep(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+def substep(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
          S_t, I_t, P_t, 
          C, W, H_het, H_hom,
-         sero_idx, het_idx, hom_idx,
-         f, f_per_I, gamma, omega, birth_vec, dt):
+         sero_idx, het_idx, hom_idx, 
+         gamma, omega, birth_vec, dt):
 
     # --- Total population ---
     N_t = pt.sum(S_t, axis=1) + pt.sum(I_t, axis=1) + pt.sum(P_t, axis=1)
@@ -334,59 +334,59 @@ def substep(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
     return S_next, I_next, P_next, dt * delta_I_hom, dt * delta_I_het
 
 
-def step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+def step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
          S_t, I_t, P_t, 
          C, W, H_het, H_hom,
          sero_idx, het_idx, hom_idx,
-         f, f_per_I, gamma, omega, birth_vec):
+         gamma, omega, birth_vec):
 
     # --- First substep ---
     S1, I1, P1, d_hom1, d_het1 = substep(
-        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
         S_t, I_t, P_t,
         C, W, H_het, H_hom,
         sero_idx, het_idx, hom_idx,
-        f, f_per_I, gamma, omega, birth_vec,
+        gamma, omega, birth_vec,
         0.2
     )
 
     # --- Second substep ---
     S2, I2, P2, d_hom2, d_het2 = substep(
-        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
         S1, I1, P1,
         C, W, H_het, H_hom,
         sero_idx, het_idx, hom_idx,
-        f, f_per_I, gamma, omega, birth_vec,
+        gamma, omega, birth_vec,
         0.2
     )
 
     # --- Third substep ---
     S3, I3, P3, d_hom3, d_het3 = substep(
-        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I, 
         S2, I2, P2,
         C, W, H_het, H_hom,
         sero_idx, het_idx, hom_idx,
-        f, f_per_I, gamma, omega, birth_vec,
+        gamma, omega, birth_vec,
         0.2
     )
 
     # --- Fourth substep ---
     S4, I4, P4, d_hom4, d_het4 = substep(
-        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
         S3, I3, P3,
         C, W, H_het, H_hom,
         sero_idx, het_idx, hom_idx,
-        f, f_per_I, gamma, omega, birth_vec,
+        gamma, omega, birth_vec,
         0.2
     )
 
     # --- Fifth substep ---
     S5, I5, P5, d_hom5, d_het5 = substep(
-        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
         S4, I4, P4,
         C, W, H_het, H_hom,
         sero_idx, het_idx, hom_idx,
-        f, f_per_I, gamma, omega, birth_vec,
+        gamma, omega, birth_vec,
         0.2
     )
 
@@ -506,12 +506,25 @@ with pm.Model() as model:
     ## average duration cross-protection
     omega = 12 #pm.Lognormal("omega", mu=2.45, sigma=1/3)
 
-    ## average FOI reduction for homologous infections
-    f_1 = pm.Beta("f_1", alpha=9, beta=3)
-    f_2 = pm.Beta("f_2", alpha=9, beta=3)
-    f_3 = pm.Beta("f_3", alpha=3, beta=3)
-    f = pt.stack([0.8, 0.82, 0.5, 0])
-    f_per_I = f[sero_idx]
+    ## average FOI reduction for homologous infections (n_months x n_serotypes)
+    ### time-dependent for DENV-1
+    mu_f1 = pm.Beta("mu_f1", alpha=9, beta=3)
+    rho_f1 = pm.Beta("rho_f1", alpha=3, beta=3)
+    sigma_f1 = pm.HalfNormal("sigma_f1", sigma=1/3)
+    eps_f1 = pm.Normal("eps_f1", 0, 1, shape=n_years+1)
+    f1_logit_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_f1[1:], outputs_info=pt.zeros(()), non_sequences=[rho_f1, sigma_f1])
+    f1_logit = pm.math.logit(mu_f1) + f1_logit_seq
+    f1_t = pm.math.sigmoid(f1_logit[year_idx[::n_clusters]])
+    ## time-independent for DENV-2/3
+    f2 = pm.Beta("f2", alpha=9, beta=3)
+    f3 = pm.Beta("f3", alpha=3, beta=3)
+    ## construct f
+    f = pt.zeros((n_months, n_serotypes))
+    f = pt.set_subtensor(f[:, 0], f1_t)
+    f = pt.set_subtensor(f[:, 1], f2)
+    f = pt.set_subtensor(f[:, 2], f3)
+    ## construct f_per_I
+    f_per_I = f[:, sero_idx]
 
     ## reported fraction (cluster x degree x serotype)
     kappa0_logit = pm.math.logit(1/10) #pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1)                 # intercept
@@ -559,12 +572,14 @@ with pm.Model() as model:
                    pt.as_tensor_variable(births),
                    pt.as_tensor_variable(death_rate),
                    pt.as_tensor_variable(intro_mask),
-                   pt.as_tensor_variable(estimated_proportions)],
+                   pt.as_tensor_variable(estimated_proportions),
+                   f, f_per_I
+                   ],
         outputs_info=[S0, I0, P0, None, None],
         non_sequences=[
             C, W, H_het, H_hom,
             sero_idx, het_idx, hom_idx,
-            f, f_per_I, gamma, omega, birth_vec
+            gamma, omega, birth_vec
         ]
     )
 
@@ -585,7 +600,7 @@ with pm.Model() as model:
     p = pm.Deterministic("p", (I_sero / pt.sum(I_sero, axis=2)[:, :, None]))
 
     # reshape S into susceptibility slots per (cluster, infection_degree, serotype and hom/het infection)
-    S_star = pm.Deterministic("S_star", pt.stack([pt.einsum("tci,ids->tcds", S, R_het), pt.einsum("tci,ids->tcds", S, f[None, None, :] * R_hom)], axis=-1))
+    S_star = pm.Deterministic("S_star", pt.stack([pt.einsum("tci,ids->tcds", S, R_het), pt.einsum("tci,ids,ts->tcds", S, R_hom, f)], axis=-1))
 
     # -----------
     # Observation
@@ -679,7 +694,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                 'f_P', 'f_P2', 'pi_d', 'pi_mono2', 'omega', 'f_1', 'f_2', 'kappa', 'kappa0_logit', 'or_34', 'or_cluster', 'or_serotype', 'or_homologous', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
+                 'f_P', 'f_P2', 'pi_d', 'pi_mono2', 'omega', 'mu_f1', 'sigma_f1', 'rho_f1', 'f2', 'f3', 'kappa', 'kappa0_logit', 'or_34', 'or_cluster', 'or_serotype', 'or_homologous', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 # Save traces
