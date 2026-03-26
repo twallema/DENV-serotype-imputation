@@ -8,9 +8,9 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 
 # analysis startdate
-start_year = 1999
+start_year = 1998
 start_month = 9
-end_year = 2000
+end_year = 2012
 assert start_year >= 1996, "earliest start_year is 1996."
 
 # helper function for argument parsing
@@ -436,7 +436,18 @@ for cluster in df['cluster'].unique().tolist():
     ax[6].set_ylabel('Total FOI (%)', fontsize=7)
     ax[6].set_ylim([-0.5,30])
 
-    # # 5: susceptibility slots per serotype
+    # 5: modeled serotype fractions
+    df_star = p_mean.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+    ax[7].stackplot(
+        df_star.index, [df_star['DENV_1']*100, df_star['DENV_2']*100, df_star['DENV_3']*100, df_star['DENV_4']*100],
+        labels=['1', '2', '3', '4'],
+        colors=['black', 'red', 'green', 'blue'],
+        alpha=0.9
+    )
+    ax[7].legend(framealpha=1, loc=3, fontsize=7)
+    ax[7].set_ylabel('Serotypes (%)', fontsize=7)
+
+    # # 6: susceptibility slots per serotype
     # # Filter data for a single UF
     # df_star_mean = S_mean.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
     # df_star_lower = S_lower.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
@@ -449,16 +460,6 @@ for cluster in df['cluster'].unique().tolist():
     #     ax[7].set_ylim([-3,125])
     # ax[7].set_ylabel('Susc. slots (%)', fontsize=7)
 
-    # 6: modeled serotype fractions
-    df_star = p_mean.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
-    ax[7].stackplot(
-        df_star.index, [df_star['DENV_1']*100, df_star['DENV_2']*100, df_star['DENV_3']*100, df_star['DENV_4']*100],
-        labels=['1', '2', '3', '4'],
-        colors=['black', 'red', 'green', 'blue'],
-        alpha=0.9
-    )
-    ax[7].legend(framealpha=1, loc=3, fontsize=7)
-    ax[7].set_ylabel('Serotypes (%)', fontsize=7)
 
     # # 7: susceptibles per degree of infection
     # # Filter data for a single UF
@@ -473,6 +474,10 @@ for cluster in df['cluster'].unique().tolist():
     #     alpha=0.9
     # )
     # ax[9].set_ylabel('Susc. degree (%)', fontsize=7)
+
+    # 8: seasonal forcing
+
+    # 9: time-dependent homologous infection FOI modifier
 
     os.makedirs(f'{output_folder}/fig/posterior_predictive', exist_ok=True)
     plt.savefig(f'{output_folder}/fig/posterior_predictive/{cluster}_total_serotyped.pdf')
