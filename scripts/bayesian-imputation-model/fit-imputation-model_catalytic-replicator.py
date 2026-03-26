@@ -507,19 +507,27 @@ with pm.Model() as model:
     omega = pm.Lognormal("omega", mu=2.45, sigma=1/3)
 
     ## average FOI reduction for homologous infections (n_months x n_serotypes)
-    ### time-dependent for DENV-1
-    mu_f1 = pm.Beta("mu_f1", alpha=9, beta=3)
+    ### time-dependent for DENV-1 / DENV-2
+    #### DENV-1
+    mu_f1 = pm.Beta("mu_f1", alpha=3, beta=3)
     rho_f1 = pm.Beta("rho_f1", alpha=3, beta=3)
     sigma_f1 = pm.HalfNormal("sigma_f1", sigma=1)
     eps_f1 = pm.Normal("eps_f1", 0, 1, shape=n_years+1)
     f1_logit_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_f1[1:], outputs_info=pt.zeros(()), non_sequences=[rho_f1, sigma_f1])
     f1_logit = pm.math.logit(mu_f1) + f1_logit_seq
     f1_t = pm.math.sigmoid(f1_logit[year_idx[::n_clusters]])
-    ## time-independent for DENV-2/3
-    f2 = pm.Beta("f2", alpha=9, beta=3)
-    f3 = pm.Beta("f3", alpha=3, beta=3)
+    #### DENV-2
+    mu_f2 = pm.Beta("mu_f2", alpha=3, beta=3)
+    rho_f2 = pm.Beta("rho_f2", alpha=3, beta=3)
+    sigma_f2 = pm.HalfNormal("sigma_f2", sigma=1)
+    eps_f2 = pm.Normal("eps_f2", 0, 1, shape=n_years+1)
+    f2_logit_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_f2[1:], outputs_info=pt.zeros(()), non_sequences=[rho_f2, sigma_f2])
+    f2_logit = pm.math.logit(mu_f2) + f2_logit_seq
+    f2_t = pm.math.sigmoid(f2_logit[year_idx[::n_clusters]])
+    ## time-independent for DENV-3
+    f3 = pm.Beta("f3", alpha=1, beta=3)
     ## construct f & save it
-    f = pm.Deterministic("f", pt.stack([f1_t, pt.repeat(f2, n_months), pt.repeat(f3, n_months), pt.repeat(0, n_months)], axis=1))
+    f = pm.Deterministic("f", pt.stack([f1_t, f2_t, pt.repeat(f3, n_months), pt.repeat(0, n_months)], axis=1))
     ## construct f_per_I
     f_per_I = f[:, sero_idx]
 
@@ -543,7 +551,7 @@ with pm.Model() as model:
 
     ## Fixed components of the FOI: transmission coefficient beta (seasonal + AR(1); time x cluster)
     ### seasonal component
-    mu_beta = pm.Normal("mu_beta", mu=np.log(2), sigma=1/3, shape=n_clusters)
+    mu_beta = pm.Normal("mu_beta", mu=np.log(2.5), sigma=1/5, shape=n_clusters)
     A_beta = pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
     phi_beta = pm.Normal("phi_beta", mu=pt.pi/3, sigma=1, shape=n_clusters) # peaks March
     season = A_beta[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_beta[:, None])
@@ -691,7 +699,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                 'f_P', 'f_P2', 'pi_d', 'pi_mono2', 'omega', 'mu_f1', 'sigma_f1', 'rho_f1', 'f2', 'f3', 'kappa', 'kappa0_logit', 'or_34', 'or_cluster', 'or_serotype', 'or_homologous', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
+                 'f_P', 'f_P2', 'pi_d', 'pi_mono2', 'omega', 'mu_f1', 'sigma_f1', 'rho_f1', 'mu_f2', 'sigma_f2', 'rho_f2', 'f3', 'kappa', 'kappa0_logit', 'or_34', 'or_cluster', 'or_serotype', 'or_homologous', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 # Save traces
