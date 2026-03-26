@@ -492,10 +492,10 @@ with pm.Model() as model:
 
     # initial states
     ## initial susceptible and cross-protected states (cluster x state_idx)
-    f_P = 0.2 #pm.Beta("f_P", alpha=10, beta=20)                 # first division of cluster population happens based on amount in a cross-protected state
-    f_P2 = 0.75 # pm.Beta("f_P2", alpha=10, beta=1)                # fraction cross-protected after DENV-2 infection
+    f_P = 0.2 #pm.Beta("f_P", alpha=8, beta=24)                 # first division of cluster population happens based on amount in a cross-protected state
+    f_P2 = 0.75 # pm.Beta("f_P2", alpha=3, beta=1)                # fraction cross-protected after DENV-2 infection
     pi_d = pt.as_tensor([0.2, 0.4, 0.4]) #pm.Dirichlet("pi_d", a=10*np.array([2, 4, 4]))   # divide the non-cross-protected across naive, mono, double
-    pi_mono2 = 0.75 #pm.Beta("pi_mono2", alpha=10, beta=1)        # divide the mono between DENV-1 and DENV-2
+    pi_mono2 = 0.75 #pm.Beta("pi_mono2", alpha=3, beta=1)        # divide the mono between DENV-1 and DENV-2
     S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, f_P, pi_d, pi_mono2))
     P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, f_P2))
 
@@ -507,22 +507,22 @@ with pm.Model() as model:
     omega = 12 #pm.Lognormal("omega", mu=2.45, sigma=1/3)
 
     ## average FOI reduction for homologous infections
-    f_1 = pm.Beta("f_1", alpha=3, beta=3)
-    f_2 = pm.Beta("f_2", alpha=1, beta=3)
-    f_3 = pm.Beta("f_3", alpha=1, beta=3)
+    f_1 = pm.Beta("f_1", alpha=9, beta=3)
+    f_2 = pm.Beta("f_2", alpha=9, beta=3)
+    f_3 = pm.Beta("f_3", alpha=3, beta=3)
     f = pt.stack([0.8, 0.82, 0.5, 0])
     f_per_I = f[sero_idx]
 
     ## reported fraction (cluster x degree x serotype)
     kappa0_logit = pm.math.logit(1/10) #pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1)                 # intercept
     is_34 = pt.as_tensor([0,0,1,1])                                                             # indicator prim/sec versus tert/quart
-    log_or_34 = pm.Normal("log_or_34", mu=-3, sigma=1/10)                                        # OR detecting prim/sec versus tert/quart
-    log_or_serotype = pm.Normal("log_or_serotype", mu=0.0, sigma=1/10, shape=n_serotypes-1)    # OR detecting serotypes (vs. DENV-1)
+    log_or_34 = pm.Normal("log_or_34", mu=-3, sigma=1/3)                                        # OR detecting prim/sec versus tert/quart
+    log_or_serotype = pm.Normal("log_or_serotype", mu=0.0, sigma=1/3, shape=n_serotypes-1)    # OR detecting serotypes (vs. DENV-1)
     log_or_serotype_full = pt.concatenate([pt.zeros(1), log_or_serotype])
-    log_or_cluster = pm.Normal("log_or_cluster", mu=0.0, sigma=1/10, shape=n_clusters-1)         # OR detecting in a cluster (vs. cluster 1)
+    log_or_cluster = pm.Normal("log_or_cluster", mu=0.0, sigma=1/3, shape=n_clusters-1)         # OR detecting in a cluster (vs. cluster 1)
     log_or_cluster_full = pt.concatenate([pt.zeros(1), log_or_cluster])
     is_hom = pt.as_tensor([1,0])                                                                # indicator for homologous infection
-    log_or_hom = pm.Normal("log_or_hom", mu=-3, sigma=1/10)                                      #            
+    log_or_hom = pm.Normal("log_or_hom", mu=-3, sigma=1/3)                                      #            
     logit_kappa = kappa0_logit + log_or_cluster_full[:, None, None, None] + log_or_34*is_34[None, :, None, None] \
         + log_or_serotype_full[None, None, :, None] + log_or_hom * is_hom[None, None, None, :]
     kappa = pm.Deterministic("kappa", pm.math.sigmoid(logit_kappa))
@@ -651,11 +651,14 @@ with pm.Model() as model:
 #######################
 
 # NUTS
-draws=10
+draws=25
 with model:
     trace = pm.sample(draws, tune=25, target_accept=0.99,
-                     chains=chains, cores=chains, init='jitter+adapt_diag', progressbar=True,
-                     initvals=chains*[{'alpha_inv': 0.3,}],
+                     chains=chains, cores=chains, init='adapt_diag', progressbar=True,
+                     initvals=chains*[{'f_P': 0.2, 'f_P2': 0.75, 'pi_d': pt.as_tensor([0.2, 0.4, 0.4]), 'pi_mono2': 0.75,
+                                       'omega': 12, 'f1': 0.8, 'f2': 0.8, 'f3': 0.5, 'kappa0_logit': pm.math.logit(0.1),
+                                       'mu_beta': np.log(2), 'A_beta': 1 * pt.ones(n_clusters), 'phi_beta': pt.ones(n_clusters),
+                                       'alpha_inv': 0.3}],
                      idata_kwargs={'log_likelihood':True})
 
 #######################
