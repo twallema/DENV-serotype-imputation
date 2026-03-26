@@ -16,7 +16,7 @@ pytensor.config.on_opt_error = "ignore"
 
 # analysis startdate
 start_year = 1998
-start_month = 8
+start_month = 9
 end_year = 2024
 assert start_year >= 1996, "earliest start_year is 1996."
 
@@ -101,9 +101,6 @@ assert all(col in df.columns for col in required_cols)
 # 2. Sort for safety
 df = df.sort_values(["CD_MUN", "date"]).reset_index(drop=True)
 
-# 3. Take only from start_year to end_year
-df = df[((df['date'] > datetime(start_year,start_month,1)) & (df['date'] <= datetime(end_year,12,31)))]
-
 # 4. Remove within-sample validation municipalities
 df.loc[df['CD_MUN'].isin(validation_labels.values), ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'DENV_total'] ] = np.nan
 
@@ -151,13 +148,17 @@ df["delta"] = df["N_typed"] / df["DENV_total"]
 df['delta'] = df['delta'].where(df['N_typed'] > 0, np.nan) # When N_typed == 0, we don't know delta — mark as missing
 df["delta"] = df["delta"].clip(lower=1e-12, upper=1 - 1e-12)
 
+# only do first X clusters
+df = df[df['cluster'].isin([23, 24])]
+
+# 3. Take only from start_year to end_year
+df_alldates = df.copy()
+df = df[((df['date'] > datetime(start_year,start_month,1)) & (df['date'] <= datetime(end_year,12,31)))]
+
 # 8. Compute year and month index
 df["year"] = pd.to_datetime(df["date"]).dt.year
 df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
-
-# only do first X clusters
-df = df[df['cluster'].isin([23, 24])]
 
 # 9. Build PyMC arrays
 # --- For DirichletMultinomial model ---
@@ -194,13 +195,15 @@ n_months = int(len(df["month_idx"].unique()))
 n_years = int(df["year_idx"].max() + 1)
 n_serotypes = len(sero_cols)
 
-# Estimate initial serotype distribution p0 from first year of data in every cluster
+# Estimate initial serotype distribution p0 from all data before startdate
 # Use the mean of the posterior of Dirichlet-Multinomial model with symmetric prior alpha = 1/2 (Jeffrey's prior = uninformative prior)
-d = df[df['year'] == min(df['year'])].groupby(by='cluster')[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].sum()
+d = df_alldates[df_alldates['date'] <= datetime(start_year, start_month, 1)].groupby(by='cluster')[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].sum()
+#d = df[df['year'] == min(df['year'])].groupby(by='cluster')[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].sum()
 cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4"]
 alpha = 1/2
 p0 = (d[cols] + alpha).div(d[cols].sum(axis=1) + len(cols) * alpha, axis=0)
 # But we set DENV_4 initially to zero and renormalise --> comes through seeding
+p0['DENV_3'] = 0
 p0['DENV_4'] = 0
 p0 = p0.div(p0.sum(axis=1), axis=0)
 
@@ -231,6 +234,7 @@ unique_dates = np.sort(df["date"].unique())
 years = pd.DatetimeIndex(unique_dates).year
 intro_mask = np.ones((len(unique_dates), 4))
 intro_mask[:, 3] = (years >= 2008).astype(int)
+intro_mask[:, 2] = (years >= 1999).astype(int)
 
 # Load in the transmission model state mappings
 ## susceptibles
@@ -468,7 +472,7 @@ def build_initial_infected(DENV_total, p0, kappa, pi_d):
     second_inf = pi_d[1] / pi_sum
 
     # divide the total dengue cases over the serotypes under the assumption they are heterologous infections
-    DENV_total_est = ((DENV_total[:, None] * p0)[:, None, :] / kappa[:, :, :, 0]) * pt.stack([first_inf, second_inf, 0, 0])[None,:, None]   # shape: (n_clusters, n_serotypes)
+    DENV_total_est = ((DENV_total[:, None] * p0)[:, None, :] / kappa[:, :, :, 1]) * pt.stack([first_inf, second_inf, 0, 0])[None,:, None]   # shape: (n_clusters, n_serotypes)
 
     # zeros
     z = pt.zeros_like(DENV_total_est[:, 0, 0])
@@ -510,7 +514,7 @@ with pm.Model() as model:
     f_per_I = f[sero_idx]
 
     ## reported fraction (cluster x degree x serotype)
-    kappa0_logit = 0.1 #pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1)                 # intercept
+    kappa0_logit = pm.math.logit(1/10) #pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1)                 # intercept
     is_34 = pt.as_tensor([0,0,1,1])                                                             # indicator prim/sec versus tert/quart
     log_or_34 = pm.Normal("log_or_34", mu=-3, sigma=1/10)                                        # OR detecting prim/sec versus tert/quart
     log_or_serotype = pm.Normal("log_or_serotype", mu=0.0, sigma=1/10, shape=n_serotypes-1)    # OR detecting serotypes (vs. DENV-1)
@@ -570,9 +574,9 @@ with pm.Model() as model:
     P = pm.Deterministic("P", P)
 
     # compute FOI trajectory
-    lambda_t = pm.Deterministic("lambda_t", beta_t * pt.sum(I, axis=2) / (pt.sum(S, axis=2) + pt.sum(P, axis=2)))
+    lambda_t = pm.Deterministic("lambda_t", beta_t * pt.sum(I, axis=2) / (pt.sum(S, axis=2) + pt.sum(I, axis=2) + pt.sum(P, axis=2)))
 
-    # reshape Delta_I into observations per cluster, degree, serotype and hom/het infection
+    # reshape Delta_I into observations per (cluster, infection_degree, serotype and hom/het infection)
     # + soft bottom so Delta_I can never hit zero --> else p_reported = 0 --> a = 0 in DirichletMultinomial --> logp = -inf !!
     Delta_I = pm.Deterministic("Delta_I", 1 + pt.softplus(pt.stack([pt.einsum("tci,ids->tcds", Delta_I_hom, O), pt.einsum("tci,ids->tcds", Delta_I_het, O)], axis=-1) - 1))
 
@@ -580,7 +584,7 @@ with pm.Model() as model:
     I_sero = pt.dot(I, C)
     p = pm.Deterministic("p", (I_sero / pt.sum(I_sero, axis=2)[:, :, None]))
 
-    # reshape S into susceptibility slots per cluster, degree, serotype and hom/het infection
+    # reshape S into susceptibility slots per (cluster, infection_degree, serotype and hom/het infection)
     S_star = pm.Deterministic("S_star", pt.stack([pt.einsum("tci,ids->tcds", S, R_het), pt.einsum("tci,ids->tcds", S, f[None, None, :] * R_hom)], axis=-1))
 
     # -----------
@@ -602,17 +606,21 @@ with pm.Model() as model:
     alpha = phi[:, :, None] * p_detect
     VIF = pm.Deterministic("VIF", (N_typed + phi) / (1 + phi)) # variance inflation of dirichlet multinomial compared to multinomial
 
-    fig,ax=plt.subplots(nrows=5)
+    fig,ax=plt.subplots(nrows=6)
     # serotype proportions
-    ax[0].plot(p.eval()[:,0,0], color='black')
-    ax[0].plot(p.eval()[:,0,1], color='red')
-    ax[0].plot(p.eval()[:,0,2], color='green')
-    ax[0].plot(p.eval()[:,0,3], color='blue')
+    ax[0].stackplot(range(len(p.eval()[:,0,0])),
+                        p.eval()[:,0,0], 
+                        p.eval()[:,0,1],
+                        p.eval()[:,0,2],
+                        p.eval()[:,0,3],
+                        colors=['black', 'red', 'green', 'blue'])
     # detected serotype proportions
-    ax[1].plot(p_detect.eval()[:,0,0], color='black')
-    ax[1].plot(p_detect.eval()[:,0,1], color='red')
-    ax[1].plot(p_detect.eval()[:,0,2], color='green')
-    ax[1].plot(p_detect.eval()[:,0,3], color='blue')
+    ax[1].stackplot(range(len(p_detect.eval()[:,0,0])),
+                        p_detect.eval()[:,0,0], 
+                        p_detect.eval()[:,0,1],
+                        p_detect.eval()[:,0,2],
+                        p_detect.eval()[:,0,3],
+                        colors=['black', 'red', 'green', 'blue'])
     # observed cases
     ax[2].scatter(range(len(DENV_total[:,0])), DENV_total[:,0], color='black', alpha=0.6, s=5)
     ax[2].plot(D_obs.eval()[:,0], color='red')
@@ -624,6 +632,14 @@ with pm.Model() as model:
     ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,1], color='red')
     ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,2], color='green')
     ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,3], color='blue')
+    # susceptibility slots per degree of infection
+    ax[5].stackplot(range(len(pt.sum(S_star, axis=(3,4)).eval()[:,0,0])),
+                            pt.sum(S_star, axis=(3,4)).eval()[:,0,0],
+                            pt.sum(S_star, axis=(3,4)).eval()[:,0,1],
+                            pt.sum(S_star, axis=(3,4)).eval()[:,0,2],
+                            pt.sum(S_star, axis=(3,4)).eval()[:,0,3],
+                            pt.sum(S_star, axis=(3,4)).eval()[:,0,4],
+                            colors=['black', 'red', 'orange', 'yellow', 'green'])
     plt.show()
     plt.close()
 
