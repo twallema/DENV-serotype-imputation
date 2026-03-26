@@ -268,13 +268,26 @@ hom_idx  = pt.constant(IP_mapping["S_to_I_homol"].values)
 birth_vec = np.zeros(len(S_mapping))
 birth_vec[0] = 1.0
 birth_vec_t = pt.constant(birth_vec)
-## Delta_I mapping
+## Delta_I mapping to (cluster, degree, serotype)
 O = np.zeros((len(IP_mapping), IP_mapping["no_prior_heterol_inf"].max() + 1, n_serotypes))
 for i, row in IP_mapping.iterrows():
     d = int(row["no_prior_heterol_inf"])
     s = int(row["currently_infected_with"]) - 1
     O[i, d, s] = 1.0
 O = pt.constant(O)
+## S mapping to (cluster, degree, serotype)
+### make two maps: one to heterologous and one to homologous 
+### susceptibility slots = heterologous + f_i * homologous
+R_het = np.zeros((len(S_mapping), S_mapping["no_prior_heterol_inf"].max() + 1, n_serotypes))
+R_hom = np.zeros((len(S_mapping), S_mapping["no_prior_heterol_inf"].max() + 1, n_serotypes))
+for i, row in S_mapping.iterrows():
+    d = int(row["no_prior_heterol_inf"])
+    for s in row["susc_to_heterol_inf"]:
+        R_het[i, d, s-1] = 1.0
+    for s in row["susc_to_homol_inf"]:
+        R_hom[i, d, s-1] = 1.0
+R_het = pt.constant(R_het)
+R_hom = pt.constant(R_hom)
 
 # Tutorials that helped build this model (step function)
 # https://www.youtube.com/watch?v=G9VWXZdbtKQ
@@ -492,7 +505,8 @@ with pm.Model() as model:
     ## average FOI reduction for homologous infections
     f_1 = pm.Beta("f_1", alpha=3, beta=3)
     f_2 = pm.Beta("f_2", alpha=1, beta=3)
-    f = pt.stack([0.85, 0.85, 0.60, 0.50])
+    f_3 = pm.Beta("f_3", alpha=1, beta=3)
+    f = pt.stack([0.8, 0.82, 0.5, 0])
     f_per_I = f[sero_idx]
 
     ## reported fraction (cluster x degree x serotype)
@@ -520,7 +534,7 @@ with pm.Model() as model:
     phi_beta = 1 * pt.ones(n_clusters) #pm.Normal("phi_beta", mu=pt.pi/3, sigma=1, shape=n_clusters) # peaks March
     season = A_beta[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_beta[:, None])
     ### AR(1) component (non-centered)
-    rho_ar_beta = pm.Beta("rho_ar_beta", alpha=3, beta=3)                 # persistence
+    rho_ar_beta = pm.Beta("rho_ar_beta", alpha=1, beta=3)                 # persistence
     sigma_ar_beta = pm.HalfNormal("sigma_ar_beta", sigma=1/3)             # freedom
     eps_raw = pm.Normal("eps_raw", mu=0, sigma=1, shape=(n_months, n_clusters))
     u_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_raw[1:], outputs_info=pt.zeros(n_clusters), non_sequences=[rho_ar_beta, sigma_ar_beta])
@@ -566,13 +580,8 @@ with pm.Model() as model:
     I_sero = pt.dot(I, C)
     p = pm.Deterministic("p", (I_sero / pt.sum(I_sero, axis=2)[:, :, None]))
 
-    # sanity check: is mass preserved (set births and deaths to zero) -> yes!
-    # fig,ax=plt.subplots()
-    # ax.plot((pt.sum(S, axis=2) + pt.sum(I, axis=2) + pt.sum(P, axis=2)).eval()[:,1], color='black')
-    # plt.show()
-    # plt.close()
-
-    # sanity check: susceptible slots per serotype
+    # reshape S into susceptibility slots per cluster, degree, serotype and hom/het infection
+    S_star = pm.Deterministic("S_star", pt.stack([pt.einsum("tci,ids->tcds", S, R_het), pt.einsum("tci,ids->tcds", S, f[None, None, :] * R_hom)], axis=-1))
 
     # -----------
     # Observation
@@ -593,7 +602,7 @@ with pm.Model() as model:
     alpha = phi[:, :, None] * p_detect
     VIF = pm.Deterministic("VIF", (N_typed + phi) / (1 + phi)) # variance inflation of dirichlet multinomial compared to multinomial
 
-    fig,ax=plt.subplots(nrows=4)
+    fig,ax=plt.subplots(nrows=5)
     # serotype proportions
     ax[0].plot(p.eval()[:,0,0], color='black')
     ax[0].plot(p.eval()[:,0,1], color='red')
@@ -610,6 +619,11 @@ with pm.Model() as model:
     # force of infection
     ax[3].plot(lambda_t.eval()[:,0], color='black')
     ax[3].axhline(np.mean(lambda_t.eval()[:,0]), color='red')
+    # susceptibility slots
+    ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,0], color='black')
+    ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,1], color='red')
+    ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,2], color='green')
+    ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,3], color='blue')
     plt.show()
     plt.close()
 
