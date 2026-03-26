@@ -313,8 +313,8 @@ def substep(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
     N_t = pt.sum(S_t, axis=1) + pt.sum(I_t, axis=1) + pt.sum(P_t, axis=1)
     
     # --- FOI ---
-    lambda_t = beta_t[:, None] * (I_t @ C) / (N_t[:, None] + 1)         # (clusters, serotypes)
-    lambda_t += dt * 1e-6 * intro_mask_t[None, :] * estimated_prop_t       # seeding
+    lambda_t = beta_t[:, None] * (I_t @ C) / N_t[:, None]         # (clusters, serotypes)
+    lambda_t += 1e-7 * intro_mask_t[None, :] * estimated_prop_t       # seeding
 
     # --- Susceptibles ---
     effective_lambda = (lambda_t @ H_het.T + (lambda_t * f[None, :]) @ H_hom.T)     # Effective FOI acting on each susceptible state
