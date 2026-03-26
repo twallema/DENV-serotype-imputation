@@ -17,7 +17,7 @@ pytensor.config.on_opt_error = "ignore"
 # analysis startdate
 start_year = 1998
 start_month = 9
-end_year = 2012
+end_year = 2015
 assert start_year >= 1996, "earliest start_year is 1996."
 
 # helper function for argument parsing
@@ -618,42 +618,42 @@ with pm.Model() as model:
     alpha = phi[:, :, None] * p_detect
     VIF = pm.Deterministic("VIF", (N_typed + phi) / (1 + phi)) # variance inflation of dirichlet multinomial compared to multinomial
 
-    fig,ax=plt.subplots(nrows=6)
-    # serotype proportions
-    ax[0].stackplot(range(len(p.eval()[:,0,0])),
-                        p.eval()[:,0,0], 
-                        p.eval()[:,0,1],
-                        p.eval()[:,0,2],
-                        p.eval()[:,0,3],
-                        colors=['black', 'red', 'green', 'blue'])
-    # detected serotype proportions
-    ax[1].stackplot(range(len(p_detect.eval()[:,0,0])),
-                        p_detect.eval()[:,0,0], 
-                        p_detect.eval()[:,0,1],
-                        p_detect.eval()[:,0,2],
-                        p_detect.eval()[:,0,3],
-                        colors=['black', 'red', 'green', 'blue'])
-    # observed cases
-    ax[2].scatter(range(len(DENV_total[:,0])), DENV_total[:,0], color='black', alpha=0.6, s=5)
-    ax[2].plot(D_obs.eval()[:,0], color='red')
-    # force of infection
-    ax[3].plot(lambda_t.eval()[:,0], color='black')
-    ax[3].axhline(np.mean(lambda_t.eval()[:,0]), color='red')
-    # susceptibility slots
-    ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,0], color='black')
-    ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,1], color='red')
-    ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,2], color='green')
-    ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,3], color='blue')
-    # susceptibility slots per degree of infection
-    ax[5].stackplot(range(len(pt.sum(S_star, axis=(3,4)).eval()[:,0,0])),
-                            pt.sum(S_star, axis=(3,4)).eval()[:,0,0],
-                            pt.sum(S_star, axis=(3,4)).eval()[:,0,1],
-                            pt.sum(S_star, axis=(3,4)).eval()[:,0,2],
-                            pt.sum(S_star, axis=(3,4)).eval()[:,0,3],
-                            pt.sum(S_star, axis=(3,4)).eval()[:,0,4],
-                            colors=['black', 'red', 'orange', 'yellow', 'green'])
-    plt.show()
-    plt.close()
+    # fig,ax=plt.subplots(nrows=6)
+    # # serotype proportions
+    # ax[0].stackplot(range(len(p.eval()[:,0,0])),
+    #                     p.eval()[:,0,0], 
+    #                     p.eval()[:,0,1],
+    #                     p.eval()[:,0,2],
+    #                     p.eval()[:,0,3],
+    #                     colors=['black', 'red', 'green', 'blue'])
+    # # detected serotype proportions
+    # ax[1].stackplot(range(len(p_detect.eval()[:,0,0])),
+    #                     p_detect.eval()[:,0,0], 
+    #                     p_detect.eval()[:,0,1],
+    #                     p_detect.eval()[:,0,2],
+    #                     p_detect.eval()[:,0,3],
+    #                     colors=['black', 'red', 'green', 'blue'])
+    # # observed cases
+    # ax[2].scatter(range(len(DENV_total[:,0])), DENV_total[:,0], color='black', alpha=0.6, s=5)
+    # ax[2].plot(D_obs.eval()[:,0], color='red')
+    # # force of infection
+    # ax[3].plot(lambda_t.eval()[:,0], color='black')
+    # ax[3].axhline(np.mean(lambda_t.eval()[:,0]), color='red')
+    # # susceptibility slots
+    # ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,0], color='black')
+    # ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,1], color='red')
+    # ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,2], color='green')
+    # ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,3], color='blue')
+    # # susceptibility slots per degree of infection
+    # ax[5].stackplot(range(len(pt.sum(S_star, axis=(3,4)).eval()[:,0,0])),
+    #                         pt.sum(S_star, axis=(3,4)).eval()[:,0,0],
+    #                         pt.sum(S_star, axis=(3,4)).eval()[:,0,1],
+    #                         pt.sum(S_star, axis=(3,4)).eval()[:,0,2],
+    #                         pt.sum(S_star, axis=(3,4)).eval()[:,0,3],
+    #                         pt.sum(S_star, axis=(3,4)).eval()[:,0,4],
+    #                         colors=['black', 'red', 'orange', 'yellow', 'green'])
+    # plt.show()
+    # plt.close()
 
     # --- Observed subtyped incidences ---
     Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
@@ -663,9 +663,9 @@ with pm.Model() as model:
 #######################
 
 # NUTS
-draws=10
+draws=50
 with model:
-    trace = pm.sample(draws, tune=10, target_accept=0.99,
+    trace = pm.sample(draws, tune=150, target_accept=0.99,
                      chains=chains, cores=chains, init='adapt_diag', progressbar=True,
                      initvals=chains*[{'f_P': 0.2, 'f_P2': 0.75, 'pi_d': pt.as_tensor([0.2, 0.4, 0.4]), 'pi_mono2': 0.75,
                                        'omega': 12, 'mu_f1': 0.8, 'f2': 0.8, 'f3': 0.5, 'kappa0_logit': pm.math.logit(0.1),
