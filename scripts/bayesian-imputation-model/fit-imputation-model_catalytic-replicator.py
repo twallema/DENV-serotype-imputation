@@ -30,7 +30,7 @@ def str_to_bool(value):
 parser = argparse.ArgumentParser()
 parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
-parser.add_argument("-chains", type=int, help="Number of parallel chains.", default=3)
+parser.add_argument("-chains", type=int, help="Number of parallel chains.", default=4)
 args = parser.parse_args()
 
 # assign to desired variables
@@ -509,7 +509,7 @@ with pm.Model() as model:
     ## average FOI reduction for homologous infections (n_months x n_serotypes)
     ### time-dependent for DENV-1 / DENV-2
     #### DENV-1
-    mu_f1 = pm.Beta("mu_f1", alpha=3, beta=3)
+    mu_f1 = pm.Beta("mu_f1", alpha=1, beta=10)
     rho_f1 = pm.Beta("rho_f1", alpha=3, beta=3)
     sigma_f1 = pm.HalfNormal("sigma_f1", sigma=1)
     eps_f1 = pm.Normal("eps_f1", 0, 1, shape=n_years+1)
@@ -517,7 +517,7 @@ with pm.Model() as model:
     f1_logit = pm.math.logit(mu_f1) + f1_logit_seq
     f1_t = pm.math.sigmoid(f1_logit[year_idx[::n_clusters]])
     #### DENV-2
-    mu_f2 = pm.Beta("mu_f2", alpha=3, beta=3)
+    mu_f2 = pm.Beta("mu_f2", alpha=1, beta=10)
     rho_f2 = pm.Beta("rho_f2", alpha=3, beta=3)
     sigma_f2 = pm.HalfNormal("sigma_f2", sigma=1)
     eps_f2 = pm.Normal("eps_f2", 0, 1, shape=n_years+1)
@@ -525,7 +525,7 @@ with pm.Model() as model:
     f2_logit = pm.math.logit(mu_f2) + f2_logit_seq
     f2_t = pm.math.sigmoid(f2_logit[year_idx[::n_clusters]])
     ## time-independent for DENV-3
-    f3 = pm.Beta("f3", alpha=1, beta=3)
+    f3 = pm.Beta("f3", alpha=1, beta=20)
     ## construct f & save it
     f = pm.Deterministic("f", pt.stack([f1_t, f2_t, pt.repeat(f3, n_months), pt.repeat(0, n_months)], axis=1))
     ## construct f_per_I
@@ -671,12 +671,12 @@ with pm.Model() as model:
 #######################
 
 # NUTS
-draws=50
+draws=250
 with model:
-    trace = pm.sample(draws, tune=150, target_accept=0.99,
+    trace = pm.sample(draws, tune=250, target_accept=0.99,
                      chains=chains, cores=chains, init='adapt_diag', progressbar=True,
                      initvals=chains*[{'f_P': 0.2, 'f_P2': 0.75, 'pi_d': pt.as_tensor([0.2, 0.4, 0.4]), 'pi_mono2': 0.75,
-                                       'omega': 12, 'mu_f1': 0.8, 'f2': 0.8, 'f3': 0.5, 'kappa0_logit': pm.math.logit(0.1),
+                                       'omega': 12, 'mu_f1': 0.8, 'mu_f2': 0.8, 'f3': 0.5, 'kappa0_logit': pm.math.logit(0.1),
                                        'mu_beta': np.log(2) * pt.ones(n_clusters), 'A_beta': 1 * pt.ones(n_clusters), 'phi_beta': pt.ones(n_clusters),
                                        'alpha_inv': 0.3}],
                      idata_kwargs={'log_likelihood':True})

@@ -469,7 +469,7 @@ for cluster in df['cluster'].unique().tolist():
     ax[9].plot(df_star_mean.index, df_star_mean[f'FOI']*100, color='hotpink', alpha=1)
     ax[9].fill_between(df_star_mean.index, df_star_lower['FOI']*100, df_star_upper['FOI']*100, color='hotpink', alpha=0.2)
     ax[9].set_ylabel('Total FOI (%)', fontsize=7)
-    ax[9].set_ylim([-0.5,35])
+    ax[9].set_ylim([-0.5,None])
 
     # 9: seasonal forcing
     # Filter data for a single UF
