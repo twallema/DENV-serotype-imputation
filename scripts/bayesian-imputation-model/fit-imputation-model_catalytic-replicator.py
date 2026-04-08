@@ -272,16 +272,16 @@ for j, row in S_mapping.iterrows():
         H_het[j, int(k)-1] = 1.0
     for k in row["susc_to_homol_inf"]:
         H_hom[j, int(k)-1] = 1.0
-H_het = pt.constant(H_het)
-H_hom = pt.constant(H_hom)
+H_het = pt.transpose(pt.constant(H_het))
+H_hom = pt.transpose(pt.constant(H_hom))
 ## Flow of S states into I states (heterologous and homologous)
 K_het = np.zeros((n_I, n_S))
 K_hom = np.zeros((n_I, n_S))
 for i, row in IP_mapping.iterrows():
     K_het[i, int(row["S_to_I_heterol"])] = 1.0
     K_hom[i, int(row["S_to_I_homol"])] = 1.0
-K_het = pt.constant(K_het)
-K_hom = pt.constant(K_hom)
+K_het = pt.transpose(pt.constant(K_het))
+K_hom = pt.transpose(pt.constant(K_hom))
 ## Map serotype-specific FOI to the per I state FOI
 L = np.zeros((n_serotypes, n_I))
 for i, s in enumerate(IP_mapping["currently_infected_with"].values - 1):
@@ -334,82 +334,114 @@ def substep(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per
     N_t = pt.sum(S_t, axis=1) + pt.sum(I_t, axis=1) + pt.sum(P_t, axis=1)   # (clusters,)
     
     # --- FOI ---
-    lambda_t = beta_t[:, None] * (I_t @ C) / N_t[:, None]                   # (clusters, serotypes)
+    lambda_t = beta_t[:, None] * pt.dot(I_t, C) / N_t[:, None]                   # (clusters, serotypes)
     lambda_t += 1e-7 * intro_mask_t[None, :] * estimated_prop_t             # seeding
 
     # --- Susceptibles ---
-    effective_lambda = (lambda_t @ H_het.T + (lambda_t * f[None, :]) @ H_hom.T)     # (clusters, n_S)
-    S_next = S_t + dt * (births_t[:, None] * birth_vec[None, :] - deaths_t[:, None] * S_t + (1/omega) * (P_t @ W) - effective_lambda * S_t)
+    effective_lambda = (pt.dot(lambda_t, H_het) + pt.dot((lambda_t * f[None, :]), H_hom))     # (clusters, n_S)
+    dS_dt = births_t[:, None] * birth_vec[None, :] - deaths_t[:, None] * S_t + (1/omega) * pt.dot(P_t, W) - effective_lambda * S_t
 
     # --- Infectious  ---
-    lambda_per_I = lambda_t @ L     # (clusters, n_I)
-    S_to_I_het = S_t @ K_het.T                         
-    S_to_I_hom = S_t @ K_hom.T                                
-    delta_I_het = lambda_per_I * S_to_I_het                    
-    delta_I_hom = lambda_per_I * (S_to_I_hom * f_per_I[None, :])
-    I_next = I_t + dt * (-(1/gamma + deaths_t)[:, None] * I_t + delta_I_het + delta_I_hom)
+    lambda_per_I = pt.dot(lambda_t, L)     # (clusters, n_I)                                         
+    delta_I_het = lambda_per_I * pt.dot(S_t, K_het)                
+    delta_I_hom = lambda_per_I * (pt.dot(S_t, K_hom) * f_per_I[None, :])
+    dI_dt = -(1/gamma + deaths_t)[:, None] * I_t + delta_I_het + delta_I_hom
 
     # --- Cross-protection ---
-    P_next = P_t + dt * (-(1/omega + deaths_t)[:, None] * P_t + (1/gamma) * I_t)
+    dP_dt = -(1/omega + deaths_t)[:, None] * P_t + (1/gamma) * I_t
 
-    return S_next, I_next, P_next, dt * delta_I_hom, dt * delta_I_het, lambda_t
+    return dS_dt, dI_dt, dP_dt, delta_I_hom, delta_I_het, lambda_t
+
+
+def rk4_step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
+             S_t, I_t, P_t, 
+             C, W, H_het, H_hom, L, K_het, K_hom,
+             gamma, omega, birth_vec, dt):
+    """
+    One RK4 integration step using substep that returns derivatives.
+    Returns updated S, I, P and cumulative delta_I over this step.
+    """
+    
+    # --- k1: derivatives at current state ---
+    dS1, dI1, dP1, d_hom1, d_het1, _ = substep(
+        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+        f, f_per_I, S_t, I_t, P_t,
+        C, W, H_het, H_hom, L, K_het, K_hom,
+        gamma, omega, birth_vec, dt=None  # dt not used inside substep now
+    )
+    
+    # --- k2: derivatives at midpoint using k1 ---
+    dS2, dI2, dP2, d_hom2, d_het2, _ = substep(
+        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+        f, f_per_I,
+        S_t + 0.5*dt*dS1,
+        I_t + 0.5*dt*dI1,
+        P_t + 0.5*dt*dP1,
+        C, W, H_het, H_hom, L, K_het, K_hom,
+        gamma, omega, birth_vec, dt=None
+    )
+    
+    # --- k3: derivatives at midpoint using k2 ---
+    dS3, dI3, dP3, d_hom3, d_het3, _ = substep(
+        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+        f, f_per_I,
+        S_t + 0.5*dt*dS2,
+        I_t + 0.5*dt*dI2,
+        P_t + 0.5*dt*dP2,
+        C, W, H_het, H_hom, L, K_het, K_hom,
+        gamma, omega, birth_vec, dt=None
+    )
+    
+    # --- k4: derivatives at end using k3 ---
+    dS4, dI4, dP4, d_hom4, d_het4, lambda4 = substep(
+        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+        f, f_per_I,
+        S_t + dt*dS3,
+        I_t + dt*dI3,
+        P_t + dt*dP3,
+        C, W, H_het, H_hom, L, K_het, K_hom,
+        gamma, omega, birth_vec, dt=None
+    )
+    
+    # --- RK4 weighted average ---
+    S_next = S_t + (dt/6)*(dS1 + 2*dS2 + 2*dS3 + dS4)
+    I_next = I_t + (dt/6)*(dI1 + 2*dI2 + 2*dI3 + dI4)
+    P_next = P_t + (dt/6)*(dP1 + 2*dP2 + 2*dP3 + dP4)
+    
+    # --- Accumulate delta_I over the step ---
+    delta_hom_sum = (dt/6)*(d_hom1 + 2*d_hom2 + 2*d_hom3 + d_hom4)
+    delta_het_sum = (dt/6)*(d_het1 + 2*d_het2 + 2*d_het3 + d_het4)
+    
+    return S_next, I_next, P_next, delta_hom_sum, delta_het_sum, lambda4
 
 
 def step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
          S_t, I_t, P_t, 
          C, W, H_het, H_hom, L, K_het, K_hom,
          gamma, omega, birth_vec):
+    """
+    Monthly step using two RK4 half-month steps.
+    Returns updated S, I, P, and cumulative delta_I over the month.
+    """
 
-    # --- First substep ---
-    S1, I1, P1, d_hom1, d_het1, _ = substep(
-        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
-        S_t, I_t, P_t,
-        C, W, H_het, H_hom, L, K_het, K_hom,
-        gamma, omega, birth_vec,
-        0.2
-    )
+    n_steps = 4
+    S, I, P = S_t, I_t, P_t
+    delta_hom_total = pt.zeros_like(I_t)
+    delta_het_total = pt.zeros_like(I_t)
 
-    # --- Second substep ---
-    S2, I2, P2, d_hom2, d_het2, _ = substep(
-        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
-        S1, I1, P1,
-        C, W, H_het, H_hom, L, K_het, K_hom,
-        gamma, omega, birth_vec,
-        0.2
-    )
+    # --- Two RK4 steps per month ---
+    for _ in range(n_steps):
+        S, I, P, d_hom, d_het, lambda_t = rk4_step(
+            beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
+            f, f_per_I, S, I, P,
+            C, W, H_het, H_hom, L, K_het, K_hom,
+            gamma, omega, birth_vec,
+            1/n_steps
+        )
+        delta_hom_total += d_hom
+        delta_het_total += d_het
 
-    # --- Third substep ---
-    S3, I3, P3, d_hom3, d_het3, _ = substep(
-        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I, 
-        S2, I2, P2,
-        C, W, H_het, H_hom, L, K_het, K_hom,
-        gamma, omega, birth_vec,
-        0.2
-    )
-
-    # --- Fourth substep ---
-    S4, I4, P4, d_hom4, d_het4, _ = substep(
-        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
-        S3, I3, P3,
-        C, W, H_het, H_hom, L, K_het, K_hom,
-        gamma, omega, birth_vec,
-        0.2
-    )
-
-    # --- Fifth substep ---
-    S5, I5, P5, d_hom5, d_het5, lambda5 = substep(
-        beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
-        S4, I4, P4,
-        C, W, H_het, H_hom, L, K_het, K_hom,
-        gamma, omega, birth_vec,
-        0.2
-    )
-
-    # --- accumulate Delta_I over the full month ---
-    delta_hom_sum = d_hom1 + d_hom2 + d_hom3 + d_hom4 + d_hom5
-    delta_het_sum = d_het1 + d_het2 + d_het3 + d_het4 + d_het5
-
-    return S5, I5, P5, delta_hom_sum, delta_het_sum, lambda5
+    return S, I, P, delta_hom_total, delta_het_total, lambda_t
 
 
 def build_initial_susceptibles(demo, f_P, pi_d, pi_mono2):
