@@ -17,7 +17,7 @@ pytensor.config.on_opt_error = "ignore"
 # analysis startdate
 start_year = 1998
 start_month = 9
-end_year = 2015
+end_year = 2024
 assert start_year >= 1996, "earliest start_year is 1996."
 
 # helper function for argument parsing
@@ -246,17 +246,33 @@ for col in list_columns:
 ## infectious/protected
 IP_mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/raw/transmission_model/infectious_protected_states.csv'))
 
-# Generate the matrices C, W, M_{j,k} and the I-update-indices
+# Generate the matrices used to update the system
+
+## define lengths
+n_I = len(IP_mapping)
+n_S = len(S_mapping)
+
+## I-update-indices
+sero_idx = pt.constant(IP_mapping["currently_infected_with"].values - 1)
+het_idx  = pt.constant(IP_mapping["S_to_I_heterol"].values)
+hom_idx  = pt.constant(IP_mapping["S_to_I_homol"].values)
+
+## births
+birth_vec = np.zeros(n_S)
+birth_vec[0] = 1.0
+birth_vec_t = pt.constant(birth_vec)
+
 ## C --> Maps infected states onto serotypes
-sero_idx = IP_mapping["currently_infected_with"].values - 1   # zero-based indexing
-C = np.zeros((len(IP_mapping), n_serotypes))
-C[np.arange(len(IP_mapping)), sero_idx] = 1.0
+C = np.zeros((n_I, n_serotypes))
+C[np.arange(n_I), sero_idx.eval()] = 1.0
 C = pt.constant(C)
+
 ## W --> Maps protected states waning to S
-W = pt.constant(np.eye(len(S_mapping))[IP_mapping["P_to_S"]])
-## M = H_het + f * H_hom
-H_het = np.zeros((len(S_mapping), n_serotypes))
-H_hom = np.zeros((len(S_mapping), n_serotypes))
+W = pt.constant(np.eye(n_S)[IP_mapping["P_to_S"]])
+
+## Susceptibility of S states to serotypes (M = H_het + f * H_hom)
+H_het = np.zeros((n_S, n_serotypes))
+H_hom = np.zeros((n_S, n_serotypes))
 for j, row in S_mapping.iterrows():
     for k in row["susc_to_heterol_inf"]:
         H_het[j, int(k)-1] = 1.0
@@ -264,26 +280,36 @@ for j, row in S_mapping.iterrows():
         H_hom[j, int(k)-1] = 1.0
 H_het = pt.constant(H_het)
 H_hom = pt.constant(H_hom)
-## I-update-indices
-sero_idx = pt.constant(IP_mapping["currently_infected_with"].values - 1)
-het_idx  = pt.constant(IP_mapping["S_to_I_heterol"].values)
-hom_idx  = pt.constant(IP_mapping["S_to_I_homol"].values)
-## births
-birth_vec = np.zeros(len(S_mapping))
-birth_vec[0] = 1.0
-birth_vec_t = pt.constant(birth_vec)
+
+## Flow of S states into I states (heterologous and homologous)
+## TODO transpose?
+K_het = np.zeros((n_I, n_S))
+K_hom = np.zeros((n_I, n_S))
+for i, row in IP_mapping.iterrows():
+    K_het[i, int(row["S_to_I_heterol"])] = 1.0
+    K_hom[i, int(row["S_to_I_homol"])] = 1.0
+K_het = pt.constant(K_het)
+K_hom = pt.constant(K_hom)
+
+## Map serotype-specific FOI to the per I state FOI
+L = np.zeros((n_serotypes, n_I))
+for i, s in enumerate(IP_mapping["currently_infected_with"].values - 1):
+    L[s, i] = 1.0
+L = pt.constant(L)
+
+# post-hoc observation mapping
 ## Delta_I mapping to (cluster, degree, serotype)
-O = np.zeros((len(IP_mapping), IP_mapping["no_prior_heterol_inf"].max() + 1, n_serotypes))
+O = np.zeros((n_I, IP_mapping["no_prior_heterol_inf"].max() + 1, n_serotypes))
 for i, row in IP_mapping.iterrows():
     d = int(row["no_prior_heterol_inf"])
     s = int(row["currently_infected_with"]) - 1
     O[i, d, s] = 1.0
 O = pt.constant(O)
-## S mapping to (cluster, degree, serotype)
+## S (slots) mapping to (cluster, degree, serotype)
 ### make two maps: one to heterologous and one to homologous 
 ### susceptibility slots = heterologous + f_i * homologous
-R_het = np.zeros((len(S_mapping), S_mapping["no_prior_heterol_inf"].max() + 1, n_serotypes))
-R_hom = np.zeros((len(S_mapping), S_mapping["no_prior_heterol_inf"].max() + 1, n_serotypes))
+R_het = np.zeros((n_S, S_mapping["no_prior_heterol_inf"].max() + 1, n_serotypes))
+R_hom = np.zeros((n_S, S_mapping["no_prior_heterol_inf"].max() + 1, n_serotypes))
 for i, row in S_mapping.iterrows():
     d = int(row["no_prior_heterol_inf"])
     for s in row["susc_to_heterol_inf"]:
@@ -292,6 +318,11 @@ for i, row in S_mapping.iterrows():
         R_hom[i, d, s-1] = 1.0
 R_het = pt.constant(R_het)
 R_hom = pt.constant(R_hom)
+## S (individuals) mapping to (cluster, degree)
+D = np.zeros((n_S, S_mapping["no_prior_heterol_inf"].max() + 1))
+for i, row in S_mapping.iterrows():
+    D[i, int(row["no_prior_heterol_inf"])] = 1.0
+D = pt.constant(D)
 
 # Tutorials that helped build this model (step function)
 # https://www.youtube.com/watch?v=G9VWXZdbtKQ
@@ -305,87 +336,80 @@ R_hom = pt.constant(R_hom)
 
 def substep(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
          S_t, I_t, P_t, 
-         C, W, H_het, H_hom,
-         sero_idx, het_idx, hom_idx, 
+         C, W, H_het, H_hom, L, K_het, K_hom,
          gamma, omega, birth_vec, dt):
 
     # --- Total population ---
-    N_t = pt.sum(S_t, axis=1) + pt.sum(I_t, axis=1) + pt.sum(P_t, axis=1)
+    N_t = pt.sum(S_t, axis=1) + pt.sum(I_t, axis=1) + pt.sum(P_t, axis=1)   # (clusters,)
     
     # --- FOI ---
-    lambda_t = beta_t[:, None] * (I_t @ C) / N_t[:, None]         # (clusters, serotypes)
-    lambda_t += 1e-7 * intro_mask_t[None, :] * estimated_prop_t       # seeding
+    lambda_t = beta_t[:, None] * (I_t @ C) / N_t[:, None]                   # (clusters, serotypes)
+    lambda_t += 1e-7 * intro_mask_t[None, :] * estimated_prop_t             # seeding
 
     # --- Susceptibles ---
-    effective_lambda = (lambda_t @ H_het.T + (lambda_t * f[None, :]) @ H_hom.T)     # Effective FOI acting on each susceptible state
+    effective_lambda = (lambda_t @ H_het.T + (lambda_t * f[None, :]) @ H_hom.T)     # (clusters, n_S)
     S_next = S_t + dt * (births_t[:, None] * birth_vec[None, :] - deaths_t[:, None] * S_t + (1/omega) * (P_t @ W) - effective_lambda * S_t)
 
-    # --- Infectious ---
-    S_het = S_t[:, het_idx]
-    S_hom = S_t[:, hom_idx]
-    lambda_per_I = lambda_t[:, sero_idx]
-    delta_I_het = lambda_per_I * S_het
-    delta_I_hom = lambda_per_I * (f_per_I[None, :] * S_hom)
-    I_next = I_t + dt * (-(1/gamma)* I_t + delta_I_het + delta_I_hom)
+    # --- Infectious  ---
+    lambda_per_I = lambda_t @ L     # (clusters, n_I)
+    S_to_I_het = S_t @ K_het.T                         
+    S_to_I_hom = S_t @ K_hom.T                                
+    delta_I_het = lambda_per_I * S_to_I_het                    
+    delta_I_hom = lambda_per_I * (S_to_I_hom * f_per_I[None, :])
+    I_next = I_t + dt * (-(1/gamma + deaths_t)[:, None] * I_t + delta_I_het + delta_I_hom)
 
     # --- Cross-protection ---
     P_next = P_t + dt * (-(1/omega + deaths_t)[:, None] * P_t + (1/gamma) * I_t)
 
-    return S_next, I_next, P_next, dt * delta_I_hom, dt * delta_I_het
+    return S_next, I_next, P_next, dt * delta_I_hom, dt * delta_I_het, lambda_t
 
 
 def step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
          S_t, I_t, P_t, 
-         C, W, H_het, H_hom,
-         sero_idx, het_idx, hom_idx,
+         C, W, H_het, H_hom, L, K_het, K_hom,
          gamma, omega, birth_vec):
 
     # --- First substep ---
-    S1, I1, P1, d_hom1, d_het1 = substep(
+    S1, I1, P1, d_hom1, d_het1, _ = substep(
         beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
         S_t, I_t, P_t,
-        C, W, H_het, H_hom,
-        sero_idx, het_idx, hom_idx,
+        C, W, H_het, H_hom, L, K_het, K_hom,
         gamma, omega, birth_vec,
         0.2
     )
 
     # --- Second substep ---
-    S2, I2, P2, d_hom2, d_het2 = substep(
+    S2, I2, P2, d_hom2, d_het2, _ = substep(
         beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
         S1, I1, P1,
-        C, W, H_het, H_hom,
-        sero_idx, het_idx, hom_idx,
+        C, W, H_het, H_hom, L, K_het, K_hom,
         gamma, omega, birth_vec,
         0.2
     )
 
     # --- Third substep ---
-    S3, I3, P3, d_hom3, d_het3 = substep(
+    S3, I3, P3, d_hom3, d_het3, _ = substep(
         beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I, 
         S2, I2, P2,
-        C, W, H_het, H_hom,
-        sero_idx, het_idx, hom_idx,
+        C, W, H_het, H_hom, L, K_het, K_hom,
         gamma, omega, birth_vec,
         0.2
     )
 
     # --- Fourth substep ---
-    S4, I4, P4, d_hom4, d_het4 = substep(
+    S4, I4, P4, d_hom4, d_het4, _ = substep(
         beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
         S3, I3, P3,
-        C, W, H_het, H_hom,
-        sero_idx, het_idx, hom_idx,
+        C, W, H_het, H_hom, L, K_het, K_hom,
         gamma, omega, birth_vec,
         0.2
     )
 
     # --- Fifth substep ---
-    S5, I5, P5, d_hom5, d_het5 = substep(
+    S5, I5, P5, d_hom5, d_het5, lambda5 = substep(
         beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
         S4, I4, P4,
-        C, W, H_het, H_hom,
-        sero_idx, het_idx, hom_idx,
+        C, W, H_het, H_hom, L, K_het, K_hom,
         gamma, omega, birth_vec,
         0.2
     )
@@ -394,7 +418,7 @@ def step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
     delta_hom_sum = d_hom1 + d_hom2 + d_hom3 + d_hom4 + d_hom5
     delta_het_sum = d_het1 + d_het2 + d_het3 + d_het4 + d_het5
 
-    return S5, I5, P5, delta_hom_sum, delta_het_sum
+    return S5, I5, P5, delta_hom_sum, delta_het_sum, lambda5
 
 
 def build_initial_susceptibles(demo, f_P, pi_d, pi_mono2):
@@ -562,16 +586,16 @@ with pm.Model() as model:
     u_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_raw[1:], outputs_info=pt.zeros(n_clusters), non_sequences=[rho_ar_beta, sigma_ar_beta])
     u = pt.concatenate([ pt.zeros(n_clusters)[None, :], u_seq], axis=0)
     #### Combine
-    beta_t = pm.Deterministic("beta_t", pt.exp(mu_beta[:, None] + season + u.T).T) #+ u.T
+    beta_t = pm.Deterministic("beta_t", pt.exp(mu_beta[:, None] + season).T) #+ u.T
     
     ## Initial infected
     I0 = build_initial_infected(pt.as_tensor(DENV_total[0,:]), pt.as_tensor(p0.values), kappa, pi_d)
 
-    # -----------------------------------------------------------
-    # Integrate transmission model using Euler's method with dt=1
-    # -----------------------------------------------------------
+    # -----------------------------------------------------------------------------
+    # Integrate transmission model (Euler's method; dt = 1 month; 5 steps per month
+    # -----------------------------------------------------------------------------
 
-    (S, I, P, Delta_I_hom, Delta_I_het), _ = pytensor.scan(
+    (S, I, P, Delta_I_hom, Delta_I_het, lambda_t), _ = pytensor.scan(
         fn=step,
         sequences=[beta_t,
                    pt.as_tensor_variable(births),
@@ -580,32 +604,33 @@ with pm.Model() as model:
                    pt.as_tensor_variable(estimated_proportions),
                    f, f_per_I
                    ],
-        outputs_info=[S0, I0, P0, None, None],
+        outputs_info=[S0, I0, P0, None, None, None],
         non_sequences=[
-            C, W, H_het, H_hom,
-            sero_idx, het_idx, hom_idx,
+            C, W, H_het, H_hom, L, K_het, K_hom,
             gamma, omega, birth_vec
         ]
     )
 
-    # save results
-    S = pm.Deterministic("S", S)
-    I = pm.Deterministic("I", I)
-    P = pm.Deterministic("P", P)
+    # ---------------------------
+    # Derived simulation products
+    # ---------------------------
 
-    # compute FOI trajectory
-    lambda_t = pm.Deterministic("lambda_t", beta_t * pt.sum(I, axis=2) / (pt.sum(S, axis=2) + pt.sum(I, axis=2) + pt.sum(P, axis=2)))
+    # compute FOI trajectory (time, cluster)
+    lambda_t = pm.Deterministic("lambda_t", pt.sum(lambda_t, axis=-1)) 
 
-    # reshape Delta_I into observations per (cluster, infection_degree, serotype and hom/het infection)
+    # reshape Delta_I into observations per (time, cluster, infection_degree, serotype, hom/het infection)
     # + soft bottom so Delta_I can never hit zero --> else p_reported = 0 --> a = 0 in DirichletMultinomial --> logp = -inf !!
     Delta_I = pm.Deterministic("Delta_I", 1 + pt.softplus(pt.stack([pt.einsum("tci,ids->tcds", Delta_I_hom, O), pt.einsum("tci,ids->tcds", Delta_I_het, O)], axis=-1) - 1))
 
-    # compute serotype proportions
+    # compute "true" serotype proportions (time, cluster, serotype)
     I_sero = pt.dot(I, C)
     p = pm.Deterministic("p", (I_sero / pt.sum(I_sero, axis=2)[:, :, None]))
 
-    # reshape S into susceptibility slots per (cluster, infection_degree, serotype and hom/het infection)
-    S_star = pm.Deterministic("S_star", pt.stack([pt.einsum("tci,ids->tcds", S, R_het), pt.einsum("tci,ids,ts->tcds", S, R_hom, f)], axis=-1))
+    # reshape S into susceptibility slots per (time, cluster, infection_degree, serotype and hom/het infection)
+    S_expanded = pm.Deterministic("S_expanded", pt.stack([pt.einsum("tci,ids->tcds", S, R_het), pt.einsum("tci,ids,ts->tcds", S, R_hom, f)], axis=-1))
+
+    # reshape S into susceptible individuals per (time, degree)
+    S_degree = pm.Deterministic("S_degree", pt.einsum("tci,id->tcd", S, D))
 
     # -----------
     # Observation
