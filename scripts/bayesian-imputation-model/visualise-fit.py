@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 # analysis startdate
 start_year = 1998
 start_month = 9
-end_year = 2024
+end_year = 2016
 assert start_year >= 1996, "earliest start_year is 1996."
 
 # helper function for argument parsing
@@ -155,7 +155,7 @@ df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
 
 # only do first X clusters
-df = df[df['cluster'].isin([19,23,28])]
+df = df[df['cluster'].isin([23,19])]
 
 # 9. Build PyMC arrays
 # --- For Multinomial model (subtypes, only when typed) ---

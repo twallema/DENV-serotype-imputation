@@ -17,7 +17,7 @@ pytensor.config.on_opt_error = "ignore"
 # analysis startdate
 start_year = 1998
 start_month = 9
-end_year = 2024
+end_year = 2016
 assert start_year >= 1996, "earliest start_year is 1996."
 
 # helper function for argument parsing
@@ -149,7 +149,7 @@ df['delta'] = df['delta'].where(df['N_typed'] > 0, np.nan) # When N_typed == 0, 
 df["delta"] = df["delta"].clip(lower=1e-12, upper=1 - 1e-12)
 
 # only do first X clusters
-df = df[df['cluster'].isin([19,23,28])]
+df = df[df['cluster'].isin([23,19])]
 
 # 3. Take only from start_year to end_year
 df_alldates = df.copy()
@@ -182,7 +182,7 @@ df_expanded["estimated_death_rate"] = df_expanded["estimated_deaths"] / df_expan
 births = df_expanded.pivot(index="date", columns="cluster", values="estimated_births").to_numpy().astype(int) # (n_months, n_clusters)
 death_rate = df_expanded.pivot(index="date", columns="cluster", values="estimated_death_rate").to_numpy() # (n_months, n_clusters)
 # Initial demography
-demo = demo[((demo['year'] == start_year) & (demo['cluster'].isin([19,23,28])))]['population'].values 
+demo = demo[((demo['year'] == start_year) & (demo['cluster'].isin([23,19])))]['population'].values 
 
 # --- Indices ---
 cluster_idx = df["cluster"].to_numpy().astype(int)
