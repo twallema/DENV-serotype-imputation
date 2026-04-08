@@ -247,29 +247,23 @@ for col in list_columns:
 IP_mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/raw/transmission_model/infectious_protected_states.csv'))
 
 # Generate the matrices used to update the system
-
 ## define lengths
 n_I = len(IP_mapping)
 n_S = len(S_mapping)
-
 ## I-update-indices
 sero_idx = pt.constant(IP_mapping["currently_infected_with"].values - 1)
 het_idx  = pt.constant(IP_mapping["S_to_I_heterol"].values)
 hom_idx  = pt.constant(IP_mapping["S_to_I_homol"].values)
-
 ## births
 birth_vec = np.zeros(n_S)
 birth_vec[0] = 1.0
 birth_vec_t = pt.constant(birth_vec)
-
 ## C --> Maps infected states onto serotypes
 C = np.zeros((n_I, n_serotypes))
 C[np.arange(n_I), sero_idx.eval()] = 1.0
 C = pt.constant(C)
-
 ## W --> Maps protected states waning to S
 W = pt.constant(np.eye(n_S)[IP_mapping["P_to_S"]])
-
 ## Susceptibility of S states to serotypes (M = H_het + f * H_hom)
 H_het = np.zeros((n_S, n_serotypes))
 H_hom = np.zeros((n_S, n_serotypes))
@@ -280,9 +274,7 @@ for j, row in S_mapping.iterrows():
         H_hom[j, int(k)-1] = 1.0
 H_het = pt.constant(H_het)
 H_hom = pt.constant(H_hom)
-
 ## Flow of S states into I states (heterologous and homologous)
-## TODO transpose?
 K_het = np.zeros((n_I, n_S))
 K_hom = np.zeros((n_I, n_S))
 for i, row in IP_mapping.iterrows():
@@ -290,7 +282,6 @@ for i, row in IP_mapping.iterrows():
     K_hom[i, int(row["S_to_I_homol"])] = 1.0
 K_het = pt.constant(K_het)
 K_hom = pt.constant(K_hom)
-
 ## Map serotype-specific FOI to the per I state FOI
 L = np.zeros((n_serotypes, n_I))
 for i, s in enumerate(IP_mapping["currently_infected_with"].values - 1):
@@ -516,10 +507,10 @@ with pm.Model() as model:
 
     # initial states
     ## initial susceptible and cross-protected states (cluster x state_idx)
-    f_P = pm.Beta("f_P", alpha=8, beta=24)                 # first division of cluster population happens based on amount in a cross-protected state
-    f_P2 = pm.Beta("f_P2", alpha=3, beta=1)                # fraction cross-protected after DENV-2 infection
-    pi_d = pm.Dirichlet("pi_d", a=10*np.array([2, 4, 4]))   # divide the non-cross-protected across naive, mono, double
-    pi_mono2 = pm.Beta("pi_mono2", alpha=3, beta=1)        # divide the mono between DENV-1 and DENV-2
+    f_P = 0.25 #pm.Beta("f_P", alpha=8, beta=24)                 # first division of cluster population happens based on amount in a cross-protected state
+    f_P2 = 0.75 #pm.Beta("f_P2", alpha=3, beta=1)                # fraction cross-protected after DENV-2 infection
+    pi_d = np.array([0.1, 0.2, 0.7]) #m.Dirichlet("pi_d", a=10*np.array([2, 4, 4]))   # divide the non-cross-protected across naive, mono, double
+    pi_mono2 = 0.75 # pm.Beta("pi_mono2", alpha=3, beta=1)        # divide the mono between DENV-1 and DENV-2
     S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, f_P, pi_d, pi_mono2))
     P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, f_P2))
 
@@ -528,14 +519,14 @@ with pm.Model() as model:
     gamma = 1/2
 
     ## average duration cross-protection
-    omega = pm.Lognormal("omega", mu=2.45, sigma=1/3)
+    omega = 36 # pm.Lognormal("omega", mu=3, sigma=0.1)
 
     ## average FOI reduction for homologous infections (n_months x n_serotypes)
     ### time-dependent for DENV-1 / DENV-2
     #### DENV-1
     mu_f1 = pm.Beta("mu_f1", alpha=1, beta=10)
     rho_f1 = pm.Beta("rho_f1", alpha=3, beta=3)
-    sigma_f1 = pm.HalfNormal("sigma_f1", sigma=1)
+    sigma_f1 = pm.HalfNormal("sigma_f1", sigma=1/3)
     eps_f1 = pm.Normal("eps_f1", 0, 1, shape=n_years+1)
     f1_logit_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_f1[1:], outputs_info=pt.zeros(()), non_sequences=[rho_f1, sigma_f1])
     f1_logit = pm.math.logit(mu_f1) + f1_logit_seq
@@ -543,28 +534,31 @@ with pm.Model() as model:
     #### DENV-2
     mu_f2 = pm.Beta("mu_f2", alpha=1, beta=10)
     rho_f2 = pm.Beta("rho_f2", alpha=3, beta=3)
-    sigma_f2 = pm.HalfNormal("sigma_f2", sigma=1)
+    sigma_f2 = pm.HalfNormal("sigma_f2", sigma=1/3)
     eps_f2 = pm.Normal("eps_f2", 0, 1, shape=n_years+1)
     f2_logit_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_f2[1:], outputs_info=pt.zeros(()), non_sequences=[rho_f2, sigma_f2])
     f2_logit = pm.math.logit(mu_f2) + f2_logit_seq
     f2_t = pm.math.sigmoid(f2_logit[year_idx[::n_clusters]])
     ## time-independent for DENV-3
-    f3 = pm.Beta("f3", alpha=1, beta=20)
+    f1 = 0.9
+    f2 = 0.9
+    f3 = 0.7 # pm.Beta("f3", alpha=1, beta=20)
     ## construct f & save it
-    f = pm.Deterministic("f", pt.stack([f1_t, f2_t, pt.repeat(f3, n_months), pt.repeat(0, n_months)], axis=1))
+    #f = pm.Deterministic("f", pt.stack([f1_t, f2_t, pt.repeat(f3, n_months), pt.repeat(0, n_months)], axis=1))
+    f = pm.Deterministic("f", pt.stack([pt.repeat(f1, n_months), pt.repeat(f2, n_months), pt.repeat(f3, n_months), pt.repeat(0, n_months)], axis=1))
     ## construct f_per_I
     f_per_I = f[:, sero_idx]
 
     ## reported fraction (cluster x degree x serotype)
-    kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1)                 # intercept
+    kappa0_logit = pm.math.logit(1/10) #pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1)                 # intercept
     is_34 = pt.as_tensor([0,0,1,1])                                                             # indicator prim/sec versus tert/quart
-    log_or_34 = pm.Normal("log_or_34", mu=-3, sigma=1/3)                                        # OR detecting prim/sec versus tert/quart
+    log_or_34 = pm.Normal("log_or_34", mu=-9, sigma=1/3)                                        # OR detecting prim/sec versus tert/quart
     log_or_serotype = pm.Normal("log_or_serotype", mu=0.0, sigma=1/3, shape=n_serotypes-1)    # OR detecting serotypes (vs. DENV-1)
     log_or_serotype_full = pt.concatenate([pt.zeros(1), log_or_serotype])
     log_or_cluster = pm.Normal("log_or_cluster", mu=0.0, sigma=1/3, shape=n_clusters-1)         # OR detecting in a cluster (vs. cluster 1)
     log_or_cluster_full = pt.concatenate([pt.zeros(1), log_or_cluster])
     is_hom = pt.as_tensor([1,0])                                                                # indicator for homologous infection
-    log_or_hom = pm.Normal("log_or_hom", mu=-3, sigma=1/3)                                      #            
+    log_or_hom = pm.Normal("log_or_hom", mu=-9, sigma=1/3)                                      #            
     logit_kappa = kappa0_logit + log_or_cluster_full[:, None, None, None] + log_or_34*is_34[None, :, None, None] \
         + log_or_serotype_full[None, None, :, None] + log_or_hom * is_hom[None, None, None, :]
     kappa = pm.Deterministic("kappa", pm.math.sigmoid(logit_kappa))
@@ -575,9 +569,9 @@ with pm.Model() as model:
 
     ## Fixed components of the FOI: transmission coefficient beta (seasonal + AR(1); time x cluster)
     ### seasonal component
-    mu_beta = pm.Normal("mu_beta", mu=np.log(2.5), sigma=1/5, shape=n_clusters)
-    A_beta = pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
-    phi_beta = pm.Normal("phi_beta", mu=pt.pi/3, sigma=1, shape=n_clusters) # peaks March
+    mu_beta = np.log(2.5) * pt.ones(n_clusters) #pm.Normal("mu_beta", mu=np.log(2.5), sigma=1/5, shape=n_clusters)
+    A_beta = 1 * pt.ones(n_clusters) # pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
+    phi_beta = 1 * pt.ones(n_clusters) # pm.Normal("phi_beta", mu=pt.pi/3, sigma=1, shape=n_clusters) # peaks March
     season = A_beta[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_beta[:, None])
     ### AR(1) component (non-centered)
     rho_ar_beta = pm.Beta("rho_ar_beta", alpha=1, beta=3)                 # persistence
@@ -651,42 +645,48 @@ with pm.Model() as model:
     alpha = phi[:, :, None] * p_detect
     VIF = pm.Deterministic("VIF", (N_typed + phi) / (1 + phi)) # variance inflation of dirichlet multinomial compared to multinomial
 
-    # fig,ax=plt.subplots(nrows=6)
-    # # serotype proportions
-    # ax[0].stackplot(range(len(p.eval()[:,0,0])),
-    #                     p.eval()[:,0,0], 
-    #                     p.eval()[:,0,1],
-    #                     p.eval()[:,0,2],
-    #                     p.eval()[:,0,3],
-    #                     colors=['black', 'red', 'green', 'blue'])
-    # # detected serotype proportions
-    # ax[1].stackplot(range(len(p_detect.eval()[:,0,0])),
-    #                     p_detect.eval()[:,0,0], 
-    #                     p_detect.eval()[:,0,1],
-    #                     p_detect.eval()[:,0,2],
-    #                     p_detect.eval()[:,0,3],
-    #                     colors=['black', 'red', 'green', 'blue'])
-    # # observed cases
-    # ax[2].scatter(range(len(DENV_total[:,0])), DENV_total[:,0], color='black', alpha=0.6, s=5)
-    # ax[2].plot(D_obs.eval()[:,0], color='red')
-    # # force of infection
-    # ax[3].plot(lambda_t.eval()[:,0], color='black')
-    # ax[3].axhline(np.mean(lambda_t.eval()[:,0]), color='red')
-    # # susceptibility slots
-    # ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,0], color='black')
-    # ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,1], color='red')
-    # ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,2], color='green')
-    # ax[4].plot(pt.sum(S_star, axis=(2,4)).eval()[:,0,3], color='blue')
-    # # susceptibility slots per degree of infection
-    # ax[5].stackplot(range(len(pt.sum(S_star, axis=(3,4)).eval()[:,0,0])),
-    #                         pt.sum(S_star, axis=(3,4)).eval()[:,0,0],
-    #                         pt.sum(S_star, axis=(3,4)).eval()[:,0,1],
-    #                         pt.sum(S_star, axis=(3,4)).eval()[:,0,2],
-    #                         pt.sum(S_star, axis=(3,4)).eval()[:,0,3],
-    #                         pt.sum(S_star, axis=(3,4)).eval()[:,0,4],
-    #                         colors=['black', 'red', 'orange', 'yellow', 'green'])
-    # plt.show()
-    # plt.close()
+    # ad-hoc visualisation
+    fig,ax=plt.subplots(nrows=6)
+    # serotype proportions
+    ax[0].stackplot(range(len(p.eval()[:,0,0])),
+                        p.eval()[:,0,0], 
+                        p.eval()[:,0,1],
+                        p.eval()[:,0,2],
+                        p.eval()[:,0,3],
+                        colors=['black', 'red', 'green', 'blue'])
+    # detected serotype proportions
+    ax[1].stackplot(range(len(p_detect.eval()[:,0,0])),
+                        p_detect.eval()[:,0,0], 
+                        p_detect.eval()[:,0,1],
+                        p_detect.eval()[:,0,2],
+                        p_detect.eval()[:,0,3],
+                        colors=['black', 'red', 'green', 'blue'])
+    # observed cases
+    ax[2].scatter(range(len(DENV_total[:,0])), DENV_total[:,0], color='black', alpha=0.6, s=5)
+    ax[2].plot(D_obs.eval()[:,0], color='red')
+    # force of infection
+    ax[3].plot(lambda_t.eval()[:,0], color='black')
+    ax[3].axhline(np.mean(lambda_t.eval()[:,0]), color='red')
+    # susceptibility slots (total)
+    ax[4].plot(pt.sum(S_expanded, axis=(2,4)).eval()[:,0,0], color='black')
+    ax[4].plot(pt.sum(S_expanded, axis=(2,4)).eval()[:,0,1], color='red')
+    ax[4].plot(pt.sum(S_expanded, axis=(2,4)).eval()[:,0,2], color='green')
+    ax[4].plot(pt.sum(S_expanded, axis=(2,4)).eval()[:,0,3], color='blue')
+    # susceptibility slots  (homologous)
+    ax[4].plot(pt.sum(S_expanded, axis=2).eval()[:,0,0,0], color='black', linestyle='dashed')
+    ax[4].plot(pt.sum(S_expanded, axis=2).eval()[:,0,1,0], color='red', linestyle='dashed')
+    ax[4].plot(pt.sum(S_expanded, axis=2).eval()[:,0,2,0], color='green', linestyle='dashed')
+    ax[4].plot(pt.sum(S_expanded, axis=2).eval()[:,0,3,0], color='blue', linestyle='dashed')
+    # number of susceptible individuals per degree of infection
+    ax[5].stackplot(range(len(S_degree.eval()[:,0,0])),
+                            S_degree.eval()[:,0,0],
+                            S_degree.eval()[:,0,1],
+                            S_degree.eval()[:,0,2],
+                            S_degree.eval()[:,0,3],
+                            S_degree.eval()[:,0,4],
+                            colors=['black', 'red', 'orange', 'yellow', 'green'])
+    plt.show()
+    plt.close()
 
     # --- Observed subtyped incidences ---
     Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
