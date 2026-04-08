@@ -325,7 +325,7 @@ D = pt.constant(D)
 ## Bayesian imputation model ##
 ###############################
 
-def substep(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
+def RHS(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
          S_t, I_t, P_t, 
          C, W, H_het, H_hom, L, K_het, K_hom,
          gamma, omega, birth_vec, dt):
@@ -335,7 +335,7 @@ def substep(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per
     
     # --- FOI ---
     lambda_t = beta_t[:, None] * pt.dot(I_t, C) / N_t[:, None]                   # (clusters, serotypes)
-    lambda_t += 1e-7 * intro_mask_t[None, :] * estimated_prop_t             # seeding
+    lambda_t += 1e-7 * intro_mask_t[None, :] * estimated_prop_t                  # seeding
 
     # --- Susceptibles ---
     effective_lambda = (pt.dot(lambda_t, H_het) + pt.dot((lambda_t * f[None, :]), H_hom))     # (clusters, n_S)
@@ -363,7 +363,7 @@ def rk4_step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_pe
     """
     
     # --- k1: derivatives at current state ---
-    dS1, dI1, dP1, d_hom1, d_het1, _ = substep(
+    dS1, dI1, dP1, d_hom1, d_het1, _ = RHS(
         beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
         f, f_per_I, S_t, I_t, P_t,
         C, W, H_het, H_hom, L, K_het, K_hom,
@@ -371,7 +371,7 @@ def rk4_step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_pe
     )
     
     # --- k2: derivatives at midpoint using k1 ---
-    dS2, dI2, dP2, d_hom2, d_het2, _ = substep(
+    dS2, dI2, dP2, d_hom2, d_het2, _ = RHS(
         beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
         f, f_per_I,
         S_t + 0.5*dt*dS1,
@@ -382,7 +382,7 @@ def rk4_step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_pe
     )
     
     # --- k3: derivatives at midpoint using k2 ---
-    dS3, dI3, dP3, d_hom3, d_het3, _ = substep(
+    dS3, dI3, dP3, d_hom3, d_het3, _ = RHS(
         beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
         f, f_per_I,
         S_t + 0.5*dt*dS2,
@@ -393,7 +393,7 @@ def rk4_step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_pe
     )
     
     # --- k4: derivatives at end using k3 ---
-    dS4, dI4, dP4, d_hom4, d_het4, lambda4 = substep(
+    dS4, dI4, dP4, d_hom4, d_het4, lambda4 = RHS(
         beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
         f, f_per_I,
         S_t + dt*dS3,
@@ -424,7 +424,7 @@ def step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
     Returns updated S, I, P, and cumulative delta_I over the month.
     """
 
-    n_steps = 4
+    n_steps = 2
     S, I, P = S_t, I_t, P_t
     delta_hom_total = pt.zeros_like(I_t)
     delta_het_total = pt.zeros_like(I_t)
@@ -539,7 +539,7 @@ with pm.Model() as model:
 
     # initial states
     ## initial susceptible and cross-protected states (cluster x state_idx)
-    f_P = 0.25 #pm.Beta("f_P", alpha=8, beta=24)                 # first division of cluster population happens based on amount in a cross-protected state
+    f_P = 0.3 #pm.Beta("f_P", alpha=8, beta=24)                 # first division of cluster population happens based on amount in a cross-protected state
     f_P2 = 0.75 #pm.Beta("f_P2", alpha=3, beta=1)                # fraction cross-protected after DENV-2 infection
     pi_d = np.array([0.1, 0.2, 0.7]) #m.Dirichlet("pi_d", a=10*np.array([2, 4, 4]))   # divide the non-cross-protected across naive, mono, double
     pi_mono2 = 0.75 # pm.Beta("pi_mono2", alpha=3, beta=1)        # divide the mono between DENV-1 and DENV-2
@@ -602,7 +602,7 @@ with pm.Model() as model:
     ## Fixed components of the FOI: transmission coefficient beta (seasonal + AR(1); time x cluster)
     ### seasonal component
     mu_beta = np.log(2.5) * pt.ones(n_clusters) #pm.Normal("mu_beta", mu=np.log(2.5), sigma=1/5, shape=n_clusters)
-    A_beta = 1 * pt.ones(n_clusters) # pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
+    A_beta = 0.5 * pt.ones(n_clusters) # pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
     phi_beta = 1 * pt.ones(n_clusters) # pm.Normal("phi_beta", mu=pt.pi/3, sigma=1, shape=n_clusters) # peaks March
     season = A_beta[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_beta[:, None])
     ### AR(1) component (non-centered)
