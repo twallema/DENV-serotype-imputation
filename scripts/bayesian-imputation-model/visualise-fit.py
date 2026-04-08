@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 # analysis startdate
 start_year = 1998
 start_month = 9
-end_year = 2015
+end_year = 2024
 assert start_year >= 1996, "earliest start_year is 1996."
 
 # helper function for argument parsing
@@ -155,7 +155,7 @@ df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
 
 # only do first X clusters
-df = df[df['cluster'].isin([23, 24])]
+df = df[df['cluster'].isin([19,23,28])]
 
 # 9. Build PyMC arrays
 # --- For Multinomial model (subtypes, only when typed) ---
@@ -283,29 +283,29 @@ p_upper = p_upper.set_index(['cluster','date'])
 # Get susceptibility slots per serotype
 ## Mean
 S_mean = df[['cluster','date']]
-S_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = np.sum(trace['posterior']['S_star'].mean(dim=['chain','draw']).values, axis=(2,4)).reshape((n_months*n_clusters, n_serotypes))
+S_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = np.sum(trace['posterior']['S_expanded'].mean(dim=['chain','draw']).values, axis=(2,4)).reshape((n_months*n_clusters, n_serotypes))
 S_mean = S_mean.set_index(['cluster','date'])
 ## Lower
 S_lower = df[['cluster','date']]
-S_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = np.sum(trace['posterior']['S_star'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values, axis=(2,4)).reshape((n_months*n_clusters, n_serotypes))
+S_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = np.sum(trace['posterior']['S_expanded'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values, axis=(2,4)).reshape((n_months*n_clusters, n_serotypes))
 S_lower = S_lower.set_index(['cluster','date'])
 ## Upper
 S_upper = df[['cluster','date']]
-S_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = np.sum(trace['posterior']['S_star'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values, axis=(2,4)).reshape((n_months*n_clusters, n_serotypes))
+S_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = np.sum(trace['posterior']['S_expanded'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values, axis=(2,4)).reshape((n_months*n_clusters, n_serotypes))
 S_upper = S_upper.set_index(['cluster','date'])
 
 # Get susceptibility slots per degree of infection
 ## Mean
 d_mean = df[['cluster','date']]
-d_mean[['0', '1', '2', '3', '4']] = np.sum(trace['posterior']['S_star'].mean(dim=['chain','draw']).values, axis=(3,4)).reshape((n_months*n_clusters, 5))
+d_mean[['0', '1', '2', '3', '4']] = trace['posterior']['S_degree'].mean(dim=['chain','draw']).values.reshape((n_months*n_clusters, 5))
 d_mean = d_mean.set_index(['cluster','date'])
 ## Lower
 d_lower = df[['cluster','date']]
-d_lower[['0', '1', '2', '3', '4']] = np.sum(trace['posterior']['S_star'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values, axis=(3,4)).reshape((n_months*n_clusters, 5))
+d_lower[['0', '1', '2', '3', '4']] = trace['posterior']['S_degree'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months*n_clusters, 5))
 d_lower = d_lower.set_index(['cluster','date'])
 ## Upper
 d_upper = df[['cluster','date']]
-d_upper[['0', '1', '2', '3', '4']] = np.sum(trace['posterior']['S_star'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values, axis=(3,4)).reshape((n_months*n_clusters, 5))
+d_upper[['0', '1', '2', '3', '4']] = trace['posterior']['S_degree'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months*n_clusters, 5))
 d_upper = d_upper.set_index(['cluster','date'])
 
 # Get total dengue cases
