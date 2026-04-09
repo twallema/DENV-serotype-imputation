@@ -559,7 +559,7 @@ with pm.Model() as model:
     ## average FOI reduction for homologous infections (n_months x n_serotypes)
     ### time-dependent for DENV-1 / DENV-2
     #### DENV-1
-    mu_f1 = pm.Beta("mu_f1", alpha=3, beta=3)
+    mu_f1 = pm.Beta("mu_f1", alpha=5, beta=5)
     rho_f1 = pm.Beta("rho_f1", alpha=3, beta=3)
     sigma_f1 = pm.HalfNormal("sigma_f1", sigma=1/3)
     eps_f1 = pm.Normal("eps_f1", 0, 1, shape=n_years+1)
@@ -567,7 +567,7 @@ with pm.Model() as model:
     f1_logit = pm.math.logit(mu_f1) + f1_logit_seq
     f1_t = pm.math.sigmoid(f1_logit[year_idx[::n_clusters]])
     #### DENV-2
-    mu_f2 = pm.Beta("mu_f2", alpha=3, beta=3)
+    mu_f2 = pm.Beta("mu_f2", alpha=5, beta=5)
     rho_f2 = pm.Beta("rho_f2", alpha=3, beta=3)
     sigma_f2 = pm.HalfNormal("sigma_f2", sigma=1/3)
     eps_f2 = pm.Normal("eps_f2", 0, 1, shape=n_years+1)
@@ -575,7 +575,7 @@ with pm.Model() as model:
     f2_logit = pm.math.logit(mu_f2) + f2_logit_seq
     f2_t = pm.math.sigmoid(f2_logit[year_idx[::n_clusters]])
     ## time-independent for DENV-3
-    f3 = pm.Beta("f3", alpha=1, beta=10)
+    f3 = pm.Beta("f3", alpha=1, beta=5)
     ## construct f & save it
     f = pm.Deterministic("f", pt.stack([f1_t, f2_t, pt.repeat(f3, n_months), pt.repeat(0, n_months)], axis=1))
     ## construct f_per_I
@@ -584,13 +584,13 @@ with pm.Model() as model:
     ## reported fraction (cluster x degree x serotype)
     kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1)                 # intercept
     is_34 = pt.as_tensor([0,0,1,1])                                                             # indicator prim/sec versus tert/quart
-    log_or_34 = pm.Normal("log_or_34", mu=-3, sigma=1/3)                                        # OR detecting prim/sec versus tert/quart
+    log_or_34 = pm.Normal("log_or_34", mu=-3, sigma=1/10)                                        # OR detecting prim/sec versus tert/quart
     log_or_serotype = pm.Normal("log_or_serotype", mu=0.0, sigma=1/3, shape=n_serotypes-1)    # OR detecting serotypes (vs. DENV-1)
     log_or_serotype_full = pt.concatenate([pt.zeros(1), log_or_serotype])
     log_or_cluster = pm.Normal("log_or_cluster", mu=0.0, sigma=1/3, shape=n_clusters-1)         # OR detecting in a cluster (vs. cluster 1)
     log_or_cluster_full = pt.concatenate([pt.zeros(1), log_or_cluster])
     is_hom = pt.as_tensor([1,0])                                                                # indicator for homologous infection
-    log_or_hom = pm.Normal("log_or_hom", mu=-3, sigma=1/3)                                      #            
+    log_or_hom = pm.Normal("log_or_hom", mu=-3, sigma=1/10)                                      #            
     logit_kappa = kappa0_logit + log_or_cluster_full[:, None, None, None] + log_or_34*is_34[None, :, None, None] \
         + log_or_serotype_full[None, None, :, None] + log_or_hom * is_hom[None, None, None, :]
     kappa = pm.Deterministic("kappa", pm.math.sigmoid(logit_kappa))
@@ -601,7 +601,7 @@ with pm.Model() as model:
 
     ## Fixed components of the FOI: transmission coefficient beta (seasonal + AR(1); time x cluster)
     ### seasonal component
-    mu_beta = pm.Normal("mu_beta", mu=np.log(2.5), sigma=1/5, shape=n_clusters)
+    mu_beta = pm.Normal("mu_beta", mu=np.log(2.5), sigma=1/10, shape=n_clusters)
     A_beta = pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
     phi_beta = pm.Normal("phi_beta", mu=pt.pi/2, sigma=1, shape=n_clusters) # peaks March
     season = A_beta[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_beta[:, None])
@@ -661,7 +661,7 @@ with pm.Model() as model:
 
     # Observed cases
     reported = pt.sum(Delta_I * kappa, axis=(2,3,4))
-    alpha_inv = pm.HalfNormal("alpha_inv", sigma=1/20)
+    alpha_inv = pm.HalfNormal("alpha_inv", sigma=1/10)
     D_obs = pm.NegativeBinomial("D_obs", mu=reported, alpha=1/alpha_inv, observed=DENV_total)
 
     # Observed serotyped cases
