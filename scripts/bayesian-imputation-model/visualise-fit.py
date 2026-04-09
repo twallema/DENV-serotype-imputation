@@ -8,7 +8,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 
 # analysis startdate
-start_year = 1998
+start_year = 2000
 start_month = 9
 end_year = 2016
 assert start_year >= 1996, "earliest start_year is 1996."
@@ -155,7 +155,7 @@ df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
 
 # only do first X clusters
-df = df[df['cluster'].isin([23,19])]
+df = df[df['cluster'].isin([11, 12, 13, 16])]
 
 # 9. Build PyMC arrays
 # --- For Multinomial model (subtypes, only when typed) ---
@@ -366,18 +366,17 @@ beta_upper = beta_upper.set_index(['cluster','date'])
 
 # Get time-trajectory f
 ## Mean
-f_mean = df[['cluster','date']]
-f_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = np.tile(trace['posterior']['f'].mean(dim=['chain','draw']).values[:, np.newaxis, :], (1,2,1)).reshape((n_months*n_clusters, n_serotypes))
-f_mean = f_mean.set_index(['cluster','date'])
+f_mean = pd.DataFrame(index=pd.Index(df['date'].unique(), name='date')).reset_index()
+f_mean[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['f'].mean(dim=['chain','draw']).values.reshape((n_months, n_serotypes))
+f_mean = f_mean.set_index(['date'])
 ## Lower
-f_lower = df[['cluster','date']]
-f_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = np.tile(trace['posterior']['f'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values[:, np.newaxis, :], (1,2,1)).reshape((n_months*n_clusters, n_serotypes))
-f_lower = f_lower.set_index(['cluster','date'])
+f_lower = pd.DataFrame(index=pd.Index(df['date'].unique(), name='date')).reset_index()
+f_lower[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['f'].quantile(dim=['chain','draw'], q=(100-confidence)/2/100).values.reshape((n_months, n_serotypes))
+f_lower = f_lower.set_index(['date'])
 ## Upper
-f_upper = df[['cluster','date']]
-f_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = np.tile(trace['posterior']['f'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values[:, np.newaxis, :], (1,2,1)).reshape((n_months*n_clusters, n_serotypes))
-f_upper = f_upper.set_index(['cluster','date'])
-
+f_upper = pd.DataFrame(index=pd.Index(df['date'].unique(), name='date')).reset_index()
+f_upper[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']] = trace['posterior']['f'].quantile(dim=['chain','draw'], q=1-(100-confidence)/2/100).values.reshape((n_months, n_serotypes))
+f_upper = f_upper.set_index(['date'])
 
 # Get timepoints
 time = df['date'].unique()
@@ -466,6 +465,7 @@ for cluster in df['cluster'].unique().tolist():
     df_star_lower = FOI_lower.loc[cluster, ['FOI']]
     df_star_upper = FOI_upper.loc[cluster, ['FOI']]
     ax[9].axhline(np.mean(df_star_mean[f'FOI']*100), color='red', linewidth=0.5)
+    ax[9].axhline(12*np.mean(df_star_mean[f'FOI']*100), color='red', linestyle='dashed', linewidth=0.5)
     ax[9].plot(df_star_mean.index, df_star_mean[f'FOI']*100, color='hotpink', alpha=1)
     ax[9].fill_between(df_star_mean.index, df_star_lower['FOI']*100, df_star_upper['FOI']*100, color='hotpink', alpha=0.2)
     ax[9].set_ylabel('Total FOI (%)', fontsize=7)
@@ -484,9 +484,9 @@ for cluster in df['cluster'].unique().tolist():
 
     # 10: time-dependent homologous infection FOI modifier
     # Filter data for a single UF
-    df_star_mean = f_mean.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3']]
-    df_star_lower = f_lower.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3']]
-    df_star_upper = f_upper.loc[cluster, ['DENV_1', 'DENV_2', 'DENV_3']]
+    df_star_mean = f_mean
+    df_star_lower = f_lower
+    df_star_upper = f_upper
     # Plot
     colors = ['black', 'red', 'green', 'blue']
     for i in range(1,4):

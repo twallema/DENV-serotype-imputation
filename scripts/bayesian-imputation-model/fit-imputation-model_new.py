@@ -15,7 +15,7 @@ pytensor.config.cxx = '/usr/bin/clang++'
 pytensor.config.on_opt_error = "ignore"
 
 # analysis startdate
-start_year = 1998
+start_year = 2000
 start_month = 9
 end_year = 2016
 assert start_year >= 1996, "earliest start_year is 1996."
@@ -149,7 +149,7 @@ df['delta'] = df['delta'].where(df['N_typed'] > 0, np.nan) # When N_typed == 0, 
 df["delta"] = df["delta"].clip(lower=1e-12, upper=1 - 1e-12)
 
 # only do first X clusters
-df = df[df['cluster'].isin([23,19])]
+df = df[df['cluster'].isin([11, 12, 13, 16])]
 
 # 3. Take only from start_year to end_year
 df_alldates = df.copy()
@@ -182,7 +182,7 @@ df_expanded["estimated_death_rate"] = df_expanded["estimated_deaths"] / df_expan
 births = df_expanded.pivot(index="date", columns="cluster", values="estimated_births").to_numpy().astype(int) # (n_months, n_clusters)
 death_rate = df_expanded.pivot(index="date", columns="cluster", values="estimated_death_rate").to_numpy() # (n_months, n_clusters)
 # Initial demography
-demo = demo[((demo['year'] == start_year) & (demo['cluster'].isin([23,19])))]['population'].values 
+demo = demo[((demo['year'] == start_year) & (demo['cluster'].isin([11, 12, 13, 16])))]['population'].values 
 
 # --- Indices ---
 cluster_idx = df["cluster"].to_numpy().astype(int)
@@ -234,7 +234,7 @@ unique_dates = np.sort(df["date"].unique())
 years = pd.DatetimeIndex(unique_dates).year
 intro_mask = np.ones((len(unique_dates), 4))
 intro_mask[:, 3] = (years >= 2008).astype(int)
-intro_mask[:, 2] = (years >= 1999).astype(int)
+intro_mask[:, 2] = (years >= 200).astype(int)
 
 # Load in the transmission model state mappings
 ## susceptibles
@@ -488,7 +488,7 @@ def build_initial_crossprotection(demo, f_P, pi_d, f_P2):
     return f_P * demo[:, None] * P_frac[None, :]
 
 
-def build_initial_infected(DENV_total, p0, kappa, pi_d):
+def build_initial_infected(demo, DENV_total, p0, pi_d):
     """
     Parameters
     ----------
@@ -519,7 +519,8 @@ def build_initial_infected(DENV_total, p0, kappa, pi_d):
     second_inf = pi_d[1] / pi_sum
 
     # divide the total dengue cases over the serotypes under the assumption they are heterologous infections
-    DENV_total_est = ((DENV_total[:, None] * p0)[:, None, :] / kappa[:, :, :, 1]) * pt.stack([first_inf, second_inf, 0, 0])[None,:, None]   # shape: (n_clusters, n_serotypes)
+    #DENV_total_est = ((DENV_total[:, None] * p0)[:, None, :] / kappa[:, :, :, 1]) * pt.stack([first_inf, second_inf, 0, 0])[None,:, None]   # shape: (n_clusters, n_serotypes)
+    DENV_total_est = ((DENV_total * demo)[:, None] * p0)[:, None, :] * pt.stack([first_inf, second_inf, 0, 0])[None,:, None]
 
     # zeros
     z = pt.zeros_like(DENV_total_est[:, 0, 0])
@@ -543,8 +544,10 @@ with pm.Model() as model:
     f_P2 = pm.Beta("f_P2", alpha=3, beta=1)                # fraction cross-protected after DENV-2 infection
     pi_d = pm.Dirichlet("pi_d", a=10*np.array([1, 2, 7]))   # divide the non-cross-protected across naive, mono, double
     pi_mono2 = pm.Beta("pi_mono2", alpha=3, beta=1)        # divide the mono between DENV-1 and DENV-2
+    I0_est = pm.HalfNormal("I0_est", sigma=1e-6, shape=n_clusters)
     S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, f_P, pi_d, pi_mono2))
     P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, f_P2))
+    I0 = pm.Deterministic("I0", build_initial_infected(demo, I0_est, pt.as_tensor(p0.values), pi_d))
 
     # Parameters 
     ## average duration of infection
@@ -556,23 +559,23 @@ with pm.Model() as model:
     ## average FOI reduction for homologous infections (n_months x n_serotypes)
     ### time-dependent for DENV-1 / DENV-2
     #### DENV-1
-    mu_f1 = pm.Beta("mu_f1", alpha=1, beta=10)
+    mu_f1 = pm.Beta("mu_f1", alpha=3, beta=3)
     rho_f1 = pm.Beta("rho_f1", alpha=3, beta=3)
-    sigma_f1 = pm.HalfNormal("sigma_f1", sigma=1/5)
+    sigma_f1 = pm.HalfNormal("sigma_f1", sigma=1/3)
     eps_f1 = pm.Normal("eps_f1", 0, 1, shape=n_years+1)
     f1_logit_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_f1[1:], outputs_info=pt.zeros(()), non_sequences=[rho_f1, sigma_f1])
     f1_logit = pm.math.logit(mu_f1) + f1_logit_seq
     f1_t = pm.math.sigmoid(f1_logit[year_idx[::n_clusters]])
     #### DENV-2
-    mu_f2 = pm.Beta("mu_f2", alpha=1, beta=10)
+    mu_f2 = pm.Beta("mu_f2", alpha=3, beta=3)
     rho_f2 = pm.Beta("rho_f2", alpha=3, beta=3)
-    sigma_f2 = pm.HalfNormal("sigma_f2", sigma=1/5)
+    sigma_f2 = pm.HalfNormal("sigma_f2", sigma=1/3)
     eps_f2 = pm.Normal("eps_f2", 0, 1, shape=n_years+1)
     f2_logit_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_f2[1:], outputs_info=pt.zeros(()), non_sequences=[rho_f2, sigma_f2])
     f2_logit = pm.math.logit(mu_f2) + f2_logit_seq
     f2_t = pm.math.sigmoid(f2_logit[year_idx[::n_clusters]])
     ## time-independent for DENV-3
-    f3 = pm.Beta("f3", alpha=1, beta=20)
+    f3 = pm.Beta("f3", alpha=1, beta=10)
     ## construct f & save it
     f = pm.Deterministic("f", pt.stack([f1_t, f2_t, pt.repeat(f3, n_months), pt.repeat(0, n_months)], axis=1))
     ## construct f_per_I
@@ -600,7 +603,7 @@ with pm.Model() as model:
     ### seasonal component
     mu_beta = pm.Normal("mu_beta", mu=np.log(2.5), sigma=1/5, shape=n_clusters)
     A_beta = pm.HalfNormal("A_beta", sigma=1, shape=n_clusters)
-    phi_beta = pm.Normal("phi_beta", mu=pt.pi/3, sigma=1, shape=n_clusters) # peaks March
+    phi_beta = pm.Normal("phi_beta", mu=pt.pi/2, sigma=1, shape=n_clusters) # peaks March
     season = A_beta[:, None] * pt.cos(2 * np.pi * pt.arange(n_months)[None, :] / 12 - phi_beta[:, None])
     ### AR(1) component (non-centered)
     rho_ar_beta = pm.Beta("rho_ar_beta", alpha=1, beta=3)                 # persistence
@@ -611,9 +614,6 @@ with pm.Model() as model:
     #### Combine
     beta_t = pm.Deterministic("beta_t", pt.exp(mu_beta[:, None] + season + u.T).T) #+ u.T
     
-    ## Initial infected
-    I0 = build_initial_infected(pt.as_tensor(DENV_total[0,:]), pt.as_tensor(p0.values), kappa, pi_d)
-
     # -----------------------------------------------------------------------------
     # Integrate transmission model (Euler's method; dt = 1 month; 5 steps per month
     # -----------------------------------------------------------------------------
@@ -661,7 +661,7 @@ with pm.Model() as model:
 
     # Observed cases
     reported = pt.sum(Delta_I * kappa, axis=(2,3,4))
-    alpha_inv = pm.HalfNormal("alpha_inv", sigma=1/10)
+    alpha_inv = pm.HalfNormal("alpha_inv", sigma=1/20)
     D_obs = pm.NegativeBinomial("D_obs", mu=reported, alpha=1/alpha_inv, observed=DENV_total)
 
     # Observed serotyped cases
@@ -725,14 +725,14 @@ with pm.Model() as model:
 #######################
 
 # NUTS
-draws=10
+draws=500
 with model:
-    trace = pm.sample(draws, tune=15, target_accept=0.99,
+    trace = pm.sample(draws, tune=500, target_accept=0.8,
                      chains=chains, cores=chains, init='adapt_diag', progressbar=True,
                      initvals=chains*[{'f_P': 0.25, 'f_P2': 0.75, 'pi_d': pt.as_tensor([0.1, 0.2, 0.7]), 'pi_mono2': 0.75,
                                        'omega': 24, 'mu_f1': 0.8, 'mu_f2': 0.8, 'f3': 0.5, 'kappa0_logit': pm.math.logit(0.1),
-                                       'mu_beta': np.log(2.5) * pt.ones(n_clusters), 'A_beta': 1 * pt.ones(n_clusters), 'phi_beta': pt.ones(n_clusters),
-                                       'alpha_inv': 0.3}],
+                                       'mu_beta': np.log(2.5) * pt.ones(n_clusters), 'A_beta': 1 * pt.ones(n_clusters), 'phi_beta': 1.5 * pt.ones(n_clusters),
+                                       'alpha_inv': 0.5}],
                      idata_kwargs={'log_likelihood':True})
 
 #######################
@@ -753,7 +753,7 @@ arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc"
 
 # Traceplot
 variables2plot = [
-                 'f_P', 'f_P2', 'pi_d', 'pi_mono2', 'omega', 'mu_f1', 'sigma_f1', 'rho_f1', 'mu_f2', 'sigma_f2', 'rho_f2', 'f3', 'kappa', 'kappa0_logit', 'or_34', 'or_cluster', 'or_serotype', 'or_homologous', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
+                 'f_P', 'f_P2', 'pi_d', 'pi_mono2', 'I0_est', 'omega', 'mu_f1', 'sigma_f1', 'rho_f1', 'mu_f2', 'sigma_f2', 'rho_f2', 'f3', 'kappa', 'kappa0_logit', 'or_34', 'or_cluster', 'or_serotype', 'or_homologous', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 # Save traces
