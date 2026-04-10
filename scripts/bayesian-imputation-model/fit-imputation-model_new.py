@@ -420,7 +420,7 @@ def step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
          C, W, H_het, H_hom, L, K_het, K_hom,
          gamma, omega, birth_vec):
     """
-    Monthly step using two RK4 half-month steps.
+    Monthly step using `n_steps` RK4 substeps.
     Returns updated S, I, P, and cumulative delta_I over the month.
     """
 
@@ -429,7 +429,7 @@ def step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
     delta_hom_total = pt.zeros_like(I_t)
     delta_het_total = pt.zeros_like(I_t)
 
-    # --- Two RK4 steps per month ---
+    # Take n_steps RK4 steps per month
     for _ in range(n_steps):
         S, I, P, d_hom, d_het, lambda_t = rk4_step(
             beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
@@ -519,7 +519,6 @@ def build_initial_infected(demo, DENV_total, p0, pi_d):
     second_inf = pi_d[1] / pi_sum
 
     # divide the total dengue cases over the serotypes under the assumption they are heterologous infections
-    #DENV_total_est = ((DENV_total[:, None] * p0)[:, None, :] / kappa[:, :, :, 1]) * pt.stack([first_inf, second_inf, 0, 0])[None,:, None]   # shape: (n_clusters, n_serotypes)
     DENV_total_est = ((DENV_total * demo)[:, None] * p0)[:, None, :] * pt.stack([first_inf, second_inf, 0, 0])[None,:, None]
 
     # zeros
@@ -576,21 +575,21 @@ with pm.Model() as model:
     f2_t = pm.math.sigmoid(f2_logit[year_idx[::n_clusters]])
     ## time-independent for DENV-3
     f3 = pm.Beta("f3", alpha=1, beta=5)
-    ## construct f & save it
+    ## zero for DENV-4 (unidentifiable)
     f = pm.Deterministic("f", pt.stack([f1_t, f2_t, pt.repeat(f3, n_months), pt.repeat(0, n_months)], axis=1))
     ## construct f_per_I
     f_per_I = f[:, sero_idx]
 
     ## reported fraction (cluster x degree x serotype)
-    kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1)                 # intercept
+    kappa0_logit = pm.Normal("kappa0_logit", mu=pm.math.logit(1/10), sigma=1)                   # intercept
     is_34 = pt.as_tensor([0,0,1,1])                                                             # indicator prim/sec versus tert/quart
-    log_or_34 = pm.Normal("log_or_34", mu=-3, sigma=1/10)                                        # OR detecting prim/sec versus tert/quart
-    log_or_serotype = pm.Normal("log_or_serotype", mu=0.0, sigma=1/3, shape=n_serotypes-1)    # OR detecting serotypes (vs. DENV-1)
+    log_or_34 = pm.Normal("log_or_34", mu=-3, sigma=1/10)                                       # OR detecting prim/sec versus tert/quart
+    log_or_serotype = pm.Normal("log_or_serotype", mu=0.0, sigma=1/3, shape=n_serotypes-1)      # OR detecting serotypes (vs. DENV-1)
     log_or_serotype_full = pt.concatenate([pt.zeros(1), log_or_serotype])
     log_or_cluster = pm.Normal("log_or_cluster", mu=0.0, sigma=1/3, shape=n_clusters-1)         # OR detecting in a cluster (vs. cluster 1)
     log_or_cluster_full = pt.concatenate([pt.zeros(1), log_or_cluster])
     is_hom = pt.as_tensor([1,0])                                                                # indicator for homologous infection
-    log_or_hom = pm.Normal("log_or_hom", mu=-3, sigma=1/10)                                      #            
+    log_or_hom = pm.Normal("log_or_hom", mu=-3, sigma=1/10)                                                 
     logit_kappa = kappa0_logit + log_or_cluster_full[:, None, None, None] + log_or_34*is_34[None, :, None, None] \
         + log_or_serotype_full[None, None, :, None] + log_or_hom * is_hom[None, None, None, :]
     kappa = pm.Deterministic("kappa", pm.math.sigmoid(logit_kappa))
