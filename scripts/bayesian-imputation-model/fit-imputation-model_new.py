@@ -328,7 +328,7 @@ D = pt.constant(D)
 def RHS(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
          S_t, I_t, P_t, 
          C, W, H_het, H_hom, L, K_het, K_hom,
-         gamma, omega, birth_vec, dt):
+         gamma, omega, birth_vec):
 
     # --- Total population ---
     N_t = pt.sum(S_t, axis=1) + pt.sum(I_t, axis=1) + pt.sum(P_t, axis=1)   # (clusters,)
@@ -362,7 +362,7 @@ def rk4_step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_pe
     Returns updated S, I, P and cumulative delta_I over this step.
     """
     
-    # --- k1: derivatives at current state ---
+    # k1: derivatives at the current state
     dS1, dI1, dP1, d_hom1, d_het1, _ = RHS(
         beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
         f, f_per_I, S_t, I_t, P_t,
@@ -370,7 +370,7 @@ def rk4_step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_pe
         gamma, omega, birth_vec, dt=None  # dt not used inside substep now
     )
     
-    # --- k2: derivatives at midpoint using k1 ---
+    # k2: derivatives at midpoint using k1
     dS2, dI2, dP2, d_hom2, d_het2, _ = RHS(
         beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
         f, f_per_I,
@@ -381,7 +381,7 @@ def rk4_step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_pe
         gamma, omega, birth_vec, dt=None
     )
     
-    # --- k3: derivatives at midpoint using k2 ---
+    # k3: derivatives at midpoint using k2
     dS3, dI3, dP3, d_hom3, d_het3, _ = RHS(
         beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
         f, f_per_I,
@@ -392,7 +392,7 @@ def rk4_step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_pe
         gamma, omega, birth_vec, dt=None
     )
     
-    # --- k4: derivatives at end using k3 ---
+    # k4: derivatives at end using k3
     dS4, dI4, dP4, d_hom4, d_het4, lambda4 = RHS(
         beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
         f, f_per_I,
@@ -403,12 +403,12 @@ def rk4_step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_pe
         gamma, omega, birth_vec, dt=None
     )
     
-    # --- RK4 weighted average ---
+    # RK4 is a weighted average
     S_next = S_t + (dt/6)*(dS1 + 2*dS2 + 2*dS3 + dS4)
     I_next = I_t + (dt/6)*(dI1 + 2*dI2 + 2*dI3 + dI4)
     P_next = P_t + (dt/6)*(dP1 + 2*dP2 + 2*dP3 + dP4)
     
-    # --- Accumulate delta_I over the step ---
+    # Accumulate new infections over the step
     delta_hom_sum = (dt/6)*(d_hom1 + 2*d_hom2 + 2*d_hom3 + d_hom4)
     delta_het_sum = (dt/6)*(d_het1 + 2*d_het2 + 2*d_het3 + d_het4)
     
