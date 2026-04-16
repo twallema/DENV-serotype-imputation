@@ -170,9 +170,15 @@ dmypy.json
 .RData
 
 # Data
+## raw linelist data
 data/raw/datasus_DENV-linelist/composite_dataset/composite_*
-data/interim/pipeline_output
+## municipality-level interim linelist data
 data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_weekly_mun.csv
+data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv
+data/interim/datasus_DENV-linelist/mun/DENV-total_age_1999-2025_monthly_mun.csv
+## all simultion results
+data/interim/pipeline_output
+## all shapefiles
 data/raw/BR_Municipios_2023/BR_Municipios_2023.cpg
 data/raw/BR_Municipios_2023/BR_Municipios_2023.dbf
 data/raw/BR_Municipios_2023/BR_Municipios_2023.prj
@@ -180,5 +186,6 @@ data/raw/BR_Municipios_2023/BR_Municipios_2023.qix
 data/raw/BR_Municipios_2023/BR_Municipios_2023.shp
 data/raw/BR_Municipios_2023/BR_Municipios_2023.shx
 data/interim/geographic-dataset.parquet
+## (too) large clustermaps
 data/interim/DTW-MDS-embeddings/indexP/DTW-mat-clustermap_mun.pdf
 data/interim/DTW-MDS-embeddings/DENV_100k/DTW-mat-clustermap_mun.pdf
