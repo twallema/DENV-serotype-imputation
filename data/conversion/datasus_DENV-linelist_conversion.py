@@ -59,13 +59,16 @@ corresponding_years = [int(fn[10:14]) for fn in filenames]
 # Formatted data collection
 df_uf_collect=[]
 df_muni_collect=[]
+df_muni_age_collect=[]
 
 # Get the municipality to federative unit map, municipality to immediate region map, and immediate region to federative unit map
 mun2uf_map = gpd.read_parquet('../interim/geographic-dataset.parquet')[['CD_UF', 'CD_MUN']].drop_duplicates().set_index('CD_MUN')['CD_UF'].to_dict()
 
 # Loop over files
 for fn,yr in zip(filenames, corresponding_years):
-    print(f'Working on year {yr}')
+    print(f'\nWorking on year {yr}')
+    print('---------------------')
+    print("\nWorking on preprocessing..")
     # 1996, 1997, 1998
     if 1996 <= yr <= 1998:
         # define serotype column name
@@ -86,13 +89,15 @@ for fn,yr in zip(filenames, corresponding_years):
         # find minimum date
         df['date'] = df[date_columns].min(axis=1)
         # drop if date not present (very rare)
+        print(f"Fraction with a missing date: {100 - len(df.dropna(subset=['date'])) / len(df) * 100} %")
         df = df.dropna(subset=['date'])
         # the column telling us if the case was 'confirmed' is unknown --> have to assume all cases are confirmed (even though 1999-2006 indicates this is not the case)
         pass
 
     elif 1999 <= yr <= 2006:
-        # define serotype column name
+        # define relevant column names
         serotype_column = 'RESUL_VIRA'
+        age_column = 'NU_IDADE'
         # load data
         read_csv_kwargs = {'delimiter': ';'} if yr == 1999 else {'delimiter':',', 'encoding':"ISO-8859-1"}
         df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', **read_csv_kwargs, low_memory=False)
@@ -110,10 +115,11 @@ for fn,yr in zip(filenames, corresponding_years):
         ## Medians are always -3/-4 days for both variables; IQR for DT_SIN_PRI is always in the range -7 --> -1
         ## DT_FEBRE = UNRELIABLE, average lag of DT_SIN_PRI is OK but I'm not transferring cases between years (this is probably an extensive recode)
         date_columns = ['DT_NOTIFIC', 'DT_SIN_PRI']
-        df[date_columns] = df[date_columns].apply(lambda x: pd.to_datetime(x, format='%Y-%m-%d', errors='coerce')) # drop all errors 
+        df[date_columns] = df[date_columns].apply(lambda x: pd.to_datetime(x, format='%Y-%m-%d', errors='coerce')) # errors --> NaT
         # find minimum date
         df['date'] = df[date_columns].apply(choose_date, axis=1)
         # drop if date not present (very rare)
+        print(f"Fraction with a missing date: {100 - len(df.dropna(subset=['date'])) / len(df) * 100} %")
         df = df.dropna(subset=['date'])
         # filter out the discards (CON_CLASSI==5) but leave in the undocumented value '0' and inconclusive '8'
         print(f"Discarded fraction: {len(df[df['CON_CLASSI'] == 5]) / len(df) * 100} %")
@@ -123,22 +129,29 @@ for fn,yr in zip(filenames, corresponding_years):
         # convert ID_MN_RESI to CD_UF and rename ID_MN_RESI to CD_MUN
         df['CD_UF'] = df['ID_MN_RESI'].map(mun2uf_map)
         df = df.rename(columns={'ID_MN_RESI': 'CD_MUN'})
+        # convert NU_IDADE to age
+        df = df.rename(columns={age_column: 'age'})
+        df['age'] = df['age'].str.extract(r'^A(\d{3})')[0].fillna(0).astype(int)
         pass
 
     elif 2007 <= yr <= 2025:
         # define serotype column name
         serotype_column = 'SOROTIPO'
+        age_column = 'NU_IDADE_N'
         # load data
         if yr == 2008:
             df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', delimiter=',', encoding="ISO-8859-1", low_memory=False)
             # remove b'' for 2008 (using raw data)
-            df = df.applymap(decode_or_nan)
+            df = df.map(decode_or_nan)
             # convert 'SOROTIPO' and 'SG_UF' to numerics
             df['SOROTIPO'] = pd.to_numeric(df['SOROTIPO'])
             df['ID_MN_RESI'] = pd.to_numeric(df['ID_MN_RESI'], errors='coerce') # Has 6 digits so this is already an immediate region code!
             df['CLASSI_FIN'] = pd.to_numeric(df['CLASSI_FIN'])
         else:
             df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', delimiter=',', encoding="ISO-8859-1", low_memory=False)
+
+        # make sure age column is a string
+        df[age_column] = df[age_column].astype(str)
 
         # find most likely date
         ## strategy: take minimum of columns containing a date: ['DT_NOTIFIC', 'DT_SIN_PRI'] # consider adding collection date
@@ -190,7 +203,7 @@ for fn,yr in zip(filenames, corresponding_years):
         # Step 3: report fraction of ambiguous matches
         fraction_non_unique = non_unique_hits / len(df) 
         fraction_no_hits = no_hits / len(df)
-        print(f"\nFraction of 6-digit CD_MUNI with non-unique 7-digit matches: {fraction_non_unique:.2%}")
+        print(f"Fraction of 6-digit CD_MUNI with non-unique 7-digit matches: {fraction_non_unique:.2%}")
         print(f"Fraction of 6-digit CD_MUNI with no 7-digit matches: {fraction_no_hits:.2%}")
         # Step 4: drop nan and convert to integer
         df = df.dropna(subset='CD_MUN_7')
@@ -216,6 +229,7 @@ for fn,yr in zip(filenames, corresponding_years):
         # find minimum date
         df['date'] = df[date_columns].apply(choose_date, axis=1)
         # drop if date is missing (very rare)
+        print(f"Fraction with a missing date: {100 - len(df.dropna(subset=['date'])) / len(df) * 100} %")
         df = df.dropna(subset=['date'])
 
         # Examination of cases that get a 'discarded' status after investigation BUT have a subtype assigned to them (pre 2008: CON_CLASSI)
@@ -230,11 +244,15 @@ for fn,yr in zip(filenames, corresponding_years):
         # drop column 'UF'
         df = df.drop('UF', axis=1)
 
+        # convert NU_IDADE_N to age
+        df = df.rename(columns={age_column: 'age'})
+        df['age'] = df['age'].str.extract(r'^4(\d{3})')[0].fillna(0).astype(int)
         pass
     
 
     # General conversions (both RGI and UF spatial levels)
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
     # convert to the next saturday
     df['date'] = df['date'].apply(next_saturday)
     # clean the serotype column
@@ -242,6 +260,8 @@ for fn,yr in zip(filenames, corresponding_years):
 
     # Collect data at UF spatial level
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    print("\nWorking on state-level data collection..")
     df_copy = df.copy(deep=True)
     # retain only relevant columns
     df = df[['date', 'CD_UF', 'serotype']]
@@ -277,14 +297,18 @@ for fn,yr in zip(filenames, corresponding_years):
     # save result
     df_uf_collect.append(final_df)
 
-
     # Collect data at municipality level
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    print("\nWorking on municipality data collection..")
     df = df_copy
+    df_copy = df.copy(deep=True)
     # retain only relevant columns
     df = df[['date', 'CD_MUN', 'serotype']]
-    # drop if patient residency not provided 
+    # drop if patient residency not provided
+    print(f"Fraction with missing municipality code: {100 - len(df.dropna(subset=['CD_MUN'])) / len(df) * 100:.2f} %")
     df = df.dropna(subset=['CD_MUN'])
+
     # build an expanded dataframe
     all_dates = pd.date_range(start=f'{yr}-01-01', end=f'{yr}-12-31', freq='W-SAT')
     all_muni = gpd.read_parquet('../interim/geographic-dataset.parquet')['CD_MUN'].unique()
@@ -315,6 +339,62 @@ for fn,yr in zip(filenames, corresponding_years):
     # save result
     df_muni_collect.append(final_df)
 
+    # Collect age-structured data at municipality level
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    print("\nWorking on municipality age-structured data collection..")
+    df = df_copy
+    if yr >= 1999:
+        # retain only relevant columns
+        df = df[['date', 'age', 'CD_MUN', 'serotype']]
+        # drop if patient residency not provided
+        print(f"Fraction with missing municipality code: {100 - len(df.dropna(subset=['CD_MUN'])) / len(df) * 100:.2f} %")
+        df = df.dropna(subset=['CD_MUN'])
+        # drop if patient age not provided
+        l=len(df)
+        df = df.dropna(subset=['age'])
+        print(f"Fraction with missing age: {100 - len(df) / l * 100:.2f} %") 
+        # limit age
+        print(f"Fraction with 0 <= age <= 100: {100 - len(df[((df['age'] >= 0) & (df['age'] <= 100))]) / len(df) * 100:.2f} %")
+        df = df[((df['age'] >= 0) & (df['age'] <= 100))]
+
+        # build an expanded dataframe
+        all_dates = pd.date_range(start=f'{yr}-01-01', end=f'{yr}-12-31', freq='W-SAT')
+        all_ages = np.arange(101)
+        all_muni = gpd.read_parquet('../interim/geographic-dataset.parquet')['CD_MUN'].unique()
+        full_index = pd.MultiIndex.from_product([all_dates, all_ages, all_muni], names=['date', 'age', 'CD_MUN'])
+        full_df = pd.DataFrame(index=full_index).reset_index()
+        
+        # count total observations
+        total_counts = (
+            df.groupby(['date', 'age', 'CD_MUN'])
+            .size()
+            .reset_index(name='DENV_total')
+        )
+        # merge together 
+        df = (
+            full_df
+            .merge(total_counts, on=['date', 'age', 'CD_MUN'], how='left')
+        )
+
+        # bin age groups
+        df['DENV_total'] = df['DENV_total'].fillna(0)
+        bins = np.arange(0, 105, 5) 
+        labels = [f"[{i}-{i+5}(" for i in range(0, 100, 5)]
+        df['age_group'] = pd.cut(
+            df['age'],
+            bins=bins,
+            right=False,   # intervals like [0,5)
+            labels=labels,
+            include_lowest=True
+        )
+        df_binned = (
+            df
+            .groupby(['date', 'age_group', 'CD_MUN'], as_index=False, observed=False)['DENV_total']
+            .sum()
+        )
+        # save result
+        df_muni_age_collect.append(df_binned)
 
 # Final concatenation of dataframes at uf spatial level
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -354,6 +434,23 @@ monthly_df_muni = (
     .reset_index()                    # Flatten index
 )
 monthly_df_muni.to_csv('../interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv', index=False)
+
+
+# Final concatenation of age-structured dataframes at municipality spatial level
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+df_muni_age = pd.concat(df_muni_age_collect, ignore_index=True)
+
+# Save result (monthly frequency only)
+monthly_df_muni = (
+    df_muni_age.set_index(['CD_MUN', 'age_group', 'date'])
+    .groupby(level=['CD_MUN', 'age_group'], observed=False)  # Group by state
+    .resample('ME', level='date')     # Resample by month at the 'date' level
+    .sum(min_count=1)                 # Ensure NaN if all values are NaN
+    .reset_index()                    # Flatten index
+)
+monthly_df_muni = monthly_df_muni.sort_values(by=['date', 'age_group', 'CD_MUN']).reset_index(drop=True)
+monthly_df_muni.to_csv('../interim/datasus_DENV-linelist/mun/DENV_total_age_1999-2025_monthly_mun.csv', index=False)
 
 
 #############################
