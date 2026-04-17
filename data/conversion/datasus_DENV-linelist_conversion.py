@@ -380,7 +380,7 @@ for fn,yr in zip(filenames, corresponding_years):
         # bin age groups
         df['DENV_total'] = df['DENV_total'].fillna(0)
         bins = np.arange(0, 105, 5) 
-        labels = [f"[{i}-{i+5}(" for i in range(0, 100, 5)]
+        labels = [f"[{i:02d}-{i+5:02d}(" for i in range(0, 100, 5)]
         df['age_group'] = pd.cut(
             df['age'],
             bins=bins,
