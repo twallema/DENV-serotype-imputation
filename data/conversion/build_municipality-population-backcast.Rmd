@@ -16,7 +16,7 @@ library(dplyr)
 
 ```{r}
 
-muni <- read.csv("../interim/IBGE_population-projections/pop-births-deaths_mun_2001-2024.csv")
+muni <- read.csv("../interim/IBGE_population/pop-births-deaths_mun_2001-2024.csv")
 muni 
 
 ```
@@ -84,7 +84,7 @@ plot(sample.plot$year, sample.plot$estimated_deaths)
 
 ```{r}
 write.csv(muni.new,
-          "../interim/IBGE_population-projections/pop-births-deaths_mun_1996-2024.csv",
+          "../interim/IBGE_population/pop-births-deaths_mun_1996-2024.csv",
           row.names = FALSE)
 
 ```
