@@ -6,6 +6,8 @@ Here we list a description of all datasets, raw datasets are unaltered original 
 
 + `indexP_monthlyclimate_allmuni.csv`: Index-P at the municipality level, seasonal average (monthly). Obtained from Dr. Laura Alexander. Papers supporting a correlation between index P and DENV transmission: https://pmc.ncbi.nlm.nih.gov/articles/PMC9610358/
 
++ `subdivision-names.csv`: Abbreviations of Brazilian state names (ISO 3166-2:BR). Retrieved from the International Standardization Organization (ISO): https://www.iso.org/obp/ui/#iso:pub:PUB500001:en 
+
 ### Genetic sequence databases
 
 + `genbank_sequences.csv`: Metadata from the Brazilian Dengue sequences in Genbank. Downloaded from https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Nucleotide&VirusLineage_ss=Dengue%20virus,%20taxid:12637&Country_s=Brazil
@@ -76,11 +78,13 @@ These data are partly confidential and can be found on the Bento lab box.
 
 ### IBGE population
 
-`IBGE_births-deaths_uf.csv`: Contains the births, deaths and population of Brazil's federative units from 2000-2070. Extracted from `projecoes_2024_tab4_indicadores.xlsx` using MS Excel.
++ `IBGE_births-deaths_uf.csv`: Contains the births, deaths and population of Brazil's federative units from 2000-2070. Extracted from `projecoes_2024_tab4_indicadores.xlsx` using MS Excel.
 
-`IBGE_births-deaths_mun-estimated.csv`: Contains the births, deaths and population of Brazil's municipalities from 2001-2024, assuming the birth and death rate in municipalities is the same as the average of the federative unit. Created using `~/data/conversion/build_births-deaths.py` using `~/data/interim/IBGE_population/IBGE_births-deaths_uf.csv` and `~/data/raw/sprint_2025/datasus_population_2001_2024.csv`.
++ `IBGE_births-deaths_mun-estimated.csv`: Contains the births, deaths and population of Brazil's municipalities from 2001-2024, assuming the birth and death rate in municipalities is the same as the average of the federative unit. Created using `~/data/conversion/build_births-deaths.py` using `~/data/interim/IBGE_population/IBGE_births-deaths_uf.csv` and `~/data/raw/sprint_2025/datasus_population_2001_2024.csv`.
 
-`municipality_population_1996-2024_estimated`: Extension of `IBGE_births-deaths_mun-estimated.csv`, adding the predicted population, birth, and death count for 1996-2000 for every municipality. Made by S. Bajaj using `~/data/conversion/build_municipality-population-backcast.Rmd`.
++ `municipality_population_1996-2024_estimated`: Extension of `IBGE_births-deaths_mun-estimated.csv`, adding the predicted population, birth, and death count for 1996-2000 for every municipality. Made by S. Bajaj using `~/data/conversion/build_municipality-population-backcast.Rmd`.
+
++ `municipality-age_population_2000.csv`: Population in 5 year age groups and per municipality in the year 2000 (5570, post-2017 classification). Made from `~/data/raw/IBGE_population/tabela200.csv` (2000 census) using `~/data/conversion/build_population-by-age.py`.
 
 ### DTW-MDS-embeddings
 
@@ -117,3 +121,5 @@ Contains all output of the Bayesian serotype imputation model `~/scripts/bayesia
 + `build_indexP.py`: A script to aggregate the municipality level index P per month to the immediate and intermediate Brazilian regions.
 
 + `build_municipality-population-backcast.Rmd`: Script used to estimate municipality populations, births, and deaths for 1996-2000 by fitting municipality-specific linear regressions, predicting backwards in time. 
+
++ `build_population-by-age.py`: Script used to format the 2000 census population by 5-year age groups and by municipality (`~/data/interim/IBGE_population/municipality-age_population_2000.csv`).

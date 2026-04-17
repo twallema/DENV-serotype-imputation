@@ -34,8 +34,14 @@ gdf = gdf.merge(demographics, on="CD_MUN")
 # rename to pop
 gdf = gdf.rename(columns={'population': 'POP'})
 
+# load state abbreviations and merge them to the geodataframe
+state_abbrev = pd.read_csv('../raw/subdivision-names.csv')[['subdivision_code', 'subdivision_name']]
+state_abbrev = state_abbrev.rename(columns={'subdivision_code': 'ABBREV_UF', 'subdivision_name': 'NM_UF'})
+state_abbrev['ABBREV_UF'] = state_abbrev['ABBREV_UF'].apply(lambda x: x[3:])
+gdf = gdf.merge(state_abbrev, on='NM_UF')
+
 # save a lightweight csv copy of the mapping between codes
-pd.DataFrame(gdf[['CD_MUN', 'NM_MUN', 'CD_RGI', 'NM_RGI', 'CD_RGINT', 'NM_RGINT', 'CD_UF', 'NM_UF', 'CD_REGIAO', 'NM_REGIAO']]).to_csv('../interim/spatial_units_mapping.csv', index=False)
+pd.DataFrame(gdf[['CD_MUN', 'NM_MUN', 'CD_RGI', 'NM_RGI', 'CD_RGINT', 'NM_RGINT', 'CD_UF', 'ABBREV_UF', 'NM_UF', 'CD_REGIAO', 'NM_REGIAO']]).to_csv('../interim/spatial_units_mapping.csv', index=False)
 
 # Compute population density
 # >>>>>>>>>>>>>>>>>>>>>>>>>>
