@@ -8,6 +8,9 @@ abs_dir = os.path.dirname(__file__)
 # load age-municipality-month dataset
 cases = pd.read_csv(os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/mun/DENV_total_age_1999-2025_monthly_mun.csv'))
 
+# load the age-municipality year demographic data
+demo = pd.read_csv(os.path.join(abs_dir, '../../data/interim/IBGE_population/municipality-age_population_2000-2022.csv'))
+
 # load clusters
 clusters = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/large_clusters/clusters/clusters_rgint.csv'))
 region = clusters.columns.to_list()[0]
@@ -15,6 +18,11 @@ region = clusters.columns.to_list()[0]
 # convert clusters to municipalities (really need to omit this necessity)
 mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
 mapping = mapping.merge(clusters[[region, 'cluster']], on=region, how='left')
+
+# aggregate the age-municipality year demographic data spatially to the clusters
+demo = demo.merge(mapping[["CD_MUN", "cluster"]], on="CD_MUN", how="left")
+age_cols = [col for col in demo.columns if col.startswith('[')]
+demo = demo.groupby(['cluster', 'year'])[age_cols].sum().reset_index()
 
 # aggregate the age-municipality-month dataset to the clusters
 cases = cases.merge(mapping[["CD_MUN", "cluster"]], on="CD_MUN", how="left")
@@ -34,11 +42,13 @@ cases = (
       .reset_index()
 )
 
-# compute cases by age group as a percentage of total cases
-cases['DENV_pct'] = (
-    cases['DENV_total'] /
-    cases.groupby(['season', 'cluster'])['DENV_total'].transform('sum')
-) * 100
+# add demographics and compute incidence
+cases['year'] = cases['season'].str[:4].astype(int)
+demo_long = demo.melt(id_vars=['cluster', 'year'], value_vars=age_cols, var_name='age_group', value_name='population')
+cases = cases.merge(demo_long, on=['cluster', 'year', 'age_group'], how='left')
+cases = cases.drop(columns=['year'])
+cases['DENV_incidence'] = cases['DENV_total'] / cases['population'] * 100000
+cases = cases.dropna()
 
 # compute the total number of cases
 totals = (
@@ -53,47 +63,55 @@ cases['age_low'] = bounds[0].astype(int)
 cases['age_high'] = bounds[1].astype(int)
 cases['age_mid'] = (cases['age_low'] + cases['age_high']) / 2
 
+# compute median age of the population
+pop_mean_age = (
+    cases.groupby(['season', 'cluster'])
+      .apply(lambda g: (g['age_mid'] * g['population']).sum() / g['population'].sum())
+      .reset_index(name='pop_mean_age')
+)
+
 # compute mean age of infection
-mean = (
+cases_mean = (
     cases.groupby(['season', 'cluster'])
       .apply(lambda g: np.average(g['age_mid'], weights=g['DENV_total']) 
              if g['DENV_total'].sum() > 0 else np.nan)
-      .reset_index(name='mean_age')
+      .reset_index(name='cases_mean_age')
 )
 
 # compute median age of infection
-def grouped_weighted_median_interp(g):
+def grouped_weighted_median_interp(g, weight_col):
     g = g.sort_values('age_low')
-
-    total = g['DENV_total'].sum()
+    total = g[weight_col].sum()
     if total == 0:
         return np.nan
-
-    cumsum = g['DENV_total'].cumsum()
+    cumsum = g[weight_col].cumsum()
     cutoff = total / 2
-
     idx = cumsum.searchsorted(cutoff)
     row = g.iloc[idx]
-
     prev_cum = 0 if idx == 0 else cumsum.iloc[idx - 1]
-    bin_count = row['DENV_total']
-
+    bin_count = row[weight_col]
     if bin_count == 0:
         return row['age_mid']
-
     # linear interpolation within bin
     frac = (cutoff - prev_cum) / bin_count
     return row['age_low'] + frac * (row['age_high'] - row['age_low'])
 
-median = (
+cases_median = (
     cases.groupby(['season', 'cluster'])
-      .apply(grouped_weighted_median_interp)
-      .reset_index(name='median_age')
+      .apply(grouped_weighted_median_interp, weight_col='DENV_total')
+      .reset_index(name='cases_median_age')
+)
+
+# compute median age of population
+pop_median_age = (
+    cases.groupby(['season', 'cluster'])
+      .apply(grouped_weighted_median_interp, weight_col='population')
+      .reset_index(name='pop_median_age')
 )
 
 # merge dataframes of totals, means and medians
-statistics = mean.merge(
-    median,
+statistics = cases_mean.merge(
+    cases_median,
     on=['season', 'cluster'],
     how='inner'
 )
@@ -102,9 +120,19 @@ statistics = statistics.merge(
     on=['season', 'cluster'],
     how='inner'
 )
+statistics = statistics.merge(
+    pop_mean_age,
+    on=['season', 'cluster'],
+    how='left'
+)
+statistics = statistics.merge(
+    pop_median_age,
+    on=['season', 'cluster'],
+    how='left'
+)
 
 # visualise the evolution of the medians over time
-cluster_id = 1
+cluster_id = 11
 df_c = statistics[statistics['cluster'] == cluster_id].copy()
 df_c['season_start'] = df_c['season'].str[:4].astype(int)
 df_c = df_c.sort_values('season_start')
@@ -115,15 +143,21 @@ sizes = sizes * 2
 plt.figure(figsize=(10, 5))
 plt.plot(
     df_c['season_start'],
-    df_c['median_age'],
+    df_c['cases_median_age'],
     linestyle='-',
     color='black'
 )
 plt.scatter(
     df_c['season_start'],
-    df_c['median_age'],
+    df_c['cases_median_age'],
     s=sizes,
     color='black'
+)
+plt.plot(
+    df_c['season_start'],
+    df_c['pop_median_age'],
+    linestyle='-',
+    color='red'
 )
 plt.xlabel('Season')
 plt.ylabel('Median age')
@@ -132,7 +166,6 @@ plt.grid(True)
 plt.tight_layout()
 plt.savefig('median_evolution.png', dpi=200)
 plt.close()
-
 
 # visualisation helper
 seasons = cases['season'].unique()
@@ -145,8 +178,8 @@ if len(seasons) == 1:
 for ax, season in zip(axes, seasons):
 
     ax.text(
-        0.05, 0.95,                      # position (in axes coords)
-        f"Median age of infection: {statistics[((statistics['season'] == season) & (statistics['cluster'] == cluster_id))]['median_age'].values[0]:.1f}\nTotal number of cases: {statistics[((statistics['season'] == season) & (statistics['cluster'] == cluster_id))]['total_cases'].values[0]:.0f}",
+        0.75, 0.95,                      # position (in axes coords)
+        f"Median age of infection: {statistics[((statistics['season'] == season) & (statistics['cluster'] == cluster_id))]['cases_median_age'].values[0]:.1f}\nTotal number of cases: {statistics[((statistics['season'] == season) & (statistics['cluster'] == cluster_id))]['total_cases'].values[0]:.0f}",
         transform=ax.transAxes,          # <-- important
         fontsize=12,
         verticalalignment='top',
@@ -157,10 +190,14 @@ for ax, season in zip(axes, seasons):
         )
     )
     tmp = cases[((cases['season'] == season) & (cases['cluster'] == cluster_id))]
-    ax.bar(tmp['age_group'], tmp['DENV_pct'], alpha=1, color='black')
+    ax.bar(tmp['age_group'], tmp['DENV_incidence'], alpha=1, color='black')
 
     ax.set_title(f'Season {season}')
     ax.tick_params(axis='x', rotation=90)
+    ax.set_ylim([-5,2600])
+    ax.set_ylabel('Incidence per 100K')
 
 plt.tight_layout()
 plt.savefig('age_distribution.png', dpi=200)
+plt.show()
+plt.close()
