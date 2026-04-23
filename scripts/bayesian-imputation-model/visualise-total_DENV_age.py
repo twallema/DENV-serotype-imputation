@@ -104,7 +104,7 @@ statistics = statistics.merge(
 )
 
 # visualise the evolution of the medians over time
-cluster_id = 11
+cluster_id = 1
 df_c = statistics[statistics['cluster'] == cluster_id].copy()
 df_c['season_start'] = df_c['season'].str[:4].astype(int)
 df_c = df_c.sort_values('season_start')

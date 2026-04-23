@@ -34,7 +34,10 @@ Downloaded using the instructions under '2 - Using FTPWeb' on https://sprint.mos
 
 + `projecoes_2024_tab4_indicadores.xlsx`: Retrieved from: https://www.ibge.gov.br/estatisticas/sociais/populacao/9109-projecao-da-populacao.html (População por sexo e idade simples)
 
-+ `tabela200.xlsx`: Population by 5 year age groups and municipality (5566). Retrieved from: https://sidra.ibge.gov.br/tabela/200
++ `tabela200-2000-raw.csv`: Population by 5 year age groups and municipality from the 2000 or 2010 census (5566). Retrieved from: https://sidra.ibge.gov.br/tabela/200
++ `tabela200-2000-format.csv`: Formatted version of `tabela200-2000-raw.csv`. Removed total population column. Removed first 6 rows. Removed last 8 rows. Formatted age groups. Retrieved from: https://sidra.ibge.gov.br/tabela/200
+
++ `tabela9514-2022-raw.csv`: Population by 5 year age groups and municipality from the 2022 census (5570). Retrieved from: https://sidra.ibge.gov.br/tabela/200
 
 ### Datasus DENV linelist dataset
 
@@ -84,7 +87,7 @@ These data are partly confidential and can be found on the Bento lab box.
 
 + `municipality_population_1996-2024_estimated`: Extension of `IBGE_births-deaths_mun-estimated.csv`, adding the predicted population, birth, and death count for 1996-2000 for every municipality. Made by S. Bajaj using `~/data/conversion/build_municipality-population-backcast.Rmd`.
 
-+ `municipality-age_population_2000.csv`: Population in 5 year age groups and per municipality in the year 2000 (5570, post-2017 classification). Made from `~/data/raw/IBGE_population/tabela200.csv` (2000 census) using `~/data/conversion/build_population-by-age.py`.
++ `municipality-age_population_2000-2022.csv`: Population in 5 year age groups and per municipality from the year 2000 until 2022 (5570, post-2017 classification). Made from the 2000, 2010 and 2022 census data through linear intrapolation using `~/data/conversion/build_population-by-age.py`.
 
 ### DTW-MDS-embeddings
 
@@ -122,4 +125,4 @@ Contains all output of the Bayesian serotype imputation model `~/scripts/bayesia
 
 + `build_municipality-population-backcast.Rmd`: Script used to estimate municipality populations, births, and deaths for 1996-2000 by fitting municipality-specific linear regressions, predicting backwards in time. 
 
-+ `build_population-by-age.py`: Script used to format the 2000 census population by 5-year age groups and by municipality (`~/data/interim/IBGE_population/municipality-age_population_2000.csv`).
++ `build_population-by-age.py`: Script used to format the 2000, 2010 and 2022 census population by 5-year age groups and by municipality, and linearily intrapolate them from 2000-2022 (`~/data/interim/IBGE_population/municipality-age_population_2000-2022.csv`).
