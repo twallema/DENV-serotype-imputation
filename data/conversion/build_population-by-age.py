@@ -168,8 +168,5 @@ pop_interp = (
 # restore structure
 pop = pop_interp.reset_index()
 
-pop = pop.set_index(['CD_MUN', 'year'])
-pop = pop.sort_index()
-
 # save the dataset
 pop.to_csv(os.path.join(abs_dir, f'../../data/interim/IBGE_population/municipality-age_population_2000-2022.csv'), index=False)
