@@ -33,6 +33,9 @@ parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation 
 parser.add_argument("-chains", type=int, help="Number of parallel chains.", default=4)
 args = parser.parse_args()
 
+# This model runs for only one cluster
+include_clusters = [11,]
+
 # assign to desired variables
 spatial_aggregation = args.spatial_aggregation
 chains = args.chains
@@ -40,7 +43,7 @@ ID = args.ID
 
 # pipeline output folder
 abs_dir = os.path.dirname(__file__) # make sure all referenced paths are relative to the lcoation of this file and not the terminal's pwd
-output_folder = os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/bayesian-imputation-model_output/new_model/')
+output_folder = os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/bayesian-imputation-model_output/transmission_model_age/')
 # check if output dir exists, if not, make it
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
@@ -67,25 +70,20 @@ region = clusters.columns.to_list()[0]
 mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
 mapping = mapping.merge(clusters[[region, 'cluster']], on=region, how='left')
 
-# Compute demography in start_year per cluster
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# Compute demography in start_year per cluster and per age group
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-demo = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/IBGE_population/pop-births-deaths_mun_1996-2024.csv'))
-demo = demo.rename(columns={'geocode': 'CD_MUN'})
+demo = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/IBGE_population/municipality-age_population_2000-2022.csv'))
 demo = demo.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
-demo = demo.groupby(['cluster', 'year'], as_index=False)['population'].sum()
+age_cols = demo.loc[:, "[00-05(":"[100,120("].columns
+demo = demo.groupby(["cluster", "year"])[age_cols].sum().reset_index()
 
 # Compute births and death rates per cluster
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 bd = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/IBGE_population/pop-births-deaths_mun_1996-2024.csv'))
 bd = bd.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
-bd = bd.groupby(['year', 'cluster'], as_index=False).agg(estimated_births=('estimated_births', 'sum'),estimated_deaths=('estimated_deaths', 'sum'), population=('population', 'sum'))
-
-# Adjacency matrix
-# ~~~~~~~~~~~~~~~~
-
-W = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/adjacency_matrix_{spatial_aggregation}.csv'), index_col=0).values
+bd = bd.groupby(['year', 'cluster'], as_index=False).agg(estimated_births=('estimated_births', 'sum'), estimated_deaths=('estimated_deaths', 'sum'), population=('population', 'sum'))
 
 # Incidence data
 # ~~~~~~~~~~~~~~
@@ -148,41 +146,41 @@ df["delta"] = df["N_typed"] / df["DENV_total"]
 df['delta'] = df['delta'].where(df['N_typed'] > 0, np.nan) # When N_typed == 0, we don't know delta — mark as missing
 df["delta"] = df["delta"].clip(lower=1e-12, upper=1 - 1e-12)
 
-# only do first X clusters
-df = df[df['cluster'].isin([11, 12, 13, 16])]
+# 8. Select the one cluster=
+df = df[df['cluster'].isin(include_clusters)]
 
-# 3. Take only from start_year to end_year
+# 9. Take only from start_year to end_year
 df_alldates = df.copy()
 df = df[((df['date'] > datetime(start_year,start_month,1)) & (df['date'] <= datetime(end_year,12,31)))]
 
-# 8. Compute year and month index
+# 10. Compute year and month index
 df["year"] = pd.to_datetime(df["date"]).dt.year
 df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
 
-# 9. Build PyMC arrays
+# 11. Build PyMC arrays
 # --- For DirichletMultinomial model ---
 # Total number of typed cases
-N_typed = df.pivot(index="date", columns="cluster", values="N_typed").to_numpy().astype(int)    # (n_months, n_clusters)
+N_typed = np.squeeze(df.pivot(index="date", columns="cluster", values="N_typed").to_numpy().astype(int))    # (n_months, n_clusters)
 # Number of cases per DENV serotype
 Y_list = []
 for col in sero_cols:
     Y_mat = df.pivot(index="date", columns="cluster", values=col).to_numpy()
     Y_list.append(Y_mat)
-Y_multinomial = np.stack(Y_list, axis=2).astype(int)    # (n_months, n_clusters, n_serotypes)
+Y_multinomial = np.squeeze(np.stack(Y_list, axis=2).astype(int))    # (n_months, n_clusters, n_serotypes)
 
 # --- For imunity model ---
 # Total number of dengue cases
-DENV_total = df.pivot(index="date", columns="cluster", values="DENV_total").to_numpy().astype(int)  # (n_months, n_clusters)
+DENV_total = np.squeeze(df.pivot(index="date", columns="cluster", values="DENV_total").to_numpy().astype(int))              # (n_months, n_clusters)
 # Births (absolute) and death rate
 df_expanded = df.merge(bd, on=["year", "cluster"], how="left")
 df_expanded["estimated_births"] = df_expanded["estimated_births"] / 12
 df_expanded["estimated_deaths"] = df_expanded["estimated_deaths"] / 12
 df_expanded["estimated_death_rate"] = df_expanded["estimated_deaths"] / df_expanded["population"]
-births = df_expanded.pivot(index="date", columns="cluster", values="estimated_births").to_numpy().astype(int) # (n_months, n_clusters)
-death_rate = df_expanded.pivot(index="date", columns="cluster", values="estimated_death_rate").to_numpy() # (n_months, n_clusters)
+births = np.squeeze(df_expanded.pivot(index="date", columns="cluster", values="estimated_births").to_numpy().astype(int))   # (n_months, n_clusters)
+death_rate = np.squeeze(df_expanded.pivot(index="date", columns="cluster", values="estimated_death_rate").to_numpy())       # (n_months, n_clusters)
 # Initial demography
-demo = demo[((demo['year'] == start_year) & (demo['cluster'].isin([11, 12, 13, 16])))]['population'].values 
+demo = np.squeeze(demo[((demo['year'] == start_year) & (demo['cluster'].isin(include_clusters)))].values[:,2:].T)           # (n_age, n_clusters)
 
 # --- Indices ---
 cluster_idx = df["cluster"].to_numpy().astype(int)
@@ -205,7 +203,7 @@ p0 = (d[cols] + alpha).div(d[cols].sum(axis=1) + len(cols) * alpha, axis=0)
 # But we set DENV_4 initially to zero and renormalise --> comes through seeding
 p0['DENV_3'] = 0
 p0['DENV_4'] = 0
-p0 = p0.div(p0.sum(axis=1), axis=0)
+p0 = np.squeeze(p0.div(p0.sum(axis=1), axis=0).values)
 
 # Rolling-window version for seeding
 window = 12
@@ -227,7 +225,7 @@ for c_idx, cl in enumerate(clusters):
         window_sum = df_cl.iloc[start_idx:i+1].sum()
         bayes = (window_sum + alpha) / (window_sum.sum() + n_serotypes*alpha)
         rolling_array[i, c_idx, :] = bayes.values
-estimated_proportions = rolling_array   # shape: (n_months, n_clusters, n_serotypes)
+estimated_proportions = np.squeeze(rolling_array)   # shape: (n_months, n_serotypes)
 
 # Make a serotype introduction mask; shape: (n_months, n_serotypes)
 unique_dates = np.sort(df["date"].unique())
@@ -248,6 +246,7 @@ IP_mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/raw/transmission_mod
 
 # Generate the matrices used to update the system
 ## define lengths
+n_age = len(age_cols)
 n_I = len(IP_mapping)
 n_S = len(S_mapping)
 ## I-update-indices
@@ -331,7 +330,7 @@ def RHS(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_per_I,
          gamma, omega, birth_vec):
 
     # --- Total population ---
-    N_t = pt.sum(S_t, axis=1) + pt.sum(I_t, axis=1) + pt.sum(P_t, axis=1)   # (clusters,)
+    N_t = pt.sum(S_t, axis=1) + pt.sum(I_t, axis=1) + pt.sum(P_t, axis=1)       # (clusters,)
     
     # --- FOI ---
     lambda_t = beta_t[:, None] * pt.dot(I_t, C) / N_t[:, None]                   # (clusters, serotypes)
