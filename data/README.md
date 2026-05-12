@@ -39,6 +39,8 @@ Downloaded using the instructions under '2 - Using FTPWeb' on https://sprint.mos
 
 + `tabela9514-2022-raw.csv`: Population by 5 year age groups and municipality from the 2022 census (5570). Retrieved from: https://sidra.ibge.gov.br/tabela/200
 
+Population by age, municipality and year are available here: https://tabnet.datasus.gov.br/cgi/tabcgi.exe?ibge/cnv/popsvs2024br.def
+
 ### Datasus DENV linelist dataset
 
 These data are partly confidential and can be found on the Bento lab box.
