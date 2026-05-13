@@ -18,7 +18,7 @@ save_output = []
 years = [2000, 2010, 2022]
 pop_list = ['tabela200-2000-format.csv', 'tabela200-2010-format.csv', 'tabela9514-2022-format.csv']
 for yr,fn in zip(years,pop_list):
-    pop = pd.read_csv(f'../raw/IBGE_population/{fn}')
+    pop = pd.read_csv(f'../raw/population/census/{fn}')
 
     # change the missing values "-" into zero
     cols = pop.columns.drop("Município")
@@ -169,4 +169,4 @@ pop_interp = (
 pop = pop_interp.reset_index()
 
 # save the dataset
-pop.to_csv(os.path.join(abs_dir, f'../../data/interim/IBGE_population/municipality-age_population_2000-2022_census.csv'), index=False)
+pop.to_csv(os.path.join(abs_dir, f'../../data/interim/population/municipality-age_population_2000-2022_census.csv'), index=False)

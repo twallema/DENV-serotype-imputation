@@ -30,18 +30,30 @@ Downloaded using the instructions under '2 - Using FTPWeb' on https://sprint.mos
 
 + `environ_vars.csv`: Environmental characteristics of the municipalities (columns 'koppen' and 'biome').
 
-### IBGE population
+### Population
 
 + `projecoes_2024_tab4_indicadores.xlsx`: Retrieved from: https://www.ibge.gov.br/estatisticas/sociais/populacao/9109-projecao-da-populacao.html (População por sexo e idade simples)
+
+#### IBGE Census 
 
 + `tabela200-2000-raw.csv`: Population by 5 year age groups and municipality from the 2000 or 2010 census (5566). Retrieved from: https://sidra.ibge.gov.br/tabela/200
 + `tabela200-2000-format.csv`: Formatted version of `tabela200-2000-raw.csv`. Removed total population column. Removed first 6 rows. Removed last 8 rows. Formatted age groups. Retrieved from: https://sidra.ibge.gov.br/tabela/200
 
 + `tabela9514-2022-raw.csv`: Population by 5 year age groups and municipality from the 2022 census (5570). Retrieved from: https://sidra.ibge.gov.br/tabela/200
 
-Population by age, municipality and year are available here: https://tabnet.datasus.gov.br/cgi/tabcgi.exe?ibge/cnv/popsvs2024br.def
+### Datasus
+
+#### Live births
+
 Live births per municipality and year are available here: http://tabnet.datasus.gov.br/cgi/deftohtm.exe?sinasc/cnv/nvbr.def
+
+#### Deaths
+
 Deaths per municipality and year are available here: http://tabnet.datasus.gov.br/cgi/deftohtm.exe?sim/cnv/obt10br.def
+
+#### Population
+
+Population by age, municipality and year are available here: https://tabnet.datasus.gov.br/cgi/tabcgi.exe?ibge/cnv/popsvs2024br.def
 
 ### Datasus DENV linelist dataset
 

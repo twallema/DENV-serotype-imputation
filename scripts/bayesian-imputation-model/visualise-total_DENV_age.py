@@ -16,7 +16,7 @@ cluster_id = 11
 cases = pd.read_csv(os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/mun/DENV_total_age_1999-2025_monthly_mun.csv'))
 
 # load the age-municipality year demographic data
-demo = pd.read_csv(os.path.join(abs_dir, '../../data/interim/IBGE_population/municipality-age_population_2000-2022.csv'))
+demo = pd.read_csv(os.path.join(abs_dir, '../../data/interim/population/municipality-age_population_2000-2022.csv'))
 
 # load clusters
 clusters = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/large_clusters/clusters/clusters_rgint.csv'))

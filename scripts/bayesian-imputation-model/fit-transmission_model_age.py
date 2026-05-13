@@ -73,7 +73,7 @@ mapping = mapping.merge(clusters[[region, 'cluster']], on=region, how='left')
 # Compute demography in start_year per cluster and per age group
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-demo = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/IBGE_population/municipality-age_population_2000-2022.csv'))
+demo = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/population/municipality-age_population_2000-2022.csv'))
 demo = demo.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
 age_cols = demo.loc[:, "[00-05(":"[100,120("].columns
 demo = demo.groupby(["cluster", "year"])[age_cols].sum().reset_index()
@@ -81,7 +81,7 @@ demo = demo.groupby(["cluster", "year"])[age_cols].sum().reset_index()
 # Compute births and death rates per cluster
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-bd = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/IBGE_population/pop-births-deaths_mun_1996-2024.csv'))
+bd = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/population/pop-births-deaths_mun_1996-2024.csv'))
 bd = bd.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
 bd = bd.groupby(['year', 'cluster'], as_index=False).agg(estimated_births=('estimated_births', 'sum'), estimated_deaths=('estimated_deaths', 'sum'), population=('population', 'sum'))
 
