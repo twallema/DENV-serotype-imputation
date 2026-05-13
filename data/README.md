@@ -43,17 +43,12 @@ Downloaded using the instructions under '2 - Using FTPWeb' on https://sprint.mos
 
 ### Datasus
 
-#### Live births
-
-Live births per municipality and year are available here: http://tabnet.datasus.gov.br/cgi/deftohtm.exe?sinasc/cnv/nvbr.def
-
-#### Deaths
-
-Deaths per municipality and year are available here: http://tabnet.datasus.gov.br/cgi/deftohtm.exe?sim/cnv/obt10br.def
++ `births_2000-2024_clean.csv`: Live births per municipality from 2000-2024. Retrieved from: http://tabnet.datasus.gov.br/cgi/deftohtm.exe?sinasc/cnv/nvbr.def
++ `deaths_2000-2024_clean.csv`: Deaths per municipality from 2000-2024. Retrieved from: http://tabnet.datasus.gov.br/cgi/deftohtm.exe?sim/cnv/obt10br.def
 
 #### Population
 
-Population by age, municipality and year are available here: https://tabnet.datasus.gov.br/cgi/tabcgi.exe?ibge/cnv/popsvs2024br.def
+Population by age, municipality and year were downloaded from: https://tabnet.datasus.gov.br/cgi/tabcgi.exe?ibge/cnv/popsvs2024br.def
 
 ### Datasus DENV linelist dataset
 
