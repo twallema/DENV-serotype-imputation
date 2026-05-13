@@ -40,6 +40,8 @@ Downloaded using the instructions under '2 - Using FTPWeb' on https://sprint.mos
 + `tabela9514-2022-raw.csv`: Population by 5 year age groups and municipality from the 2022 census (5570). Retrieved from: https://sidra.ibge.gov.br/tabela/200
 
 Population by age, municipality and year are available here: https://tabnet.datasus.gov.br/cgi/tabcgi.exe?ibge/cnv/popsvs2024br.def
+Live births per municipality and year are available here: http://tabnet.datasus.gov.br/cgi/deftohtm.exe?sinasc/cnv/nvbr.def
+Deaths per municipality and year are available here: http://tabnet.datasus.gov.br/cgi/deftohtm.exe?sim/cnv/obt10br.def
 
 ### Datasus DENV linelist dataset
 
@@ -83,13 +85,13 @@ These data are partly confidential and can be found on the Bento lab box.
 
 ### IBGE population
 
-+ `IBGE_births-deaths_uf.csv`: Contains the births, deaths and population of Brazil's federative units from 2000-2070. Extracted from `projecoes_2024_tab4_indicadores.xlsx` using MS Excel.
++ `IBGE_births-deaths_uf.csv`: Contains the estimated births, deaths and population of Brazil's federative units from 2000-2070. Extracted from `projecoes_2024_tab4_indicadores.xlsx` using MS Excel.
 
 + `IBGE_births-deaths_mun-estimated.csv`: Contains the births, deaths and population of Brazil's municipalities from 2001-2024, assuming the birth and death rate in municipalities is the same as the average of the federative unit. Created using `~/data/conversion/build_births-deaths.py` using `~/data/interim/IBGE_population/IBGE_births-deaths_uf.csv` and `~/data/raw/sprint_2025/datasus_population_2001_2024.csv`.
 
 + `municipality_population_1996-2024_estimated`: Extension of `IBGE_births-deaths_mun-estimated.csv`, adding the predicted population, birth, and death count for 1996-2000 for every municipality. Made by S. Bajaj using `~/data/conversion/build_municipality-population-backcast.Rmd`.
 
-+ `municipality-age_population_2000-2022.csv`: Population in 5 year age groups and per municipality from the year 2000 until 2022 (5570, post-2017 classification). Made from the 2000, 2010 and 2022 census data through linear intrapolation using `~/data/conversion/build_population-by-age.py`.
++ `municipality-age_population_2000-2022_census.csv`: Population in 5 year age groups and per municipality from the year 2000 until 2022 (5570, post-2017 classification). Made by linearily interpolating between the 2000, 2010 and 2022 census data in `~/data/conversion/build_population-by-age.py`.
 
 ### DTW-MDS-embeddings
 

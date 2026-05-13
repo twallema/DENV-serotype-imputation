@@ -1,6 +1,6 @@
 
 """
-This scripts ...
+This script estimates the population by 5-year age bins in every BR municipality between 2000-2022, by interpolating the 2000, 2010 and 2022 census years.
 """
 
 import os
@@ -169,4 +169,4 @@ pop_interp = (
 pop = pop_interp.reset_index()
 
 # save the dataset
-pop.to_csv(os.path.join(abs_dir, f'../../data/interim/IBGE_population/municipality-age_population_2000-2022.csv'), index=False)
+pop.to_csv(os.path.join(abs_dir, f'../../data/interim/IBGE_population/municipality-age_population_2000-2022_census.csv'), index=False)
