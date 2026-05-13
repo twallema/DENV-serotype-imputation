@@ -99,7 +99,7 @@ These data are partly confidential and can be found on the Bento lab box.
 
 + `IBGE_births-deaths_uf.csv`: Contains the estimated births, deaths and population of Brazil's federative units from 2000-2070. Extracted from `projecoes_2024_tab4_indicadores.xlsx` using MS Excel.
 
-+ `IBGE_births-deaths_mun-estimated.csv`: Contains the births, deaths and population of Brazil's municipalities from 2001-2024, assuming the birth and death rate in municipalities is the same as the average of the federative unit. Created using `~/data/conversion/build_births-deaths.py` using `~/data/interim/IBGE_population/IBGE_births-deaths_uf.csv` and `~/data/raw/sprint_2025/datasus_population_2001_2024.csv`.
++ `IBGE_births-deaths_mun-estimated.csv`: Contains the births, deaths and population of Brazil's municipalities from 2001-2024, assuming the birth and death rate in municipalities is the same as the average of the federative unit. Created using `~/data/conversion/build_births-deaths.py` using `~/data/interim/population/IBGE_births-deaths_uf.csv` and `~/data/raw/sprint_2025/datasus_population_2001_2024.csv`.
 
 + `municipality_population_1996-2024_estimated`: Extension of `IBGE_births-deaths_mun-estimated.csv`, adding the predicted population, birth, and death count for 1996-2000 for every municipality. Made by S. Bajaj using `~/data/conversion/build_municipality-population-backcast.Rmd`.
 
@@ -141,4 +141,4 @@ Contains all output of the Bayesian serotype imputation model `~/scripts/bayesia
 
 + `build_municipality-population-backcast.Rmd`: Script used to estimate municipality populations, births, and deaths for 1996-2000 by fitting municipality-specific linear regressions, predicting backwards in time. 
 
-+ `build_population-by-age.py`: Script used to format the 2000, 2010 and 2022 census population by 5-year age groups and by municipality, and linearily intrapolate them from 2000-2022 (`~/data/interim/IBGE_population/municipality-age_population_2000-2022.csv`).
++ `build_population-by-age.py`: Script used to format the 2000, 2010 and 2022 census population by 5-year age groups and by municipality, and linearily intrapolate them from 2000-2022 (`~/data/interim/population/municipality-age_population_2000-2022.csv`).
