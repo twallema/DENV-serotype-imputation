@@ -320,7 +320,7 @@ for i in range(len(seasons), len(axes)):
 
 plt.tight_layout()
 plt.savefig('incidence_anomoly.png', dpi=300)
-plt.show()
+#plt.show()
 plt.close()
 
 
