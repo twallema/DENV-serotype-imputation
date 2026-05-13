@@ -384,7 +384,7 @@ for fn,yr in zip(filenames, corresponding_years):
         cutoff_age = 80
         df['DENV_total'] = df['DENV_total'].fillna(0)
         bins = np.arange(0, cutoff_age+5, 5, dtype=int).tolist() + [120,] 
-        labels = [f"[{i:02d}-{i+5:02d}(" for i in range(0, cutoff_age, 5)] + [f"[{cutoff_age}-inf("]
+        labels = [f"[{i:02d}-{i+5:02d}(" for i in range(0, cutoff_age, 5)] + [f"[{cutoff_age}-120("]
         df['age_group'] = pd.cut(
             df['age'],
             bins=bins,
