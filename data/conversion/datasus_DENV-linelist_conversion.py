@@ -135,7 +135,7 @@ for fn,yr in zip(filenames, corresponding_years):
         df = df.dropna(subset=['age'])
         df['age'] = df['age'].str.extract(r'^A(\d{3})')[0].fillna(0).astype(int)
         print(f"Fraction with age over 100: {len(df[df['age'] > 100]) / len(df) * 100:.4f} %")
-        df = df[df['age'] < 100]
+        # df = df[df['age'] < 100] --> It's always a very small percentage, so I don't see why this should be dropped
 
         pass
 
@@ -255,7 +255,7 @@ for fn,yr in zip(filenames, corresponding_years):
         df = df.dropna(subset=['age'])
         df['age'] = df['age'].str.extract(r'^4(\d{3})')[0].fillna(0).astype(int)
         print(f"Fraction with age over 100: {len(df[df['age'] > 100]) / len(df) * 100:.4f} %")
-        df = df[df['age'] < 100]
+        # df = df[df['age'] < 100] --> It's always a very small percentage, so I don't see why this should be dropped
 
         pass
     
@@ -381,9 +381,10 @@ for fn,yr in zip(filenames, corresponding_years):
         )
 
         # bin age groups
+        cutoff_age = 80
         df['DENV_total'] = df['DENV_total'].fillna(0)
-        bins = np.arange(0, 85, 5) 
-        labels = [f"[{i:02d}-{i+5:02d}(" for i in range(0, 80, 5)]
+        bins = np.arange(0, cutoff_age+5, 5, dtype=int).tolist() + [120,] 
+        labels = [f"[{i:02d}-{i+5:02d}(" for i in range(0, cutoff_age, 5)] + [f"[{cutoff_age}-inf("]
         df['age_group'] = pd.cut(
             df['age'],
             bins=bins,
