@@ -119,7 +119,7 @@ for fn,yr in zip(filenames, corresponding_years):
         # find minimum date
         df['date'] = df[date_columns].apply(choose_date, axis=1)
         # drop if date not present (very rare)
-        print(f"Fraction with a missing date: {100 - len(df.dropna(subset=['date'])) / len(df) * 100} %")
+        print(f"Fraction with a missing date: {100 - len(df.dropna(subset=['date'])) / len(df) * 100:.2f} %")
         df = df.dropna(subset=['date'])
         # filter out the discards (CON_CLASSI==5) but leave in the undocumented value '0' and inconclusive '8'
         print(f"Discarded fraction: {len(df[df['CON_CLASSI'] == 5]) / len(df) * 100} %")
@@ -131,7 +131,12 @@ for fn,yr in zip(filenames, corresponding_years):
         df = df.rename(columns={'ID_MN_RESI': 'CD_MUN'})
         # convert NU_IDADE to age
         df = df.rename(columns={age_column: 'age'})
+        print(f"Fraction with a missing age: {100 - len(df.dropna(subset=['age'])) / len(df) * 100:.4f} %")
+        df = df.dropna(subset=['age'])
         df['age'] = df['age'].str.extract(r'^A(\d{3})')[0].fillna(0).astype(int)
+        print(f"Fraction with age over 100: {len(df[df['age'] > 100]) / len(df) * 100:.4f} %")
+        df = df[df['age'] < 100]
+
         pass
 
     elif 2007 <= yr <= 2025:
@@ -229,7 +234,7 @@ for fn,yr in zip(filenames, corresponding_years):
         # find minimum date
         df['date'] = df[date_columns].apply(choose_date, axis=1)
         # drop if date is missing (very rare)
-        print(f"Fraction with a missing date: {100 - len(df.dropna(subset=['date'])) / len(df) * 100} %")
+        print(f"Fraction with a missing date: {100 - len(df.dropna(subset=['date'])) / len(df) * 100:.2f} %")
         df = df.dropna(subset=['date'])
 
         # Examination of cases that get a 'discarded' status after investigation BUT have a subtype assigned to them (pre 2008: CON_CLASSI)
@@ -238,7 +243,7 @@ for fn,yr in zip(filenames, corresponding_years):
         #print(f'{yr}: Discarded status with serotype: {len(df[( ((df['CLASSI_FIN'] == '5') | (df['CLASSI_FIN'] == '8')) & (~df['SOROTIPO'].isna()))])} out of {len(df[~df['SOROTIPO'].isna()])} serotyped entries')  
         
         # filter out 'discarded' (CLASSI_FIN==5) but keep 'inconclusive' (CLASSI_FIN==8)
-        print(f"Discarded fraction: {len(df[df['CLASSI_FIN'] == 5]) / len(df) * 100} %")
+        print(f"Discarded fraction: {len(df[df['CLASSI_FIN'] == 5]) / len(df) * 100:.2f} %")
         df = df[df['CLASSI_FIN'] != 5]
 
         # drop column 'UF'
@@ -246,7 +251,12 @@ for fn,yr in zip(filenames, corresponding_years):
 
         # convert NU_IDADE_N to age
         df = df.rename(columns={age_column: 'age'})
+        print(f"Fraction with a missing age: {100 - len(df.dropna(subset=['age'])) / len(df) * 100:.4f} %")
+        df = df.dropna(subset=['age'])
         df['age'] = df['age'].str.extract(r'^4(\d{3})')[0].fillna(0).astype(int)
+        print(f"Fraction with age over 100: {len(df[df['age'] > 100]) / len(df) * 100:.4f} %")
+        df = df[df['age'] < 100]
+
         pass
     
 
@@ -350,13 +360,6 @@ for fn,yr in zip(filenames, corresponding_years):
         # drop if patient residency not provided
         print(f"Fraction with missing municipality code: {100 - len(df.dropna(subset=['CD_MUN'])) / len(df) * 100:.2f} %")
         df = df.dropna(subset=['CD_MUN'])
-        # drop if patient age not provided
-        l=len(df)
-        df = df.dropna(subset=['age'])
-        print(f"Fraction with missing age: {100 - len(df) / l * 100:.2f} %") 
-        # limit age
-        print(f"Fraction with 0 <= age <= 100: {100 - len(df[((df['age'] >= 0) & (df['age'] <= 100))]) / len(df) * 100:.2f} %")
-        df = df[((df['age'] >= 0) & (df['age'] <= 100))]
 
         # build an expanded dataframe
         all_dates = pd.date_range(start=f'{yr}-01-01', end=f'{yr}-12-31', freq='W-SAT')
@@ -379,8 +382,8 @@ for fn,yr in zip(filenames, corresponding_years):
 
         # bin age groups
         df['DENV_total'] = df['DENV_total'].fillna(0)
-        bins = np.arange(0, 105, 5) 
-        labels = [f"[{i:02d}-{i+5:02d}(" for i in range(0, 100, 5)]
+        bins = np.arange(0, 85, 5) 
+        labels = [f"[{i:02d}-{i+5:02d}(" for i in range(0, 80, 5)]
         df['age_group'] = pd.cut(
             df['age'],
             bins=bins,
