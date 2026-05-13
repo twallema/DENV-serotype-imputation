@@ -168,5 +168,9 @@ pop_interp = (
 # restore structure
 pop = pop_interp.reset_index()
 
+# last age group is 80+
+pop['[80-inf]'] = pop['[80-85('] + pop['[85-90('] + pop['[90-95('] + pop['[95-100('] + pop['[100-120(']
+pop = pop.drop(columns=['[80-85(', '[85-90(', '[90-95(', '[95-100(', '[100-120('])
+
 # save the dataset
 pop.to_csv(os.path.join(abs_dir, f'../../data/interim/population/municipality-age_population_2000-2022_census.csv'), index=False)

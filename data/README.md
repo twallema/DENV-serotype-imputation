@@ -103,7 +103,7 @@ These data are partly confidential and can be found on the Bento lab box.
 
 + `municipality_population_1996-2024_estimated`: Extension of `IBGE_births-deaths_mun-estimated.csv`, adding the predicted population, birth, and death count for 1996-2000 for every municipality. Made by S. Bajaj using `~/data/conversion/build_municipality-population-backcast.Rmd`.
 
-+ `municipality-age_population_2000-2022_census.csv`: Population in 5 year age groups and per municipality from the year 2000 until 2022 (5570, post-2017 classification). Made by linearily interpolating between the 2000, 2010 and 2022 census data in `~/data/conversion/build_population-by-age.py`.
++ `municipality-age_population_2000-2022_census.csv`: Population in 5 year age groups and per municipality from the year 2000 until 2022 (5570, post-2017 classification). Made by linearily interpolating between the 2000, 2010 and 2022 census data in `~/data/conversion/build_population-by-age_census.py`.
 
 ### DTW-MDS-embeddings
 
@@ -141,4 +141,4 @@ Contains all output of the Bayesian serotype imputation model `~/scripts/bayesia
 
 + `build_municipality-population-backcast.Rmd`: Script used to estimate municipality populations, births, and deaths for 1996-2000 by fitting municipality-specific linear regressions, predicting backwards in time. 
 
-+ `build_population-by-age.py`: Script used to format the 2000, 2010 and 2022 census population by 5-year age groups and by municipality, and linearily intrapolate them from 2000-2022 (`~/data/interim/population/municipality-age_population_2000-2022.csv`).
++ `build_population-by-age_census.py`: Script used to format the 2000, 2010 and 2022 census population by 5-year age groups and by municipality, and linearily intrapolate them from 2000-2022 (`~/data/interim/population/municipality-age_population_2000-2022.csv`).
