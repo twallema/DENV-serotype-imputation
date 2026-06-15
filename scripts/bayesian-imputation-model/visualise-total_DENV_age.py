@@ -1,12 +1,18 @@
 import os
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import matplotlib.pyplot as plt
 
 abs_dir = os.path.dirname(__file__)
 
-# select cluster used in the visualisations
-cluster_id = 11
+##############
+## Settings ##
+##############
+
+cluster_id = 11 # select cluster used in the visualisations
+start_month_season = 9
+desired_age_groups = pd.IntervalIndex.from_tuples([(0, 5),(5, 15),(15, 25),(25, 45),(45, 65),(65, 120)], closed='left')
 
 ####################################
 ## Load and preprocess input data ##
@@ -16,7 +22,7 @@ cluster_id = 11
 cases = pd.read_csv(os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/mun/DENV_total_age_1999-2025_monthly_mun.csv'))
 
 # load the age-municipality year demographic data
-demo = pd.read_csv(os.path.join(abs_dir, '../../data/interim/population/municipality-age_population_2000-2022_census.csv'))
+demo = pd.read_csv(os.path.join(abs_dir, '../../data/interim/population/municipality-age_population_2000-2025_datasus.csv'))
 
 # load clusters
 clusters = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/large_clusters/clusters/clusters_rgint.csv'))
@@ -31,15 +37,34 @@ demo = demo.merge(mapping[["CD_MUN", "cluster"]], on="CD_MUN", how="left")
 age_cols = [col for col in demo.columns if col.startswith('[')]
 demo = demo.groupby(['cluster', 'year'])[age_cols].sum().reset_index()
 
+# change the age groups (str) into interval (object)
+interval_cols = pd.IntervalIndex.from_tuples(
+    demo.columns[2:]
+    .str.extract(r'\[(\d+)-(\d+)\(')
+    .astype(int)
+    .apply(tuple, axis=1),
+    closed='left'
+)
+demo.columns = ['cluster', 'year', *interval_cols]
+
+# re-aggregate to the desired age groups (MUST BE AGGREGATIONS OF 5-year bins)
+rebinned = demo[['cluster', 'year']].copy()
+for coarse in desired_age_groups:
+    cols_to_sum = [
+        c for c in interval_cols
+        if c.left >= coarse.left and c.right <= coarse.right
+    ]
+    rebinned[coarse] = demo[cols_to_sum].sum(axis=1)
+demo = rebinned
+
 # aggregate the age-municipality-month dataset to the clusters
 cases = cases.merge(mapping[["CD_MUN", "cluster"]], on="CD_MUN", how="left")
 
 # append a "season" label (September of year X -> September of year X+1)
-start_month = 9
 cases['date'] = pd.to_datetime(cases['date'])
 year = cases['date'].dt.year
 month = cases['date'].dt.month
-season_start = year.where(month >= start_month, year - 1)
+season_start = year.where(month >= start_month_season, year - 1)
 cases['season'] = season_start.astype(str) + '-' + (season_start + 1).astype(str)
 
 #################################
@@ -53,9 +78,28 @@ cases = (
       .reset_index()
 )
 
+# convert string age bins to Interval objects for ease-of-manipulation
+cases['age_group'] = pd.IntervalIndex.from_tuples(
+    cases['age_group']
+    .str.extract(r'\[(\d+)-(\d+)\(')
+    .astype(int)
+    .apply(tuple, axis=1),
+    closed='left'
+)
+
+# rebin age groups
+cases['age_group'] = desired_age_groups.take(desired_age_groups.get_indexer(cases['age_group'].apply(lambda x: x.left)))
+cases = (cases
+    .groupby(
+        ['season', 'cluster', 'age_group'],
+        as_index=False
+    )['DENV_total']
+    .sum()
+)
+
 # add demographics and compute incidence per 100K in every season, cluster and age group
 cases['year'] = cases['season'].str[:4].astype(int)
-demo_long = demo.melt(id_vars=['cluster', 'year'], value_vars=age_cols, var_name='age_group', value_name='population')
+demo_long = demo.melt(id_vars=['cluster', 'year'], value_vars=demo.columns[2:], var_name='age_group', value_name='population')
 cases = cases.merge(demo_long, on=['cluster', 'year', 'age_group'], how='left')
 cases = cases.drop(columns=['year'])
 cases['DENV_incidence'] = cases['DENV_total'] / cases['population'] * 100000
@@ -94,11 +138,16 @@ cases = cases.merge(
     how="left"
 )
 
+# Compute anomaly
+cases["relative_anomaly"] = (
+    cases["relative_incidence"] -
+    cases["mean_relative_incidence"]
+)
+
 # compute midpoint of age brackets
-bounds = cases['age_group'].str.extract(r'\[(\d+)-(\d+)')
-cases['age_low'] = bounds[0].astype(int)
-cases['age_high'] = bounds[1].astype(int)
-cases['age_mid'] = (cases['age_low'] + cases['age_high']) / 2
+cases['age_low'] = cases['age_group'].apply(lambda x: x.left)
+cases['age_mid'] = cases['age_group'].apply(lambda x: (x.left + x.right) / 2)
+cases['age_high'] = cases['age_group'].apply(lambda x: x.right)
 
 # compute median age of the population
 pop_mean_age = (
@@ -179,17 +228,116 @@ statistics = statistics.merge(
 ## Make visualisations ##
 #########################
 
-# Relative incidence anomoly
+
+# Timeseries of relative incidence anomaly
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# --- Select cluster ---
+selected = desired_age_groups[:4]
+df_cluster = cases[cases["cluster"] == cluster_id].copy()
+
+# --- Sort seasons (keeps time order correct if strings behave oddly) ---
+df_cluster = df_cluster.sort_values(["season", "age_group"])
+
+# --- Plot ---
+plt.figure(figsize=(11.7,8.3/1.5))
+
+sns.lineplot(
+    data=df_cluster,
+    x="season",
+    y="relative_anomaly",
+    linewidth=1,
+    legend=False,
+    units='age_group',
+    estimator=None,
+    color='grey'
+)
+
+sns.lineplot(
+    data=df_cluster[df_cluster["age_group"].isin(selected)],
+    x="season",
+    y="relative_anomaly",
+    hue="age_group",
+    linewidth=3
+)
+
+
+# reference line
+plt.axhline(0, color="black", linestyle="--", linewidth=1)
+
+plt.title(f"Relative Incidence Anomaly by Age Group — Cluster {cluster_id}")
+plt.xlabel("Season")
+plt.ylabel("Relative incidence anomaly")
+plt.ylim([-0.8, 0.8])
+plt.xticks(rotation=90)
+
+plt.tight_layout()
+plt.savefig('incidence_anomaly_timeseries.png', dpi=300)
+plt.close()
+
+
+# Relative incidence anomaly across age groups
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# --- Select cluster ---
+df_cluster = cases[cases["cluster"] == cluster_id].copy()
+
+# --- Select seasons to highlight ---
+selected_seasons = [
+    "2007-2008",
+    "2010-2011",
+    "2020-2021",
+    "2021-2022",
+    "2022-2023"
+]
+
+# --- Sort for proper line drawing ---
+df_cluster = df_cluster.sort_values(["season", "age_mid"])
+
+# --- Plot ---
+plt.figure(figsize=(11.7, 8.3/1.5))
+
+# all seasons in grey
+sns.lineplot(
+    data=df_cluster,
+    x="age_mid",
+    y="relative_anomaly",
+    units="season",
+    estimator=None,
+    color="grey",
+    linewidth=1,
+    legend=False
+)
+
+# highlighted seasons
+sns.lineplot(
+    data=df_cluster[df_cluster["season"].isin(selected_seasons)],
+    x="age_mid",
+    y="relative_anomaly",
+    hue="season",
+    linewidth=3
+)
+
+# reference line
+plt.axhline(0, color="black", linestyle="--", linewidth=1)
+
+plt.title(f"Relative Incidence Anomaly across Age — Cluster {cluster_id}")
+plt.xlabel("Age")
+plt.ylabel("Relative incidence anomaly")
+
+# optional: use actual age-bin centers as ticks
+plt.xticks(df_cluster["age_mid"].unique())
+
+plt.tight_layout()
+plt.savefig("incidence_anomaly_by_age.png", dpi=300)
+plt.close()
+
+
+# Relative incidence anomaly
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # Keep age ordering
 age_order = cases["age_group"].unique()
-
-# Compute anomaly
-cases["relative_anomaly"] = (
-    cases["relative_incidence"] -
-    cases["mean_relative_incidence"]
-)
 
 # Filter cluster
 cluster_df = cases[cases["cluster"] == cluster_id]
@@ -311,7 +459,7 @@ for i, (ax, season) in enumerate(zip(axes, seasons)):
     ax.set_xticks(x)
     ax.set_xticklabels(plot_df["age_group"], rotation=90, fontsize=7)
     if (i % ncols)==0:
-        ax.set_ylabel("Rel. incidence anomoly")
+        ax.set_ylabel("Rel. incidence anomaly")
     ax.set_ylim([-1,1])
 
 # Remove unused axes
@@ -319,7 +467,7 @@ for i in range(len(seasons), len(axes)):
     fig.delaxes(axes[i])
 
 plt.tight_layout()
-plt.savefig('incidence_anomoly.png', dpi=300)
+plt.savefig('incidence_anomaly.png', dpi=300)
 #plt.show()
 plt.close()
 
