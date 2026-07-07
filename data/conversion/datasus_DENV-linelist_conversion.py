@@ -38,10 +38,8 @@ def choose_date(row):
     # unpack dates (notification vs. sypmtom onset)
     d1, d2 = row['DT_NOTIFIC'], row['DT_SIN_PRI']
     # logic
-    if d1.year - d2.year > 0:
-        return d1 # e.g. d2 is from previous calendar year --> use notification date to avoid dropping data (means first week of the year should have some artificial inflation)
-    elif d2 < d1 - timedelta(days=30):
-        return d1 # e.g. d2 is more than 30 days before d1 --> rare + something likely went wrong (date of birth often swapped with symptom onset, year mistaken)
+    if d2 < d1 - timedelta(days=60):
+        return d1
     else:
         return d2
 
@@ -100,7 +98,7 @@ df_muni_age_collect=[]
 mun2uf_map = gpd.read_parquet('../interim/geographic-dataset.parquet')[['CD_UF', 'CD_MUN']].drop_duplicates().set_index('CD_MUN')['CD_UF'].to_dict()
 
 # Loop over files
-for fn,yr in zip(filenames[3:12], corresponding_years[3:12]):
+for fn,yr in zip(filenames[3:], corresponding_years[3:]):
     print(f'\nWorking on year {yr}')
     print('---------------------')
     print("\nWorking on preprocessing..")
@@ -157,6 +155,7 @@ for fn,yr in zip(filenames[3:12], corresponding_years[3:12]):
         ## DT_FEBRE = UNRELIABLE, average lag of DT_SIN_PRI is OK but I'm not transferring cases between years (this is probably an extensive recode)
         date_columns = ['DT_NOTIFIC', 'DT_SIN_PRI']
         df[date_columns] = df[date_columns].apply(lambda x: pd.to_datetime(x, format='%Y-%m-%d', errors='coerce')) # errors --> NaT
+
         # find minimum date
         df['date'] = df[date_columns].apply(choose_date, axis=1)
         # drop if date not present (very rare)
@@ -216,7 +215,7 @@ for fn,yr in zip(filenames[3:12], corresponding_years[3:12]):
 
         pass
 
-    elif 2007 <= yr <= 2025:
+    elif yr >= 2007:
         # define serotype column name
         serotype_column = 'SOROTIPO'
         age_column = 'NU_IDADE_N'
@@ -230,7 +229,8 @@ for fn,yr in zip(filenames[3:12], corresponding_years[3:12]):
             # convert 'SOROTIPO' and 'SG_UF' to numerics
             df[serotype_column] = pd.to_numeric(df[serotype_column])
             df['ID_MN_RESI'] = pd.to_numeric(df['ID_MN_RESI'], errors='coerce') # Has 6 digits!
-            df[classification_column] = pd.to_numeric(df[classification_column])
+            df[classification_column] = pd.to_numeric(df[classification_column], errors='coerce')
+            df[criterion_column] = pd.to_numeric(df[criterion_column], errors='coerce')
         else:
             df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', delimiter=',', encoding="ISO-8859-1", low_memory=False)
 
@@ -260,7 +260,9 @@ for fn,yr in zip(filenames[3:12], corresponding_years[3:12]):
         df = df.rename(columns={age_column: 'age'})
         # convert age code to an age in years
         l = len(df)
+        df['age'] = df['age'].astype("Int64")
         df["age"] = df["age"].apply(parse_age).astype("Int64")
+
         print(f"[DROPPED] Fraction with an invalid age: {100 - len(df.dropna(subset=['age'])) / l * 100} %")
         df = df.dropna(subset=['age'])
 
@@ -348,9 +350,9 @@ for fn,yr in zip(filenames[3:12], corresponding_years[3:12]):
 
         # fill in severity (NA if discarded  (5), 'inconclusive' if inconclusive (8))
         df['severity'] = 'NA'
-        df.loc[df[classification_column]==1, 'severity'] = 'low'
-        df.loc[df[classification_column]==2, 'severity'] = 'medium'
-        df.loc[((df[classification_column]==3) | (df[classification_column]==4)), 'severity'] = 'high'
+        df.loc[((df[classification_column]==1) | (df[classification_column]==10)), 'severity'] = 'low'
+        df.loc[((df[classification_column]==2) | (df[classification_column]==11)), 'severity'] = 'medium'
+        df.loc[((df[classification_column]==3) | (df[classification_column]==4) | (df[classification_column]==12)), 'severity'] = 'high'
         df.loc[df[classification_column]==8, 'severity'] = 'inconclusive'
         print(f"[FYI] Classification 'discard' (5) assigned severity 'NA'")
         print(f"[FYI] Classification 'inconclusive' (8) assigned severity 'inconclusive'")
@@ -379,9 +381,9 @@ for fn,yr in zip(filenames[3:12], corresponding_years[3:12]):
     # retain only relevant columns
     df = df[['date', 'CD_MUN', 'discarded', 'diagnosis', 'severity', 'serotype']]
     # build an expanded dataframe
-    all_dates = pd.date_range(start=f'{yr-1}-12-17', end=f'{yr+1}-01-14', freq='W-SAT')
+    all_dates = pd.date_range(start=f'{yr-1}-11-1', end=f'{yr+1}-02-01', freq='W-SAT')
     all_muni = gpd.read_parquet('../interim/geographic-dataset.parquet')['CD_MUN'].unique()
-    full_index = pd.MultiIndex.from_product([all_dates, all_muni, [0,1], ['lab', 'clin-epi', 'unknown'], ['low', 'medium', 'high', 'NA']], names=['date', 'CD_MUN', 'discarded', 'diagnosis', 'severity'])
+    full_index = pd.MultiIndex.from_product([all_dates, all_muni, [0,1], ['lab', 'clin-epi', 'unknown'], ['low', 'medium', 'high', 'inconclusive', 'NA']], names=['date', 'CD_MUN', 'discarded', 'diagnosis', 'severity'])
     full_df = pd.DataFrame(index=full_index).reset_index()
     # count serotypes
     serotype_counts = (
@@ -542,12 +544,11 @@ monthly_df_muni['CD_UF'] = monthly_df_muni["CD_MUN"].astype(str).str[:2]
 # selected non-discarded cases
 monthly_df_muni = monthly_df_muni[monthly_df_muni['discarded'] == 0]
 # groupby sum
-monthly_df_uf = monthly_df_muni.groupby(by=['date', 'CD_UF', 'diagnosis'])[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'DENV_total']].sum().reset_index()
-
+monthly_df_uf = monthly_df_muni.groupby(by=['date', 'CD_UF', 'diagnosis', 'severity'])[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'DENV_total']].sum().reset_index()
 
 # Visualise results 
 ## Brasil
-fig,ax=plt.subplots(nrows=3, figsize=(8.3,11.7/1.5), sharex=True)
+fig,ax=plt.subplots(nrows=4, figsize=(8.3,11.7), sharex=True)
 ### Not serotyped (by diagnosis)
 df_vis = monthly_df_uf.groupby(by=['date', 'diagnosis']).sum(min_count=1).reset_index()
 x = df_vis.date.unique()
@@ -555,23 +556,28 @@ ax[0].plot(x, df_vis[df_vis['diagnosis'] == 'clin-epi']['DENV_total'], color='re
 ax[0].plot(x, df_vis[df_vis['diagnosis'] == 'lab']['DENV_total'], color='green', label='lab')
 ax[0].plot(x, df_vis[df_vis['diagnosis'] == 'unknown']['DENV_total'], color='blue', label='unknown')
 ax[0].plot(x, df_vis.groupby(by='date')['DENV_total'].sum(), color='black', label='all')
-ax[0].set_ylabel('Monthly DENV cases')
+ax[0].set_ylabel('Monthly cases (-)')
 ax[0].legend()
 ### Not serotyped (by severity)
-
-
+df_vis = monthly_df_uf.groupby(by=['date', 'severity']).sum(min_count=1).reset_index()
+x = df_vis.date.unique()
+ax[1].plot(x, df_vis[df_vis['severity'] == 'medium']['DENV_total'].values / df_vis.groupby(by='date')['DENV_total'].sum().values * 100, color='green', label='medium')
+ax[1].plot(x, df_vis[df_vis['severity'] == 'high']['DENV_total'].values / df_vis.groupby(by='date')['DENV_total'].sum().values * 100, color='blue', label='high')
+ax[1].plot(x, df_vis[df_vis['severity'] == 'inconclusive']['DENV_total'].values / df_vis.groupby(by='date')['DENV_total'].sum().values * 100, color='orange', label='inconclusive')
+ax[1].set_ylabel('fraction of total cases (%)')
+ax[1].legend()
 ### Serotyped + serotyped zoom
-for i in [1,2]:
+for i in [2,3]:
     df_vis = df_vis.groupby(by='date')[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].sum()
     ax[i].plot(x, df_vis['DENV_1'], color='black', label='DENV 1')
     ax[i].plot(x, df_vis['DENV_2'], color='red', label='DENV 2')
     ax[i].plot(x, df_vis['DENV_3'], color='green', label='DENV 3')
     ax[i].plot(x, df_vis['DENV_4'], color='blue', label='DENV 4')
-    ax[i].set_ylabel('Monthly DENV cases')
-ax[2].legend(loc=1)
+    ax[i].set_ylabel('Monthly serotyped cases (-)')
+ax[3].legend(loc=1)
 ### Axis decorations
 ax[0].set_title('Brasil')
-ax[2].set_ylim([0, 100])
+ax[3].set_ylim([0, 100])
 os.makedirs('../interim/datasus_DENV-linelist/figs', exist_ok=True)
 plt.savefig('../interim/datasus_DENV-linelist/figs/Brasil.png', dpi=300)
 plt.close()
@@ -579,29 +585,37 @@ plt.close()
 ## States
 x = monthly_df_uf.date.unique()
 for UF in monthly_df_uf.CD_UF.unique():
-    fig,ax=plt.subplots(nrows=3, figsize=(8.3,11.7/1.5), sharex=True)
+    fig,ax=plt.subplots(nrows=4, figsize=(8.3,11.7), sharex=True)
     ### Not serotyped
-    df_vis = monthly_df_uf[monthly_df_uf['CD_UF'] == UF]
+    df_vis = monthly_df_uf[monthly_df_uf['CD_UF'] == UF].groupby(by=['date', 'diagnosis']).sum(min_count=1).reset_index()
     ax[0].plot(x, df_vis[df_vis['diagnosis'] == 'clin-epi']['DENV_total'], color='red', label='clin/epi')
     ax[0].plot(x, df_vis[df_vis['diagnosis'] == 'lab']['DENV_total'], color='green', label='lab')
     ax[0].plot(x, df_vis[df_vis['diagnosis'] == 'unknown']['DENV_total'], color='blue', label='unknown')
     ax[0].plot(x, df_vis.groupby(by='date')['DENV_total'].sum(), color='black', label='all')
     ax[0].set_ylabel('Monthly DENV incidence')
     ax[0].legend()
+    ### Not serotyped (by severity)
+    df_vis = monthly_df_uf[monthly_df_uf['CD_UF'] == UF].groupby(by=['date', 'severity']).sum(min_count=1).reset_index()
+    x = df_vis.date.unique()
+    ax[1].plot(x, df_vis[df_vis['severity'] == 'medium']['DENV_total'].values / df_vis.groupby(by='date')['DENV_total'].sum().values * 100, color='green', label='medium')
+    ax[1].plot(x, df_vis[df_vis['severity'] == 'high']['DENV_total'].values / df_vis.groupby(by='date')['DENV_total'].sum().values * 100, color='blue', label='high')
+    ax[1].plot(x, df_vis[df_vis['severity'] == 'inconclusive']['DENV_total'].values / df_vis.groupby(by='date')['DENV_total'].sum().values * 100, color='orange', label='inconclusive')
+    ax[1].set_ylabel('fraction of total cases (%)')
+    ax[1].legend()
     ### Serotyped + serotyped zoom
-    for i in [1,2]:
+    for i in [2,3]:
         df_vis = df_vis.groupby(by='date')[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].sum()
         ax[i].plot(x, df_vis['DENV_1'], color='black', label='DENV 1')
         ax[i].plot(x, df_vis['DENV_2'], color='red', label='DENV 2')
         ax[i].plot(x, df_vis['DENV_3'], color='green', label='DENV 3')
         ax[i].plot(x, df_vis['DENV_4'], color='blue', label='DENV 4')
         ax[i].set_ylabel('Monthly DENV cases')
-    ax[2].legend(loc=1)
+    ax[3].legend(loc=1)
     ### Axis decorations
     ax[0].set_ylabel('Monthly DENV incidence')
     ax[0].set_title(f'{UF}')
     ax[0].set_xlim([min(x), max(x)])
     mx = max([np.nanmax(df_vis['DENV_1'].values), np.nanmax( df_vis['DENV_2'].values), np.nanmax( df_vis['DENV_3'].values), np.nanmax( df_vis['DENV_4'].values)])
-    ax[2].set_ylim([0, 0.15*mx]) if not np.isnan(mx) else ax[2].set_ylim([0, 100])
+    ax[3].set_ylim([0, 0.15*mx]) if not np.isnan(mx) else ax[2].set_ylim([0, 100])
     plt.savefig(f'../interim/datasus_DENV-linelist/figs/{UF}.png', dpi=300)
     plt.close()
