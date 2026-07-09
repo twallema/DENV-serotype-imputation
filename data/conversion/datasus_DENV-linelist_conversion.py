@@ -4,7 +4,7 @@ import random
 import pandas as pd
 import numpy as np
 import geopandas as gpd
-from datetime import timedelta
+from datetime import datetime,timedelta
 import matplotlib.pyplot as plt
 
 ######################
@@ -163,6 +163,10 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
         print(f"[DROPPED] Fraction with a missing/invalid date: {100 - len(df.dropna(subset=['date'])) / len(df) * 100:.2f} %")
         df = df.dropna(subset=['date'])
 
+        print(f"[FYI] Fraction of dates within the year {yr}: {len(df[((df['date'] >= datetime(yr,1,1)) & (df['date'] < datetime(yr+1,1,1)))]) / len(df) * 100:.2f} %")
+        print(f"[FYI] Fraction of dates below the year {yr}: {len(df[df['date'] < datetime(yr,1,1)]) / len(df) * 100:.2f} %")
+        print(f"[FYI] Fraction of dates above the year {yr}: {len(df[df['date'] >= datetime(yr+1,1,1)]) / len(df) * 100:.2f} %")
+
         # drop if age is missing
         print(f"[DROPPED] Fraction with a missing age: {100 - len(df.dropna(subset=[age_column])) / len(df) * 100} %")
         df = df.dropna(subset=[age_column])
@@ -262,6 +266,10 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
         print(f"[DROPPED] Fraction with a missing/invalid date: {100 - len(df.dropna(subset=['date'])) / len(df) * 100} %")
         df = df.dropna(subset=['date'])
 
+        print(f"[FYI] Fraction of dates within the year {yr}: {len(df[((df['date'] >= datetime(yr,1,1)) & (df['date'] < datetime(yr+1,1,1)))]) / len(df) * 100:.2f} %")
+        print(f"[FYI] Fraction of dates below the year {yr}: {len(df[df['date'] < datetime(yr,1,1)]) / len(df) * 100:.2f} %")
+        print(f"[FYI] Fraction of dates above the year {yr}: {len(df[df['date'] >= datetime(yr+1,1,1)]) / len(df) * 100:.2f} %")
+
         # drop if age is missing
         print(f"[DROPPED] Fraction with a missing age: {100 - len(df.dropna(subset=[age_column])) / len(df) * 100} %")
         df = df.dropna(subset=[age_column])
@@ -359,7 +367,7 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
         df.loc[df['diagnosis']==2, 'diagnosis'] = 'clin-epi'
         df.loc[df['diagnosis']==3, 'diagnosis'] = 'unknown'
 
-        # fill in severity (NA if discarded  (5), 'inconclusive' if inconclusive (8))
+        # fill in severity (NA if discarded  (5) or undocumented (0), 'inconclusive' if inconclusive (8))
         df['severity'] = 'NA'
         df.loc[((df[classification_column]==1) | (df[classification_column]==10)), 'severity'] = 'low'
         df.loc[((df[classification_column]==2) | (df[classification_column]==11)), 'severity'] = 'medium'
@@ -396,7 +404,7 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
     # retain only relevant columns
     df = df[['date', 'CD_MUN','diagnosis', 'severity', 'serotype', 'hospitalised']]
     # build an expanded dataframe
-    all_dates = pd.date_range(start=f'{yr-1}-11-1', end=f'{yr+1}-02-01', freq='W-SAT')
+    all_dates = pd.date_range(start=f'{yr-1}-11-01', end=f'{yr+1}-02-01', freq='W-SAT')
     all_muni = gpd.read_parquet('../interim/geographic-dataset.parquet')['CD_MUN'].unique()
     full_index = pd.MultiIndex.from_product([all_dates, all_muni, ['lab', 'clin-epi', 'unknown'], ['low', 'medium', 'high', 'inconclusive'], [False, True]], names=['date', 'CD_MUN', 'diagnosis', 'severity', 'hospitalised'])
     full_df = pd.DataFrame(index=full_index).reset_index()
@@ -422,6 +430,7 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
         .merge(serotype_counts, on=['date', 'CD_MUN', 'diagnosis', 'severity', 'hospitalised'], how='left')
         .merge(total_counts, on=['date', 'CD_MUN', 'diagnosis', 'severity', 'hospitalised'], how='left')
     )
+    final_df['DENV_total'] = final_df['DENV_total'].fillna(0)
     # save result
     df_muni_collect.append(final_df)
 
@@ -429,67 +438,74 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
     # Collect age-structured data at municipality level
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-    # print("\nWorking on municipality age-structured data collection..")
-    # df = df_copy
-    # if yr >= 1999:
-    #     # retain only relevant columns
-    #     df = df[['date', 'age', 'CD_MUN', 'discarded', 'diagnosis', 'serotype']]
-    #     # drop if patient residency not provided
-    #     print(f"Fraction with missing municipality code: {100 - len(df.dropna(subset=['CD_MUN'])) / len(df) * 100:.2f} %")
-    #     df = df.dropna(subset=['CD_MUN'])
-    #     # drop if patient age not provided
-    #     l=len(df)
-    #     df = df.dropna(subset=['age'])
-    #     print(f"Fraction with missing age: {100 - len(df) / l * 100:.2f} %") 
-    #     # limit age
-    #     print(f"Fraction with 0 <= age <= 100: {len(df[((df['age'] >= 0) & (df['age'] <= 100))]) / len(df) * 100:.2f} %")
-    #     df = df[((df['age'] >= 0) & (df['age'] <= 100))]
+    print("\nWorking on age-structured municipality data collection..")
+    df = df_copy
+    if yr >= 1999:
 
-    #     # build an expanded dataframe
-    #     all_dates = pd.date_range(start=f'{yr-1}-11-01', end=f'{yr+1}-02-01', freq='W-SAT')
-    #     all_ages = np.arange(101)
-    #     all_muni = gpd.read_parquet('../interim/geographic-dataset.parquet')['CD_MUN'].unique()
-    #     full_index = pd.MultiIndex.from_product([all_dates, all_ages, all_muni, [0,1], ['lab', 'clin-epi', 'unknown']], names=['date', 'age', 'CD_MUN', 'discarded', 'diagnosis'])
-    #     full_df = pd.DataFrame(index=full_index).reset_index()
+        # retain only relevant columns
+        df = df[['date', 'age', 'CD_MUN', 'severity', 'hospitalised']]
+        # limit age
+        print(f"[DROPPED] Fraction with 0 <= age <= 100: {len(df[((df['age'] >= 0) & (df['age'] <= 100))]) / len(df) * 100:.2f} %")
+        df = df[((df['age'] >= 0) & (df['age'] <= 100))]
+
+        # build an expanded dataframe
+        all_dates = pd.date_range(start=f'{yr-1}-11-01', end=f'{yr+1}-02-01', freq='W-SAT')
+        all_age_groups = [f"[{i:02d}-{i+5:02d}(" for i in range(0, 100, 5)]
+        all_muni = gpd.read_parquet('../interim/geographic-dataset.parquet')['CD_MUN'].unique()
+        full_index = pd.MultiIndex.from_product([all_dates, all_age_groups, all_muni, ['low', 'medium', 'high'], [False, True]], names=['date', 'age_group', 'CD_MUN', 'severity', 'hospitalised'])
+        full_df = pd.DataFrame(index=full_index).reset_index()
         
-    #     # count total observations
-    #     total_counts = (
-    #         df.groupby(['date', 'age', 'CD_MUN', 'discarded', 'diagnosis'])
-    #         .size()
-    #         .reset_index(name='DENV_total')
-    #     )
-    #     # merge together 
-    #     df = (
-    #         full_df
-    #         .merge(total_counts, on=['date', 'age', 'CD_MUN', 'discarded', 'diagnosis'], how='left')
-    #     )
-    #     # bin age groups
-    #     df['DENV_total'] = df['DENV_total'].fillna(0)
-    #     bins = np.arange(0, 105, 5) 
-    #     labels = [f"[{i:02d}-{i+5:02d}(" for i in range(0, 100, 5)]
-    #     df['age_group'] = pd.cut(
-    #         df['age'],
-    #         bins=bins,
-    #         right=False,   # intervals like [0,5)
-    #         labels=labels,
-    #         include_lowest=True
-    #     )
-    #     df_binned = (
-    #         df
-    #         .groupby(['date', 'CD_MUN', 'age_group', 'discarded', 'diagnosis'], as_index=False, observed=False)['DENV_total']
-    #         .sum()
-    #     )
-    #     # save result
-    #     df_muni_age_collect.append(df_binned)
+        # count total observations
+        total_counts = (
+            df.groupby(['date', 'age', 'CD_MUN', 'severity', 'hospitalised'])
+            .size()
+            .reset_index(name='DENV_total')
+        )
+
+        # assign age groups
+        bins = np.arange(0, 105, 5) 
+        labels = [f"[{i:02d}-{i+5:02d}(" for i in range(0, 100, 5)]
+        total_counts['age_group'] = pd.cut(
+            total_counts['age'],
+            bins=bins,
+            right=False,   # intervals like [0,5)
+            labels=labels,
+            include_lowest=True
+        )
+        total_counts = total_counts.drop(columns="age")
+
+        # consider resampling on months here because on the final result is way too slow
+
+        # counts per age group
+        df_binned = (
+            total_counts
+            .groupby(['date', 'age_group', 'CD_MUN', 'severity', 'hospitalised'], observed=False, as_index=False)['DENV_total']
+            .sum()
+        )
+        df_binned['DENV_total'] = df_binned['DENV_total'].fillna(0)
+        df_binned["CD_MUN"] = df_binned["CD_MUN"].astype("Int64")
+        df_binned["age_group"] = df_binned["age_group"].astype(str)
+
+        # merge together 
+        df = (
+            full_df
+            .merge(df_binned, on=['date', 'age_group', 'CD_MUN', 'severity', 'hospitalised'], how='left')
+        )
+        df['DENV_total'] = df['DENV_total'].fillna(0)
+
+        # save result
+        df_muni_age_collect.append(df_binned)
 
 
 # Final concatenation of dataframes at municipality spatial level
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
+print("\nFinal concatenation of municipality data..")
+
 # place them one after the other
 df_muni = pd.concat(df_muni_collect, ignore_index=True)
 
-# get rid of the overlapping week 
+# get rid of the overlapping weeks 
 agg_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
 # Sum, treating NaNs as 0
 summed = df_muni.groupby(["date", "CD_MUN", "diagnosis", "severity", "hospitalised"], as_index=False)[agg_cols].sum()
@@ -519,36 +535,27 @@ monthly_df_muni.to_parquet('../interim/datasus_DENV-linelist/mun/DENV-serotypes_
 # Final concatenation of age-structured dataframes at municipality spatial level
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-# # place them one after the other
-# df_muni_age = pd.concat(df_muni_age_collect, ignore_index=True)
+print("\nFinal concatenation of age-structured municipality data..")
 
-# # get rid of the overlapping week 
-# agg_cols = ["DENV_total",]
-# # Sum, treating NaNs as 0
-# summed = df_muni_age.groupby(["date", "CD_MUN", "age_group", "discarded", "diagnosis"], as_index=False)[agg_cols].sum()
-# # Count non-missing values
-# counts = df_muni_age.groupby(["date", "CD_MUN", "age_group", "discarded", "diagnosis"])[agg_cols].count()
-# # Restore NaN where all entries were NaN
-# summed[agg_cols] = summed[agg_cols].mask(counts.eq(0).values)
-# df_muni_age = summed
+# place them one after the other
+df_muni_age = pd.concat(df_muni_age_collect, ignore_index=True)
 
-# # group
-# weekly_df_muni_age = df_muni_age.sort_values(by=['date', 'CD_MUN']).reset_index(drop=True)
+# get rid of duplicate weeks before start of year and after end of year
+df_muni_age = df_muni_age.groupby(["date", "CD_MUN", "age_group", "severity", "hospitalised"], as_index=False)["DENV_total"].sum()
 
-# # Save result (monthly frequency only)
-# monthly_df_muni_age = (
-#     df_muni_age.set_index(['date', 'CD_MUN', 'age_group', 'discarded', 'diagnosis'])
-#     .groupby(level=['CD_MUN', 'age_group', 'discarded', 'diagnosis'], observed=False)  # Group by state
-#     .resample('ME', level='date')     # Resample by month at the 'date' level
-#     .sum(min_count=1)                 # Ensure NaN if all values are NaN
-#     .reset_index()                    # Flatten index
-# )
-# monthly_df_muni_age = monthly_df_muni_age.sort_values(by=['date', 'age_group', 'CD_MUN']).reset_index(drop=True)
-# monthly_df_muni_age.to_parquet('../interim/datasus_DENV-linelist/mun/DENV_total_age_1999-2025_monthly_mun.parquet.gz', index=False, compression='gzip')
+# group
+weekly_df_muni_age = df_muni_age.sort_values(by=['date', 'CD_MUN']).reset_index(drop=True)
 
-# print(monthly_df_muni_age.head(50))
-# print(monthly_df_muni_age.tail(50))
-
+# Save result (monthly frequency only)
+monthly_df_muni_age = (
+    df_muni_age.set_index(['date', 'CD_MUN', 'age_group', 'severity', 'hospitalised'])
+    .groupby(level=['CD_MUN', 'age_group', 'severity', 'hospitalised'], observed=False)  # Group by state
+    .resample('ME', level='date')     # Resample by month at the 'date' level
+    .sum(min_count=1)                 # Ensure NaN if all values are NaN
+    .reset_index()                    # Flatten index
+)
+monthly_df_muni_age = monthly_df_muni_age.sort_values(by=['date', 'CD_MUN', 'age_group']).reset_index(drop=True)
+monthly_df_muni_age.to_parquet('../interim/datasus_DENV-linelist/mun/DENV_total_age_1999-2025_monthly_mun.parquet.gz', index=False, compression='gzip')
 
 #############################
 ## Visualisation (UF only) ##
