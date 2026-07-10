@@ -1,4 +1,5 @@
 import os
+import gc
 import ast
 import random
 import pandas as pd
@@ -99,7 +100,7 @@ mun2uf_map = gpd.read_parquet('../interim/geographic-dataset.parquet')[['CD_UF',
 code2name_uf_map = gpd.read_parquet('../interim/geographic-dataset.parquet')[['CD_UF', 'NM_UF']].drop_duplicates().set_index('CD_UF')['NM_UF'].to_dict()
 
 # Loop over files
-for fn,yr in zip(filenames[3:], corresponding_years[3:]):
+for fn,yr in zip(filenames[3:5], corresponding_years[3:5]):
     print(f'\nWorking on year {yr}')
     print('---------------------')
     print("\nWorking on preprocessing..")
@@ -197,19 +198,18 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
         # fill diagnosis method
         print(f"[FYI] Fraction with diagnosis method missing (assigned to NA): {len(df[df[criterion_column].isna()]) / len(df) * 100:.2f} %, of which {len(df[((df[criterion_column].isna()) & (df[classification_column] == 5))]) / len(df) * 100:.2f} % discarded")
         print(f"[FYI] Fraction with diagnosis method listed as 'under investigation' (assigned to NA): {len(df[df[criterion_column] == 3]) / len(df) * 100:.2f} %")
-        df['diagnosis_method'] = df[criterion_column].fillna('NA')
-        df.loc[df['diagnosis_method']==1, 'diagnosis_method'] = 'lab'
-        df.loc[df['diagnosis_method']==2, 'diagnosis_method'] = 'clin_epi'
-        df.loc[df['diagnosis_method']==3, 'diagnosis_method'] = 'NA'
+        df['diagnosis_method'] = pd.Series(None, index=df.index, dtype="Int8")
+        df.loc[df['diagnosis_method']==1, 'diagnosis_method'] = 0           # lab
+        df.loc[df['diagnosis_method']==2, 'diagnosis_method'] = 1           # clin_epi
+        #df.loc[df['diagnosis_method']==3, 'diagnosis_method'] = 'NA'       # NA
 
         # fill in diagnosis (NA if discarded  (5), 'inconclusive' if inconclusive (8))
-        df['diagnosis'] = 'NA'
-        df.loc[df[classification_column]==1, 'diagnosis'] = 'dengue'
-        df.loc[df[classification_column]==2, 'diagnosis'] = 'dengue_alarm'
-        df.loc[((df[classification_column]==3) | (df[classification_column]==4)), 'diagnosis'] = 'severe_dengue'
-        df.loc[df[classification_column]==8, 'diagnosis'] = 'inconclusive'
-        print(f"[FYI] Classification 'discard' (5) assigned diagnosis 'NA'")
-        print(f"[FYI] Classification 'inconclusive' (8) assigned diagnosis 'inconclusive'")
+        df['diagnosis'] = pd.Series(None, index=df.index, dtype="Int8")
+        df.loc[df[classification_column]==1, 'diagnosis'] = 0   # dengue
+        df.loc[df[classification_column]==2, 'diagnosis'] = 1   # dengue with alarm
+        df.loc[((df[classification_column]==3) | (df[classification_column]==4)), 'diagnosis'] = 2 # severe dengue
+        df.loc[df[classification_column]==8, 'diagnosis'] = 3   # inconclusive
+        print(f"[FYI] Classification 'inconclusive' (8) assigned diagnosis '3'")
         print(f"[FYI] Unique severities when discard==FALSE: {df[df['discarded'] == 0]['diagnosis'].unique()}")
 
         # extract the hospitalisation column
@@ -223,6 +223,7 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
         print(f"[DROPPED] Fraction with missing healthcare facility municipality code: {100 - len(df.dropna(subset=['ID_MUNICIP'])) / len(df) * 100:.2f} %")
         df['CD_MUN'] = df['CD_MUN'].fillna(df['ID_MUNICIP'])
         df = df.dropna(subset=['CD_MUN'])
+        df = df.astype({'CD_MUN': 'Int32'})
 
         pass
 
@@ -359,22 +360,21 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
 
         # fill in discarded
         df['discarded'] = df[classification_column].isin([5,]).astype(int)
-        # fill diagnosis code
+        # fill diagnosis method
         print(f"[FYI] Fraction with diagnosis method missing (assigned to NA): {len(df[df[criterion_column].isna()]) / len(df) * 100:.2f} %, of which {len(df[((df[criterion_column].isna()) & (df[classification_column] == 5))]) / len(df) * 100:.2f} % discarded")
         print(f"[FYI] Fraction with diagnosis method listed as 'under investigation' (assigned to NA): {len(df[df[criterion_column] == 3]) / len(df) * 100:.2f} %")
-        df['diagnosis_method'] = df[criterion_column].fillna('NA')
-        df.loc[df['diagnosis_method']==1, 'diagnosis_method'] = 'lab'
-        df.loc[df['diagnosis_method']==2, 'diagnosis_method'] = 'clin_epi'
-        df.loc[df['diagnosis_method']==3, 'diagnosis_method'] = 'NA'
+        df['diagnosis_method'] = pd.Series(2, index=df.index, dtype="Int8")
+        df.loc[df['diagnosis_method']==1, 'diagnosis_method'] = 0           # lab
+        df.loc[df['diagnosis_method']==2, 'diagnosis_method'] = 1           # clin_epi
+        df.loc[df['diagnosis_method']==3, 'diagnosis_method'] = 2           # unknown
 
-        # fill in diagnosis (NA if discarded  (5) or undocumented (0), 'inconclusive' if inconclusive (8))
-        df['diagnosis'] = 'NA'
-        df.loc[((df[classification_column]==1) | (df[classification_column]==10)), 'diagnosis'] = 'dengue'
-        df.loc[((df[classification_column]==2) | (df[classification_column]==11)), 'diagnosis'] = 'dengue_alarm'
-        df.loc[((df[classification_column]==3) | (df[classification_column]==4) | (df[classification_column]==12)), 'diagnosis'] = 'dengue_severe'
-        df.loc[df[classification_column]==8, 'diagnosis'] = 'inconclusive'
-        print(f"[FYI] Classification 'discard' (5) assigned diagnosis 'NA'")
-        print(f"[FYI] Classification 'inconclusive' (8) assigned diagnosis 'inconclusive'")
+        # fill in diagnosis (NA if discarded  (5), 'inconclusive' if inconclusive (8))
+        df['diagnosis'] = pd.Series(None, index=df.index, dtype="Int8")
+        df.loc[df[classification_column]==1, 'diagnosis'] = 0   # dengue
+        df.loc[df[classification_column]==2, 'diagnosis'] = 1   # dengue with alarm
+        df.loc[((df[classification_column]==3) | (df[classification_column]==4)), 'diagnosis'] = 2 # severe dengue
+        df.loc[df[classification_column]==8, 'diagnosis'] = 3   # inconclusive
+        print(f"[FYI] Classification 'inconclusive' (8) assigned diagnosis '3'")
         print(f"[FYI] Unique severities when discard==FALSE: {df[df['discarded'] == 0]['diagnosis'].unique()}")
 
         # extract the hospitalisation column
@@ -383,6 +383,7 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
 
         # Rename ID_MN_RES to CD_MUN
         df = df.rename(columns={'ID_MN_RESI': 'CD_MUN'})
+        df = df.astype({'CD_MUN': 'Int32'})
 
         pass
     
@@ -393,7 +394,7 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
     # convert to the next saturday
     df['date'] = df['date'].apply(next_saturday)
     # clean the serotype column
-    df['serotype'] = df[serotype_column].where(df[serotype_column].isin([1, 2, 3, 4]), np.nan)
+    df['serotype'] = df[serotype_column].where(df[serotype_column].isin([1, 2, 3, 4]), pd.NA)
 
 
     # Collect serotype data at municipality level
@@ -404,33 +405,62 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
     # retain only relevant columns
     df = df[['date', 'CD_MUN','diagnosis_method', 'diagnosis', 'serotype', 'hospitalised']]
     # build an expanded dataframe
-    all_weeks = pd.date_range(start=f'{yr-1}-11-01', end=f'{yr+1}-02-01', freq='W-SAT')
+    all_months = pd.date_range(start=f'{yr-1}-11-01', end=f'{yr+1}-02-01', freq='ME')
     all_muni = gpd.read_parquet('../interim/geographic-dataset.parquet')['CD_MUN'].unique()
-    full_index = pd.MultiIndex.from_product([all_weeks, all_muni, ['lab', 'clin-epi', 'NA'], ['dengue', 'dengue_alarm', 'dengue_severe', 'inconclusive'], [False, True]], names=['date', 'CD_MUN', 'diagnosis_method', 'diagnosis', 'hospitalised'])
-    full_df = pd.DataFrame(index=full_index).reset_index()
+    full_index = pd.MultiIndex.from_product([all_months, all_muni, [0, 1, 2, pd.NA], [0, 1, 2, 3, pd.NA], [False, True]], names=['date', 'CD_MUN', 'diagnosis_method', 'diagnosis', 'hospitalised'])
+    full_df = pd.DataFrame(index=full_index).reset_index().astype({'CD_MUN': 'Int32', 'diagnosis_method': 'Int8', 'diagnosis': 'Int8', 'hospitalised': 'boolean'})
     # count serotypes
     serotype_counts = (
         df.dropna(subset=['serotype'])
-        .groupby(['date', 'CD_MUN', 'serotype', 'diagnosis_method', 'diagnosis', 'hospitalised'])
+        .groupby(['date', 'CD_MUN', 'serotype', 'diagnosis_method', 'diagnosis', 'hospitalised'], dropna=False)
         .size()
         .unstack(level='serotype')  # wide format, columns are 1.0–4.0
-        .reindex(columns=[1.0, 2.0, 3.0, 4.0], fill_value=np.nan)  # ensures all 4 exist
+        .reindex(columns=[1, 2, 3, 4], fill_value=pd.NA)  # ensures all 4 exist
         .rename(columns=lambda x: f'DENV_{int(x)}')
         .reset_index()
+        .astype({
+            'DENV_1': 'Int8',
+            'DENV_2': 'Int8',
+            'DENV_3': 'Int8',
+            'DENV_4': 'Int8',
+            'hospitalised': 'boolean'
+        })
     )
+
+    # resample to months 
+    serotype_counts = (
+        serotype_counts
+        .groupby([pd.Grouper(key="date", freq="ME"), 'CD_MUN', 'diagnosis_method', 'diagnosis', 'hospitalised'], observed=False, dropna=False)[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']]
+        .sum(min_count=1)                 # Ensure NaN if all values are NaN
+        .reset_index()                    # Flatten index
+    )
+
     # count total observations
     total_counts = (
-        df.groupby(['date', 'CD_MUN', 'diagnosis_method', 'diagnosis', 'hospitalised'])
+        df.groupby(['date', 'CD_MUN', 'diagnosis_method', 'diagnosis', 'hospitalised'], dropna=False)
         .size()
         .reset_index(name='DENV_total')
+        .astype({'DENV_total': 'Int32', 'hospitalised': 'boolean'})
     )
+
+    # resample to months 
+    total_counts = (
+        total_counts
+        .groupby([pd.Grouper(key="date", freq="ME"), 'CD_MUN', 'diagnosis_method', 'diagnosis', 'hospitalised'], observed=False, dropna=False)['DENV_total']
+        .sum(min_count=1)                 # Ensure NaN if all values are NaN
+        .reset_index()                    # Flatten index
+    )
+
     # merge together 
     final_df = (
         full_df
         .merge(serotype_counts, on=['date', 'CD_MUN', 'diagnosis_method', 'diagnosis', 'hospitalised'], how='left')
         .merge(total_counts, on=['date', 'CD_MUN', 'diagnosis_method', 'diagnosis', 'hospitalised'], how='left')
     )
+
+    final_df = final_df[~ final_df['diagnosis'].isna()]
     final_df['DENV_total'] = final_df['DENV_total'].fillna(0)
+
     # save result
     df_muni_collect.append(final_df)
 
@@ -438,70 +468,71 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
     # Collect age-structured data at municipality level
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-    print("\nWorking on age-structured municipality data collection..")
-    df = df_copy
-    if yr >= 1999:
+    # print("\nWorking on age-structured municipality data collection..")
+    # df = df_copy
+    # if yr >= 1999:
 
-        # retain only relevant columns
-        df = df[['date', 'age', 'CD_MUN', 'diagnosis', 'hospitalised']]
-        # limit age
-        print(f"[DROPPED] Fraction with 0 <= age <= 100: {len(df[((df['age'] >= 0) & (df['age'] <= 100))]) / len(df) * 100:.2f} %")
-        df = df[((df['age'] >= 0) & (df['age'] <= 100))]
+    #     # retain only relevant columns
+    #     df = df[['date', 'age', 'CD_MUN', 'diagnosis', 'hospitalised']]
 
-        # build an expanded dataframe
-        all_months = pd.date_range(start=f'{yr-1}-11-01', end=f'{yr+1}-02-01', freq='ME')
-        all_age_groups = [f"[{i:02d}-{i+5:02d}(" for i in range(0, 100, 5)]
-        all_muni = gpd.read_parquet('../interim/geographic-dataset.parquet')['CD_MUN'].unique()
-        full_index = pd.MultiIndex.from_product([all_months, all_age_groups, all_muni, ['dengue', 'dengue_alarm', 'dengue_severe'], [False, True]], names=['date', 'age_group', 'CD_MUN', 'diagnosis', 'hospitalised'])
-        full_df = pd.DataFrame(index=full_index).reset_index()
+    #     # limit age
+    #     print(f"[DROPPED] Fraction with 0 <= age <= 100: {len(df[((df['age'] >= 0) & (df['age'] <= 100))]) / len(df) * 100:.2f} %")
+    #     df = df[((df['age'] >= 0) & (df['age'] <= 100))]
+
+    #     # build an expanded dataframe
+    #     all_months = pd.date_range(start=f'{yr-1}-11-01', end=f'{yr+1}-02-01', freq='ME')
+    #     all_age_groups = [f"[{i:02d}-{i+5:02d}(" for i in range(0, 100, 5)]
+    #     all_muni = gpd.read_parquet('../interim/geographic-dataset.parquet')['CD_MUN'].unique()
+    #     full_index = pd.MultiIndex.from_product([all_months, all_age_groups, all_muni, [0, 1, 2, 3, pd.NA], [False, True]], names=['date', 'age_group', 'CD_MUN', 'diagnosis', 'hospitalised'])
+    #     full_df = pd.DataFrame(index=full_index).reset_index()
         
-        # count total observations
-        total_counts = (
-            df.groupby(['date', 'age', 'CD_MUN', 'diagnosis', 'hospitalised'])
-            .size()
-            .reset_index(name='DENV_total')
-        )
+    #     # count total observations
+    #     total_counts = (
+    #         df.groupby(['date', 'age', 'CD_MUN', 'diagnosis', 'hospitalised'])
+    #         .size()
+    #         .reset_index(name='DENV_total')
+    #     )
 
-        # assign age groups
-        bins = np.arange(0, 105, 5) 
-        labels = [f"[{i:02d}-{i+5:02d}(" for i in range(0, 100, 5)]
-        total_counts['age_group'] = pd.cut(
-            total_counts['age'],
-            bins=bins,
-            right=False,   # intervals like [0,5)
-            labels=labels,
-            include_lowest=True
-        )
-        total_counts = total_counts.drop(columns="age")
+    #     # assign age groups
+    #     bins = np.arange(0, 105, 5) 
+    #     labels = [f"[{i:02d}-{i+5:02d}(" for i in range(0, 100, 5)]
+    #     total_counts['age_group'] = pd.cut(
+    #         total_counts['age'],
+    #         bins=bins,
+    #         right=False,   # intervals like [0,5)
+    #         labels=labels,
+    #         include_lowest=True
+    #     )
+    #     total_counts = total_counts.drop(columns="age")
 
-        # resample to months 
-        total_counts_month = (
-            total_counts.set_index(['date', 'CD_MUN', 'age_group', 'diagnosis', 'hospitalised'])
-            .groupby(level=['CD_MUN', 'age_group', 'diagnosis', 'hospitalised'], observed=False)
-            .resample('ME', level='date')     # Resample by month at the 'date' level
-            .sum(min_count=1)                 # Ensure NaN if all values are NaN
-            .reset_index()                    # Flatten index
-        )
+    #     # resample to months 
+    #     total_counts_month = (
+    #         total_counts.set_index(['date', 'CD_MUN', 'age_group', 'diagnosis', 'hospitalised'])
+    #         .groupby(level=['CD_MUN', 'age_group', 'diagnosis', 'hospitalised'], observed=False)
+    #         .resample('ME', level='date')     # Resample by month at the 'date' level
+    #         .sum(min_count=1)                 # Ensure NaN if all values are NaN
+    #         .reset_index()                    # Flatten index
+    #     )
 
-        # counts per age group
-        df_binned = (
-            total_counts_month
-            .groupby(['date', 'age_group', 'CD_MUN', 'diagnosis', 'hospitalised'], observed=False, as_index=False)['DENV_total']
-            .sum()
-        )
-        df_binned['DENV_total'] = df_binned['DENV_total'].fillna(0)
-        df_binned["CD_MUN"] = df_binned["CD_MUN"].astype("Int64")
-        df_binned["age_group"] = df_binned["age_group"].astype(str)
+    #     # counts per age group
+    #     df_binned = (
+    #         total_counts_month
+    #         .groupby(['date', 'age_group', 'CD_MUN', 'diagnosis', 'hospitalised'], observed=False, as_index=False)['DENV_total']
+    #         .sum()
+    #     )
+    #     df_binned['DENV_total'] = df_binned['DENV_total'].fillna(0)
+    #     df_binned["CD_MUN"] = df_binned["CD_MUN"].astype("Int64")
+    #     df_binned["age_group"] = df_binned["age_group"].astype(str)
 
-        # merge together 
-        df = (
-            full_df
-            .merge(df_binned, on=['date', 'age_group', 'CD_MUN', 'diagnosis', 'hospitalised'], how='left')
-        )
-        df['DENV_total'] = df['DENV_total'].fillna(0)
+    #     # merge together 
+    #     df = (
+    #         full_df
+    #         .merge(df_binned, on=['date', 'age_group', 'CD_MUN', 'diagnosis', 'hospitalised'], how='left')
+    #     )
+    #     df['DENV_total'] = df['DENV_total'].fillna(0)
 
-        # save result
-        df_muni_age_collect.append(df_binned)
+    #     # save result
+    #     df_muni_age_collect.append(df_binned)
 
 
 # Final concatenation of dataframes at municipality spatial level
@@ -515,105 +546,129 @@ df_muni = pd.concat(df_muni_collect, ignore_index=True)
 # get rid of the overlapping weeks 
 agg_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
 # Sum, treating NaNs as 0
-summed = df_muni.groupby(["date", "CD_MUN", "diagnosis_method", "diagnosis", "hospitalised"], as_index=False)[agg_cols].sum()
+summed = df_muni.groupby(["date", "CD_MUN", "diagnosis_method", "diagnosis", "hospitalised"], as_index=False, dropna=False)[agg_cols].sum()
 # Count non-missing values
-counts = df_muni.groupby(["date", "CD_MUN", "diagnosis_method", "diagnosis", "hospitalised"])[agg_cols].count()
+counts = df_muni.groupby(["date", "CD_MUN", "diagnosis_method", "diagnosis", "hospitalised"], as_index=False, dropna=False)[agg_cols].count()
 # Restore NaN where all entries were NaN
-summed[agg_cols] = summed[agg_cols].mask(counts.eq(0).values)
+summed[agg_cols] = summed[agg_cols].mask(counts.eq(0))
 df_muni = summed
 
-# group
-weekly_df_muni = df_muni.sort_values(by=['date', 'CD_MUN']).reset_index(drop=True)
+# sort
+df_muni = df_muni.sort_values(by=['date', 'CD_MUN']).reset_index(drop=True)
 
-# Save result (weekly frequency)
-weekly_df_muni.to_parquet('../interim/datasus_DENV-linelist/mun/DENV-serotypes_1999-2025_weekly_mun.parquet.gz', index=False, compression='gzip')
+# replace diagnosis method codes
+df_muni['diagnosis_method_star'] = ''
+df_muni.loc[df_muni['diagnosis_method']==0, 'diagnosis_method_star'] = 'lab'
+df_muni.loc[df_muni['diagnosis_method']==1, 'diagnosis_method_star'] = 'clin_epi'
+df_muni.loc[df_muni['diagnosis_method']==2, 'diagnosis_method_star'] = 'unknown'
+df_muni['diagnosis_method'] = df_muni['diagnosis_method_star']
+df_muni = df_muni.drop(columns=['diagnosis_method_star'])
 
-# Save result (monthly frequency)
-monthly_df_muni = (
-    df_muni.set_index(['CD_MUN', 'date', 'diagnosis_method', 'diagnosis', 'hospitalised'])
-    .groupby(level=['CD_MUN', 'diagnosis_method', 'diagnosis', 'hospitalised'])                # Group by municipality
-    .resample('ME', level='date')           # Resample by month at the 'date' level
-    .sum(min_count=1)                       # Ensure NaN if all values are NaN
-    .reset_index()                          # Flatten index
-)
-monthly_df_muni.to_parquet('../interim/datasus_DENV-linelist/mun/DENV-serotypes_1999-2025_monthly_mun.parquet.gz', index=False, compression='gzip')
+# replace diagnosis codes
+df_muni['diagnosis_star'] = ''
+df_muni.loc[df_muni['diagnosis']==0, 'diagnosis_star'] = 'dengue'
+df_muni.loc[df_muni['diagnosis']==1, 'diagnosis_star'] = 'dengue_alarm'
+df_muni.loc[df_muni['diagnosis']==2, 'diagnosis_star'] = 'dengue_severe'
+df_muni.loc[df_muni['diagnosis']==3, 'diagnosis_star'] = 'inconclusive'
+df_muni['diagnosis'] = df_muni['diagnosis_star']
+df_muni = df_muni.drop(columns=['diagnosis_star'])
+
+# save result
+df_muni.to_parquet('../interim/datasus_DENV-linelist/mun/DENV-serotypes_1999-2025_monthly_mun.parquet.gz', index=False, compression='gzip')
+
+
+# Wipe memory
+# >>>>>>>>>>>
+
+# del df_muni_collect
+
+# del monthly_df_muni
+
+# gc.collect()
 
 
 # Final concatenation of age-structured dataframes at municipality spatial level
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-print("\nFinal concatenation of age-structured municipality data..")
+# print("\nFinal concatenation of age-structured municipality data..")
 
-# place them one after the other
-df_muni_age = pd.concat(df_muni_age_collect, ignore_index=True)
+# # place them one after the other
+# df_muni_age = pd.concat(df_muni_age_collect, ignore_index=True)
 
-# get rid of duplicate weeks before start of year and after end of year
-df_muni_age = df_muni_age.groupby(["date", "CD_MUN", "age_group", "diagnosis", "hospitalised"], as_index=False)["DENV_total"].sum()
+# print('here')
 
-# group
-monthly_df_muni_age = df_muni_age.sort_values(by=['date', 'CD_MUN', 'age_group']).reset_index(drop=True)
+# # get rid of duplicate weeks before start of year and after end of year
+# df_muni_age = df_muni_age.groupby(["date", "CD_MUN", "age_group", "diagnosis", "hospitalised"], as_index=False)["DENV_total"].sum()
 
-# save
-monthly_df_muni_age.to_parquet('../interim/datasus_DENV-linelist/mun/DENV_total_age_1999-2025_monthly_mun.parquet.gz', index=False, compression='gzip')
+# print('here')
+
+# # group
+# monthly_df_muni_age = df_muni_age.sort_values(by=['date', 'CD_MUN', 'age_group']).reset_index(drop=True)
+
+# print('here')
+
+# # save
+# monthly_df_muni_age.to_parquet('../interim/datasus_DENV-linelist/mun/DENV_total_age_1999-2025_monthly_mun.parquet.gz', index=False, compression='gzip')
 
 
-#############################
-## Visualisation (UF only) ##
-#############################
+# #############################
+# ## Visualisation (UF only) ##
+# #############################
 
 # add UF label
-monthly_df_muni['CD_UF'] = monthly_df_muni["CD_MUN"].astype(str).str[:2]
+df_muni['CD_UF'] = df_muni["CD_MUN"].astype(str).str[:2]
 # groupby sum
-monthly_df_uf = monthly_df_muni.groupby(by=['date', 'CD_UF', 'diagnosis_method', 'diagnosis', 'hospitalised'])[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'DENV_total']].sum().reset_index()
+cols_to_sum = ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'DENV_total']
+df_uf = df_muni.groupby(by=['date', 'CD_UF', 'diagnosis_method', 'diagnosis', 'hospitalised'], dropna=False)[cols_to_sum].sum(min_count=1).reset_index()
 
 # Visualise results 
 ## Brasil
 fig,ax=plt.subplots(nrows=7, figsize=(8.3,11.7*1.5), sharex=True)
 ### Not serotyped (by diagnosis_method)
-df_vis = monthly_df_uf.groupby(by=['date', 'diagnosis_method']).sum(min_count=1).reset_index()
+df_vis = df_uf.groupby(by=['date', 'diagnosis_method'], dropna=False)[cols_to_sum].sum(min_count=1).reset_index()
 x = df_vis.date.unique()
-ax[0].plot(x, df_vis[df_vis['diagnosis_method'] == 'clin-epi']['DENV_total'], color='red', label='clin/epi')
+ax[0].plot(x, df_vis[df_vis['diagnosis_method'] == 'clin_epi']['DENV_total'], color='red', label='clin/epi')
 ax[0].plot(x, df_vis[df_vis['diagnosis_method'] == 'lab']['DENV_total'], color='green', label='lab')
-ax[0].plot(x, df_vis[df_vis['diagnosis_method'] == 'NA']['DENV_total'], color='blue', label='NA')
+ax[0].plot(x, df_vis[df_vis['diagnosis_method'] == 'unknown']['DENV_total'], color='blue', label='unknown')
 ax[0].plot(x, df_vis.groupby(by='date')['DENV_total'].sum(), color='black', label='all')
 ax[0].set_ylabel('Monthly cases (-)')
 ax[0].legend()
 ### Not serotyped (by diagnosis)
-df_vis = monthly_df_uf.groupby(by=['date', 'diagnosis']).sum(min_count=1).reset_index()
+df_vis = df_uf.groupby(by=['date', 'diagnosis'], dropna=False)[cols_to_sum].sum(min_count=1).reset_index()
 x = df_vis.date.unique()
-ax[1].plot(x, df_vis[df_vis['diagnosis'] == 'dengue_alarm']['DENV_total'].values / df_vis.groupby(by='date')['DENV_total'].sum().values * 100, color='green', label='dengue_alarm')
-ax[1].plot(x, df_vis[df_vis['diagnosis'] == 'dengue_severe']['DENV_total'].values / df_vis.groupby(by='date')['DENV_total'].sum().values * 100, color='blue', label='dengue_severe')
-ax[1].plot(x, df_vis[df_vis['diagnosis'] == 'inconclusive']['DENV_total'].values / df_vis.groupby(by='date')['DENV_total'].sum().values * 100, color='orange', label='inconclusive')
+ax[1].plot(x, df_vis[df_vis['diagnosis'] == 'dengue_alarm']['DENV_total'].values / df_vis.groupby(by='date', dropna=False)['DENV_total'].sum().values * 100, color='green', label='dengue_alarm')
+ax[1].plot(x, df_vis[df_vis['diagnosis'] == 'dengue_severe']['DENV_total'].values / df_vis.groupby(by='date', dropna=False)['DENV_total'].sum().values * 100, color='blue', label='dengue_severe')
+ax[1].plot(x, df_vis[df_vis['diagnosis'] == 'inconclusive']['DENV_total'].values / df_vis.groupby(by='date', dropna=False)['DENV_total'].sum().values * 100, color='orange', label='inconclusive')
 ax[1].set_ylabel('Fraction of total cases (%)')
 ax[1].legend()
 ### Not serotyped (comparing with and without inconclusive cases)
-df_vis = monthly_df_uf[monthly_df_uf['diagnosis'] != 'inconclusive'].groupby(by=['date']).sum(min_count=1).reset_index()
+df_vis = df_uf[df_uf['diagnosis'] != 'inconclusive'].groupby(by=['date'], dropna=False)[cols_to_sum].sum(min_count=1).reset_index()
 x = df_vis.date.unique()
 ax[2].plot(x, df_vis['DENV_total'].values, color='red', label='w/o. inconclusive')
-df_vis = monthly_df_uf.groupby(by=['date']).sum(min_count=1).reset_index()
+df_vis = df_uf.groupby(by=['date']).sum(min_count=1).reset_index()
 x = df_vis.date.unique()
 ax[2].plot(x, df_vis['DENV_total'].values, color='black', label='w. inconclusive')
 ax[2].set_ylabel('Monthly cases (-)')
 ax[2].legend()
 ### Not serotyped (comparing case diagnosis without inconclusive cases)
-df_vis = monthly_df_uf[monthly_df_uf['diagnosis'] != 'inconclusive'].groupby(by=['date', 'diagnosis']).sum(min_count=1).reset_index()
+df_vis = df_uf[df_uf['diagnosis'] != 'inconclusive'].groupby(by=['date', 'diagnosis'], dropna=False)[cols_to_sum].sum(min_count=1).reset_index()
 x = df_vis.date.unique()
-ax[3].plot(x, df_vis[df_vis['diagnosis'] == 'dengue_alarm']['DENV_total'].values / df_vis.groupby(by='date')['DENV_total'].sum().values * 100, color='green', label='dengue_alarm (excl. inconcl.)')
-ax[3].plot(x, df_vis[df_vis['diagnosis'] == 'dengue_severe']['DENV_total'].values / df_vis.groupby(by='date')['DENV_total'].sum().values * 100, color='blue', label='dengue_severe (excl. inconcl.)')
+ax[3].plot(x, df_vis[df_vis['diagnosis'] == 'dengue_alarm']['DENV_total'].values / df_vis.groupby(by='date', dropna=False)['DENV_total'].sum().values * 100, color='green', label='dengue_alarm (excl. inconcl.)')
+ax[3].plot(x, df_vis[df_vis['diagnosis'] == 'dengue_severe']['DENV_total'].values / df_vis.groupby(by='date', dropna=False)['DENV_total'].sum().values * 100, color='blue', label='dengue_severe (excl. inconcl.)')
 ax[3].set_ylabel('Fraction of total cases (%)')
 ax[3].legend()
 ### Fraction of dengue/dengue_alarm/dengue_severe hospitalised
-df_hosp = monthly_df_uf[monthly_df_uf['hospitalised'] == True].groupby(by=['date', 'diagnosis']).sum(min_count=1).reset_index()
-df_total = monthly_df_uf.groupby(by=['date', 'diagnosis']).sum(min_count=1).reset_index()
+df_hosp = df_uf[df_uf['hospitalised'] == True].groupby(by=['date', 'diagnosis'], dropna=False)[cols_to_sum].sum(min_count=1).reset_index()
+df_total = df_uf.groupby(by=['date', 'diagnosis']).sum(min_count=1).reset_index()
 x = df_vis.date.unique()
-ax[4].plot(x, df_hosp[df_hosp['diagnosis'] == 'dengue']['DENV_total'].values / df_total[df_total['diagnosis'] == 'dengue'].groupby(by='date')['DENV_total'].sum().values * 100, color='green', label='dengue')
-ax[4].plot(x, df_hosp[df_hosp['diagnosis'] == 'dengue_alarm']['DENV_total'].values / df_total[df_total['diagnosis'] == 'dengue_alarm'].groupby(by='date')['DENV_total'].sum().values * 100, color='orange', label='dengue_alarm')
-ax[4].plot(x, df_hosp[df_hosp['diagnosis'] == 'dengue_severe']['DENV_total'].values / df_total[df_total['diagnosis'] == 'dengue_severe'].groupby(by='date')['DENV_total'].sum().values * 100, color='red', label='dengue_severe')
+ax[4].plot(x, df_hosp[df_hosp['diagnosis'] == 'dengue']['DENV_total'].values / df_total[df_total['diagnosis'] == 'dengue'].groupby(by='date', dropna=False)['DENV_total'].sum().values * 100, color='green', label='dengue')
+ax[4].plot(x, df_hosp[df_hosp['diagnosis'] == 'dengue_alarm']['DENV_total'].values / df_total[df_total['diagnosis'] == 'dengue_alarm'].groupby(by='date', dropna=False)['DENV_total'].sum().values * 100, color='orange', label='dengue_alarm')
+ax[4].plot(x, df_hosp[df_hosp['diagnosis'] == 'dengue_severe']['DENV_total'].values / df_total[df_total['diagnosis'] == 'dengue_severe'].groupby(by='date', dropna=False)['DENV_total'].sum().values * 100, color='red', label='dengue_severe')
 ax[4].set_ylabel('Fraction of cases w. diagnosis (%)')
 ax[4].legend()
 ### Serotyped + serotyped zoom
 for i in [5,6]:
-    df_vis = df_vis.groupby(by='date')[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].sum()
+    df_vis = df_vis.groupby(by='date')[cols_to_sum].sum()
     ax[i].plot(x, df_vis['DENV_1'], color='black', label='DENV 1')
     ax[i].plot(x, df_vis['DENV_2'], color='red', label='DENV 2')
     ax[i].plot(x, df_vis['DENV_3'], color='green', label='DENV 3')
@@ -627,21 +682,20 @@ os.makedirs('../interim/datasus_DENV-linelist/figs', exist_ok=True)
 plt.savefig('../interim/datasus_DENV-linelist/figs/Brasil.png', dpi=300)
 plt.close()
 
-
 ## States
-x = monthly_df_uf.date.unique()
-for UF in monthly_df_uf.CD_UF.unique():
+x = df_uf.date.unique()
+for UF in df_uf.CD_UF.unique():
     fig,ax=plt.subplots(nrows=7, figsize=(8.3,11.7*1.5), sharex=True)
     ### Not serotyped
-    df_vis = monthly_df_uf[monthly_df_uf['CD_UF'] == UF].groupby(by=['date', 'diagnosis_method']).sum(min_count=1).reset_index()
-    ax[0].plot(x, df_vis[df_vis['diagnosis_method'] == 'clin-epi']['DENV_total'], color='red', label='clin/epi')
+    df_vis = df_uf[df_uf['CD_UF'] == UF].groupby(by=['date', 'diagnosis_method'])[cols_to_sum].sum(min_count=1).reset_index()
+    ax[0].plot(x, df_vis[df_vis['diagnosis_method'] == 'clin_epi']['DENV_total'], color='red', label='clin/epi')
     ax[0].plot(x, df_vis[df_vis['diagnosis_method'] == 'lab']['DENV_total'], color='green', label='lab')
-    ax[0].plot(x, df_vis[df_vis['diagnosis_method'] == 'NA']['DENV_total'], color='blue', label='NA')
+    ax[0].plot(x, df_vis[df_vis['diagnosis_method'] == 'unknown']['DENV_total'], color='blue', label='unknown')
     ax[0].plot(x, df_vis.groupby(by='date')['DENV_total'].sum(), color='black', label='all')
     ax[0].set_ylabel('Monthly DENV incidence')
     ax[0].legend()
     ### Not serotyped (by diagnosis)
-    df_vis = monthly_df_uf[monthly_df_uf['CD_UF'] == UF].groupby(by=['date', 'diagnosis']).sum(min_count=1).reset_index()
+    df_vis = df_uf[df_uf['CD_UF'] == UF].groupby(by=['date', 'diagnosis'])[cols_to_sum].sum(min_count=1).reset_index()
     x = df_vis.date.unique()
     ax[1].plot(x, df_vis[df_vis['diagnosis'] == 'dengue_alarm']['DENV_total'].values / df_vis.groupby(by='date')['DENV_total'].sum().values * 100, color='green', label='dengue_alarm')
     ax[1].plot(x, df_vis[df_vis['diagnosis'] == 'dengue_severe']['DENV_total'].values / df_vis.groupby(by='date')['DENV_total'].sum().values * 100, color='blue', label='dengue_severe')
@@ -649,24 +703,24 @@ for UF in monthly_df_uf.CD_UF.unique():
     ax[1].set_ylabel('Fraction of total cases (%)')
     ax[1].legend()
     ### Not serotyped (comparing with and without inconclusive cases)
-    df_vis = monthly_df_uf[((monthly_df_uf['diagnosis'] != 'inconclusive') & (monthly_df_uf['CD_UF'] == UF))].groupby(by=['date']).sum(min_count=1).reset_index()
+    df_vis = df_uf[((df_uf['diagnosis'] != 'inconclusive') & (df_uf['CD_UF'] == UF))].groupby(by=['date'])[cols_to_sum].sum(min_count=1).reset_index()
     x = df_vis.date.unique()
     ax[2].plot(x, df_vis['DENV_total'].values, color='red', label='w/o. inconclusive')
-    df_vis = monthly_df_uf[monthly_df_uf['CD_UF'] == UF].groupby(by=['date']).sum(min_count=1).reset_index()
+    df_vis = df_uf[df_uf['CD_UF'] == UF].groupby(by=['date'])[cols_to_sum].sum(min_count=1).reset_index()
     x = df_vis.date.unique()
     ax[2].plot(x, df_vis['DENV_total'].values, color='black', label='w. inconclusive')
     ax[2].set_ylabel('Monthly cases (-)')
     ax[2].legend()
     ### Not serotyped (comparing case diagnosis without inconclusive cases)
-    df_vis = monthly_df_uf[((monthly_df_uf['CD_UF'] == UF) & (monthly_df_uf['diagnosis'] != 'inconclusive'))].groupby(by=['date', 'diagnosis']).sum(min_count=1).reset_index()
+    df_vis = df_uf[((df_uf['CD_UF'] == UF) & (df_uf['diagnosis'] != 'inconclusive'))].groupby(by=['date', 'diagnosis'])[cols_to_sum].sum(min_count=1).reset_index()
     x = df_vis.date.unique()
     ax[3].plot(x, df_vis[df_vis['diagnosis'] == 'dengue_alarm']['DENV_total'].values / df_vis.groupby(by='date')['DENV_total'].sum().values * 100, color='green', label='dengue_alarm (excl. inconcl.)')
     ax[3].plot(x, df_vis[df_vis['diagnosis'] == 'dengue_severe']['DENV_total'].values / df_vis.groupby(by='date')['DENV_total'].sum().values * 100, color='blue', label='dengue_severe (excl. inconcl.)')
     ax[3].set_ylabel('Fraction of total cases (%)')
     ax[3].legend()
     ### Fraction of dengue/dengue_alarm/dengue_severe hospitalised
-    df_hosp = monthly_df_uf[((monthly_df_uf['CD_UF'] == UF) & (monthly_df_uf['hospitalised'] == True))].groupby(by=['date', 'diagnosis']).sum(min_count=1).reset_index()
-    df_total = monthly_df_uf[monthly_df_uf['CD_UF'] == UF].groupby(by=['date', 'diagnosis']).sum(min_count=1).reset_index()
+    df_hosp = df_uf[((df_uf['CD_UF'] == UF) & (df_uf['hospitalised'] == True))].groupby(by=['date', 'diagnosis'])[cols_to_sum].sum(min_count=1).reset_index()
+    df_total = df_uf[df_uf['CD_UF'] == UF].groupby(by=['date', 'diagnosis'])[cols_to_sum].sum(min_count=1).reset_index()
     x = df_vis.date.unique()
     ax[4].plot(x, df_hosp[df_hosp['diagnosis'] == 'dengue']['DENV_total'].values / df_total[df_total['diagnosis'] == 'dengue'].groupby(by='date')['DENV_total'].sum().values * 100, color='green', label='dengue')
     ax[4].plot(x, df_hosp[df_hosp['diagnosis'] == 'dengue_alarm']['DENV_total'].values / df_total[df_total['diagnosis'] == 'dengue_alarm'].groupby(by='date')['DENV_total'].sum().values * 100, color='orange', label='dengue_alarm')
@@ -675,7 +729,7 @@ for UF in monthly_df_uf.CD_UF.unique():
     ax[4].legend()
     ### Serotyped + serotyped zoom
     for i in [5,6]:
-        df_vis = df_vis.groupby(by='date')[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].sum()
+        df_vis = df_vis.groupby(by='date')[cols_to_sum].sum()
         ax[i].plot(x, df_vis['DENV_1'], color='black', label='DENV 1')
         ax[i].plot(x, df_vis['DENV_2'], color='red', label='DENV 2')
         ax[i].plot(x, df_vis['DENV_3'], color='green', label='DENV 3')
@@ -688,5 +742,5 @@ for UF in monthly_df_uf.CD_UF.unique():
     ax[0].set_xlim([min(x), max(x)])
     mx = max([np.nanmax(df_vis['DENV_1'].values), np.nanmax( df_vis['DENV_2'].values), np.nanmax( df_vis['DENV_3'].values), np.nanmax( df_vis['DENV_4'].values)])
     ax[6].set_ylim([0, 0.15*mx]) if not np.isnan(mx) else ax[2].set_ylim([0, 100])
-    plt.savefig(f'../interim/datasus_DENV-linelist/figs/{UF}.png', dpi=300)
+    plt.savefig(f'../interim/datasus_DENV-linelist/figs/{code2name_uf_map[int(UF)]}.png', dpi=300)
     plt.close()
