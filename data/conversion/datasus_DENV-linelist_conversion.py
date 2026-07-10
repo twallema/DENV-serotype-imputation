@@ -199,9 +199,8 @@ for fn,yr in zip(filenames[3:5], corresponding_years[3:5]):
         print(f"[FYI] Fraction with diagnosis method missing (assigned to NA): {len(df[df[criterion_column].isna()]) / len(df) * 100:.2f} %, of which {len(df[((df[criterion_column].isna()) & (df[classification_column] == 5))]) / len(df) * 100:.2f} % discarded")
         print(f"[FYI] Fraction with diagnosis method listed as 'under investigation' (assigned to NA): {len(df[df[criterion_column] == 3]) / len(df) * 100:.2f} %")
         df['diagnosis_method'] = pd.Series(None, index=df.index, dtype="Int8")
-        df.loc[df['diagnosis_method']==1, 'diagnosis_method'] = 0           # lab
-        df.loc[df['diagnosis_method']==2, 'diagnosis_method'] = 1           # clin_epi
-        #df.loc[df['diagnosis_method']==3, 'diagnosis_method'] = 'NA'       # NA
+        df.loc[df[criterion_column]==1, 'diagnosis_method'] = 0           # lab
+        df.loc[df[criterion_column]==2, 'diagnosis_method'] = 1           # clin_epi
 
         # fill in diagnosis (NA if discarded  (5), 'inconclusive' if inconclusive (8))
         df['diagnosis'] = pd.Series(None, index=df.index, dtype="Int8")
@@ -364,9 +363,9 @@ for fn,yr in zip(filenames[3:5], corresponding_years[3:5]):
         print(f"[FYI] Fraction with diagnosis method missing (assigned to NA): {len(df[df[criterion_column].isna()]) / len(df) * 100:.2f} %, of which {len(df[((df[criterion_column].isna()) & (df[classification_column] == 5))]) / len(df) * 100:.2f} % discarded")
         print(f"[FYI] Fraction with diagnosis method listed as 'under investigation' (assigned to NA): {len(df[df[criterion_column] == 3]) / len(df) * 100:.2f} %")
         df['diagnosis_method'] = pd.Series(2, index=df.index, dtype="Int8")
-        df.loc[df['diagnosis_method']==1, 'diagnosis_method'] = 0           # lab
-        df.loc[df['diagnosis_method']==2, 'diagnosis_method'] = 1           # clin_epi
-        df.loc[df['diagnosis_method']==3, 'diagnosis_method'] = 2           # unknown
+        df.loc[df[criterion_column]==1, 'diagnosis_method'] = 0           # lab
+        df.loc[df[criterion_column]==2, 'diagnosis_method'] = 1           # clin_epi
+        df.loc[df[criterion_column]==3, 'diagnosis_method'] = 2           # unknown
 
         # fill in diagnosis (NA if discarded  (5), 'inconclusive' if inconclusive (8))
         df['diagnosis'] = pd.Series(None, index=df.index, dtype="Int8")
@@ -580,11 +579,11 @@ df_muni.to_parquet('../interim/datasus_DENV-linelist/mun/DENV-serotypes_1999-202
 # Wipe memory
 # >>>>>>>>>>>
 
-# del df_muni_collect
+print("\nWiping memory..")
 
-# del monthly_df_muni
+del df_muni_collect
 
-# gc.collect()
+gc.collect()
 
 
 # Final concatenation of age-structured dataframes at municipality spatial level
@@ -611,9 +610,11 @@ df_muni.to_parquet('../interim/datasus_DENV-linelist/mun/DENV-serotypes_1999-202
 # monthly_df_muni_age.to_parquet('../interim/datasus_DENV-linelist/mun/DENV_total_age_1999-2025_monthly_mun.parquet.gz', index=False, compression='gzip')
 
 
-# #############################
-# ## Visualisation (UF only) ##
-# #############################
+#############################
+## Visualisation (UF only) ##
+#############################
+
+print("\nMaking visualisations..")
 
 # add UF label
 df_muni['CD_UF'] = df_muni["CD_MUN"].astype(str).str[:2]
