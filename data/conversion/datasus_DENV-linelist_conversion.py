@@ -154,7 +154,7 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
         ## 2005: DT_SIN_PRI (-17.4, CL: -52, 0), DT_FEBRE (-10, CL: -62, 1);
         ## 2006: DT_SIN_PRI (-20.6, CL: -59, 0), DT_FEBRE (-10, CL: -63, 0);
         ## Medians are always -3/-4 days for both variables; IQR for DT_SIN_PRI is always in the range -7 --> -1
-        ## DT_FEBRE = UNRELIABLE, average lag of DT_SIN_PRI is OK but I'm not transferring cases between years (this is probably an extensive recode)
+        ## DT_FEBRE = UNRELIABLE, average lag of DT_SIN_PRI is OK
         date_columns = ['DT_NOTIFIC', 'DT_SIN_PRI']
         df[date_columns] = df[date_columns].apply(lambda x: pd.to_datetime(x, format='%Y-%m-%d', errors='coerce')) # errors --> NaT
 
@@ -384,9 +384,6 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
         df = df.rename(columns={'ID_MN_RESI': 'CD_MUN'})
         df = df.astype({'CD_MUN': 'Int32'})
 
-        # 
-        #df['serotype'] = df['serotype'].astype('Int8')
-
         pass
     
 
@@ -463,7 +460,7 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
         .merge(total_counts, on=['date', 'CD_MUN', 'diagnosis_method', 'diagnosis', 'hospitalised'], how='left')
     )
 
-    final_df = final_df[~ final_df['diagnosis'].isna()]
+    final_df = final_df[~ final_df['diagnosis'].isna()]         # if there's no diagnosis we can't do much with the case
     final_df['DENV_total'] = final_df['DENV_total'].fillna(0)
 
     # save result
