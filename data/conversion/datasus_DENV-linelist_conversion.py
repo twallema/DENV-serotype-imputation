@@ -8,6 +8,9 @@ import geopandas as gpd
 from datetime import datetime,timedelta
 import matplotlib.pyplot as plt
 
+start_year = 2006
+end_year = 2010
+
 ######################
 ## Helper functions ##
 ######################
@@ -89,6 +92,9 @@ filenames.sort()
 
 # Figure out corresponding year
 corresponding_years = [int(fn[10:14]) for fn in filenames]
+extracted_years = [yr for yr in corresponding_years if ((yr >= start_year) & (yr <= end_year))]
+extracted_years_mask = [True if yr in extracted_years else False for yr in corresponding_years]
+filenames = [fn for i,fn in enumerate(filenames) if extracted_years_mask[i] == True]
 
 # Formatted data collection
 df_uf_collect=[]
@@ -100,7 +106,7 @@ mun2uf_map = gpd.read_parquet('../interim/geographic-dataset.parquet')[['CD_UF',
 code2name_uf_map = gpd.read_parquet('../interim/geographic-dataset.parquet')[['CD_UF', 'NM_UF']].drop_duplicates().set_index('CD_UF')['NM_UF'].to_dict()
 
 # Loop over files
-for fn,yr in zip(filenames[3:], corresponding_years[3:]):
+for fn,yr in zip(filenames, extracted_years):
     print(f'\nWorking on year {yr}')
     print('---------------------')
     print("\nWorking on preprocessing..")
@@ -407,7 +413,14 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
     df = df[['date', 'CD_MUN','diagnosis_method', 'diagnosis', 'serotype', 'hospitalised']]
 
     # build an expanded dataframe
-    all_months = pd.date_range(start=f'{yr-1}-11-01', end=f'{yr+1}-02-01', freq='ME')
+    if ((yr == start_year) & (yr == end_year)):
+        all_months = pd.date_range(start=f'{yr}-01-01', end=f'{yr}-12-31', freq='ME')
+    elif yr == start_year:
+        all_months = pd.date_range(start=f'{yr}-01-01', end=f'{yr+1}-02-01', freq='ME')
+    elif yr == end_year:
+        all_months = pd.date_range(start=f'{yr-1}-11-01', end=f'{yr}-12-31', freq='ME')
+    else:
+        all_months = pd.date_range(start=f'{yr-1}-11-01', end=f'{yr+1}-02-01', freq='ME')
     all_muni = gpd.read_parquet('../interim/geographic-dataset.parquet')['CD_MUN'].unique()
     full_index = pd.MultiIndex.from_product([all_months, all_muni, [0, 1, 2, pd.NA], [0, 1, 2, 3, pd.NA], [False, True]], names=['date', 'CD_MUN', 'diagnosis_method', 'diagnosis', 'hospitalised'])
     full_df = pd.DataFrame(index=full_index).reset_index().astype({'CD_MUN': 'Int32', 'diagnosis_method': 'Int8', 'diagnosis': 'Int8', 'hospitalised': 'boolean'})
@@ -474,69 +487,74 @@ for fn,yr in zip(filenames[3:], corresponding_years[3:]):
 
     df = df_copy
 
-    if yr >= 1999:
+    # retain only relevant columns
+    df = df[['date', 'age', 'CD_MUN', 'diagnosis_method', 'diagnosis', 'hospitalised']]
 
-        # retain only relevant columns
-        df = df[['date', 'age', 'CD_MUN', 'diagnosis', 'hospitalised']]
+    # limit age
+    print(f"[DROPPED] Fraction with 0 <= age <= 100: {len(df[((df['age'] >= 0) & (df['age'] <= 100))]) / len(df) * 100:.2f} %")
+    df = df[((df['age'] >= 0) & (df['age'] <= 100))]
 
-        # limit age
-        print(f"[DROPPED] Fraction with 0 <= age <= 100: {len(df[((df['age'] >= 0) & (df['age'] <= 100))]) / len(df) * 100:.2f} %")
-        df = df[((df['age'] >= 0) & (df['age'] <= 100))]
-
-        # build an expanded dataframe
+    # build an expanded dataframe
+    if ((yr == start_year) & (yr == end_year)):
+        all_months = pd.date_range(start=f'{yr}-01-01', end=f'{yr}-12-31', freq='ME')
+    elif yr == start_year:
+        all_months = pd.date_range(start=f'{yr}-01-01', end=f'{yr+1}-02-01', freq='ME')
+    elif yr == end_year:
+        all_months = pd.date_range(start=f'{yr-1}-11-01', end=f'{yr}-12-31', freq='ME')
+    else:
         all_months = pd.date_range(start=f'{yr-1}-11-01', end=f'{yr+1}-02-01', freq='ME')
-        all_age_groups = [f"[{i:02d}-{i+5:02d}(" for i in range(0, 100, 5)]
-        all_muni = gpd.read_parquet('../interim/geographic-dataset.parquet')['CD_MUN'].unique()
-        full_index = pd.MultiIndex.from_product([all_months, all_age_groups, all_muni, [0, 1, 2, 3, pd.NA], [False, True]], names=['date', 'age_group', 'CD_MUN', 'diagnosis', 'hospitalised'])
-        full_df = pd.DataFrame(index=full_index).reset_index().astype({'CD_MUN': 'Int32', 'diagnosis': 'Int8', 'hospitalised': 'boolean'})
-        
-        # count total observations
-        total_counts = (
-            df.groupby(['date', 'age', 'CD_MUN', 'diagnosis', 'hospitalised'])
-            .size()
-            .reset_index(name='DENV_total')
-            .astype({'DENV_total': 'Int32', 'hospitalised': 'boolean'})
-        )
+    all_age_groups = [f"[{i:02d}-{i+5:02d}(" for i in range(0, 100, 5)]
+    all_muni = gpd.read_parquet('../interim/geographic-dataset.parquet')['CD_MUN'].unique()
+    full_index = pd.MultiIndex.from_product([all_months, all_age_groups, all_muni, [0, 1, 2, pd.NA], [0, 1, 2, 3, pd.NA], [False, True]], names=['date', 'age_group', 'CD_MUN', 'diagnosis_method', 'diagnosis', 'hospitalised'])
+    full_df = pd.DataFrame(index=full_index).reset_index().astype({'CD_MUN': 'Int32', 'diagnosis_method': 'Int8', 'diagnosis': 'Int8', 'hospitalised': 'boolean'})
+    
+    # count total observations
+    total_counts = (
+        df.groupby(['date', 'age', 'CD_MUN', 'diagnosis_method', 'diagnosis', 'hospitalised'])
+        .size()
+        .reset_index(name='DENV_total')
+        .astype({'DENV_total': 'Int32', 'hospitalised': 'boolean'})
+    )
 
-        # assign age groups
-        bins = np.arange(0, 105, 5) 
-        labels = [f"[{i:02d}-{i+5:02d}(" for i in range(0, 100, 5)]
-        total_counts['age_group'] = pd.cut(
-            total_counts['age'],
-            bins=bins,
-            right=False,   # intervals like [0,5)
-            labels=labels,
-            include_lowest=True
-        )
-        total_counts = total_counts.drop(columns="age")
+    # assign age groups
+    bins = np.arange(0, 105, 5) 
+    labels = [f"[{i:02d}-{i+5:02d}(" for i in range(0, 100, 5)]
+    total_counts['age_group'] = pd.cut(
+        total_counts['age'],
+        bins=bins,
+        right=False,   # intervals like [0,5)
+        labels=labels,
+        include_lowest=True
+    )
+    total_counts = total_counts.drop(columns="age")
 
-        # resample to months 
-        total_counts = (
-            total_counts.set_index(['date', 'CD_MUN', 'age_group', 'diagnosis', 'hospitalised'])
-            .groupby(level=['CD_MUN', 'age_group', 'diagnosis', 'hospitalised'], observed=False)
-            .resample('ME', level='date')     # Resample by month at the 'date' level
-            .sum(min_count=1)                 # Ensure NaN if all values are NaN
-            .reset_index()                    # Flatten index
-        )
+    # resample to months 
+    total_counts = (
+        total_counts.set_index(['date', 'CD_MUN', 'age_group', 'diagnosis_method', 'diagnosis', 'hospitalised'])
+        .groupby(level=['CD_MUN', 'age_group', 'diagnosis_method', 'diagnosis', 'hospitalised'], observed=False)
+        .resample('ME', level='date')     # Resample by month at the 'date' level
+        .sum(min_count=1)                 # Ensure NaN if all values are NaN
+        .reset_index()                    # Flatten index
+    )
 
-        # counts per age group
-        df_binned = (
-            total_counts
-            .groupby(['date', 'age_group', 'CD_MUN', 'diagnosis', 'hospitalised'], observed=False, as_index=False)['DENV_total']
-            .sum()
-            .astype({'age_group': 'str'})
-        )
+    # counts per age group
+    df_binned = (
+        total_counts
+        .groupby(['date', 'age_group', 'CD_MUN', 'diagnosis_method', 'diagnosis', 'hospitalised'], observed=False, as_index=False)['DENV_total']
+        .sum()
+        .astype({'age_group': 'str'})
+    )
 
-        # merge together 
-        df = (
-            full_df
-            .merge(df_binned, on=['date', 'age_group', 'CD_MUN', 'diagnosis', 'hospitalised'], how='left')
-        )
-        df['DENV_total'] = df['DENV_total'].fillna(0)
-        df = df[~ df['diagnosis'].isna()]
+    # merge together 
+    df = (
+        full_df
+        .merge(df_binned, on=['date', 'age_group', 'CD_MUN', 'diagnosis_method', 'diagnosis', 'hospitalised'], how='left')
+    )
+    df['DENV_total'] = df['DENV_total'].fillna(0)
+    df = df[~ df['diagnosis'].isna()]
 
-        # save result
-        df_muni_age_collect.append(df)
+    # save result
+    df_muni_age_collect.append(df)
 
 
 # Final concatenation of dataframes at municipality spatial level
@@ -578,7 +596,7 @@ df_muni['diagnosis'] = df_muni['diagnosis_star']
 df_muni = df_muni.drop(columns=['diagnosis_star'])
 
 # save result
-df_muni.to_parquet('../interim/datasus_DENV-linelist/mun/DENV-serotypes_1999-2025_monthly_mun.parquet.gz', index=False, compression='gzip')
+df_muni.to_parquet(f'../interim/datasus_DENV-linelist/mun/DENV_serotypes-{start_year}_{end_year}-monthly-mun.parquet.gz', index=False, compression='gzip')
 
 
 # Wipe memory
@@ -600,12 +618,19 @@ print("\nFinal concatenation of age-structured municipality data..")
 df_muni_age = pd.concat(df_muni_age_collect, ignore_index=True)
 
 # get rid of duplicate weeks before start of year and after end of year
-df_muni_age = df_muni_age.groupby(["date", "CD_MUN", "age_group", "diagnosis", "hospitalised"], as_index=False, dropna=False)["DENV_total"].sum()
+df_muni_age = df_muni_age.groupby(["date", "CD_MUN", "age_group", "diagnosis_method", "diagnosis", "hospitalised"], as_index=False, dropna=False)["DENV_total"].sum()
 
 # group
 df_muni_age = df_muni_age.sort_values(by=['date', 'CD_MUN', 'age_group']).reset_index(drop=True)
 
-# add diagnosis label back in
+# replace diagnosis method codes
+df_muni_age['diagnosis_method_star'] = ''
+df_muni_age.loc[df_muni_age['diagnosis_method']==0, 'diagnosis_method_star'] = 'lab'
+df_muni_age.loc[df_muni_age['diagnosis_method']==1, 'diagnosis_method_star'] = 'clin_epi'
+df_muni_age.loc[df_muni_age['diagnosis_method']==2, 'diagnosis_method_star'] = 'unknown'
+df_muni_age['diagnosis_method'] = df_muni_age['diagnosis_method_star']
+df_muni_age = df_muni_age.drop(columns=['diagnosis_method_star'])
+
 # replace diagnosis codes
 df_muni_age['diagnosis_star'] = ''
 df_muni_age.loc[df_muni_age['diagnosis']==0, 'diagnosis_star'] = 'dengue'
@@ -616,7 +641,7 @@ df_muni_age['diagnosis'] = df_muni_age['diagnosis_star']
 df_muni_age = df_muni_age.drop(columns=['diagnosis_star'])
 
 # save
-df_muni_age.to_parquet('../interim/datasus_DENV-linelist/mun/DENV_total_age_1999-2025_monthly_mun.parquet.gz', index=False, compression='gzip')
+df_muni_age.to_parquet(f'../interim/datasus_DENV-linelist/mun/DENV_total_age-{start_year}_{end_year}-monthly-mun.parquet.gz', index=False, compression='gzip')
 
 
 #############################
