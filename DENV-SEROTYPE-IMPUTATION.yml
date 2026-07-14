@@ -18,3 +18,4 @@ dependencies:
   - tslearn
   - seaborn
   - scikit-learn>=1.7
+  - polars
