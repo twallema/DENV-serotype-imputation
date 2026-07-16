@@ -741,7 +741,6 @@ df.write_parquet(
     compression="zstd",
 )
 
-print(df)
 
 ##############
 ## Clean up ##
