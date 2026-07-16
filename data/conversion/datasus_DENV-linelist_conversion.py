@@ -12,7 +12,7 @@ from datetime import datetime,timedelta,date
 import matplotlib.pyplot as plt
 
 start_year = 1999
-end_year = 2003
+end_year = 2026
 
 ######################
 ## Helper functions ##
@@ -106,415 +106,415 @@ df_muni_age_collect=[]
 mun2uf_map = gpd.read_parquet('../interim/geographic-dataset.parquet')[['CD_UF', 'CD_MUN']].drop_duplicates().set_index('CD_MUN')['CD_UF'].to_dict()
 code2name_uf_map = gpd.read_parquet('../interim/geographic-dataset.parquet')[['CD_UF', 'NM_UF']].drop_duplicates().set_index('CD_UF')['NM_UF'].to_dict()
 
-# # Loop over files
-# for fn,yr in zip(filenames, extracted_years):
-#     print(f'\nWorking on year {yr}')
-#     print('---------------------')
-#     print("\nWorking on preprocessing the linelist data..\n")
-#     # 1996, 1997, 1998
-#     if 1996 <= yr <= 1998:
-#         raise NotImplementedError("script no longer works for years before 1999.\n")
-#         # define serotype column name
-#         serotype_column = 'SOROTIPO'
-#         # load data
-#         df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', delimiter=';', low_memory=False)
-#         # rename municipality geocode column for consistency
-#         df = df.rename(columns={'MUNIATEND': 'CD_MUN'})
-#         # attach relevant spatial units
-#         df['CD_UF'] = df['CD_MUN'].map(mun2uf_map)
-#         # find most likely date
-#         ## strategy: take minimum of columns containing a date: ['DTCOLETA', 'DTMAC1', 'DTMAC2', 'DTINIHEMA1', 'DTINIHEMA2']
-#         ## BUT: MAC1/MAC2/DTINIHEMA1/DTINIHEMA2 always lag 'DTCOLECTA' (98% confidence interval > 0), except MAC1 in 1997 which has strongly negative lagging outliers compared to 'DTCOLECTA' (1% lags more than 150 days)
-#         ## HENCE: use 'DTCOLECTA' only 
-#         ## BUT: there are a lot of missing dates so we wind up missing out on a lot of data by only using 'DTCOLECTA'
-#         date_columns = ['DTCOLETA', 'DTMAC1', 'DTMAC2', 'DTINIHEMA1', 'DTINIHEMA2']
-#         df[date_columns] = df[date_columns].apply(pd.to_datetime)
-#         # find minimum date
-#         df['date'] = df[date_columns].min(axis=1)
-#         # drop if date not present (very rare)
-#         print(f"Fraction with a missing date: {100 - len(df.dropna(subset=['date'])) / len(df) * 100} %")
-#         df = df.dropna(subset=['date'])
-#         # the column telling us if the case was 'confirmed' is unknown --> assume no cases are confirmed, except the serotyped ones
-#         df['confirmed'] = df[serotype_column].isin([1, 2, 3, 4]).astype(int)
-#         pass
+# Loop over files
+for fn,yr in zip(filenames, extracted_years):
+    print(f'\nWorking on year {yr}')
+    print('---------------------')
+    print("\nWorking on preprocessing the linelist data..\n")
+    # 1996, 1997, 1998
+    if 1996 <= yr <= 1998:
+        raise NotImplementedError("script no longer works for years before 1999.\n")
+        # define serotype column name
+        serotype_column = 'SOROTIPO'
+        # load data
+        df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', delimiter=';', low_memory=False)
+        # rename municipality geocode column for consistency
+        df = df.rename(columns={'MUNIATEND': 'CD_MUN'})
+        # attach relevant spatial units
+        df['CD_UF'] = df['CD_MUN'].map(mun2uf_map)
+        # find most likely date
+        ## strategy: take minimum of columns containing a date: ['DTCOLETA', 'DTMAC1', 'DTMAC2', 'DTINIHEMA1', 'DTINIHEMA2']
+        ## BUT: MAC1/MAC2/DTINIHEMA1/DTINIHEMA2 always lag 'DTCOLECTA' (98% confidence interval > 0), except MAC1 in 1997 which has strongly negative lagging outliers compared to 'DTCOLECTA' (1% lags more than 150 days)
+        ## HENCE: use 'DTCOLECTA' only 
+        ## BUT: there are a lot of missing dates so we wind up missing out on a lot of data by only using 'DTCOLECTA'
+        date_columns = ['DTCOLETA', 'DTMAC1', 'DTMAC2', 'DTINIHEMA1', 'DTINIHEMA2']
+        df[date_columns] = df[date_columns].apply(pd.to_datetime)
+        # find minimum date
+        df['date'] = df[date_columns].min(axis=1)
+        # drop if date not present (very rare)
+        print(f"Fraction with a missing date: {100 - len(df.dropna(subset=['date'])) / len(df) * 100} %")
+        df = df.dropna(subset=['date'])
+        # the column telling us if the case was 'confirmed' is unknown --> assume no cases are confirmed, except the serotyped ones
+        df['confirmed'] = df[serotype_column].isin([1, 2, 3, 4]).astype(int)
+        pass
 
-#     elif 1999 <= yr <= 2006:
-#         # define relevant column names
-#         serotype_column = 'RESUL_VIRA'
-#         age_column = 'NU_IDADE'
-#         classification_column = 'CON_CLASSI'
-#         criterion_column = 'CON_CRITER'
-#         # load data
-#         read_csv_kwargs = {'delimiter': ';'} if yr == 1999 else {'delimiter':',', 'encoding':"ISO-8859-1"}
-#         df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', **read_csv_kwargs, low_memory=False)
+    elif 1999 <= yr <= 2006:
+        # define relevant column names
+        serotype_column = 'RESUL_VIRA'
+        age_column = 'NU_IDADE'
+        classification_column = 'CON_CLASSI'
+        criterion_column = 'CON_CRITER'
+        # load data
+        read_csv_kwargs = {'delimiter': ';'} if yr == 1999 else {'delimiter':',', 'encoding':"ISO-8859-1"}
+        df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', **read_csv_kwargs, low_memory=False)
 
-#         # find most likely date
-#         # DT_COLLECTA very reliable according to Laura
-#         ## strategy: take minimum of columns containing a date: ['DT_NOTIFIC', 'DT_SIN_PRI', 'DT_FEBRE'] # consider adding collection date
-#         ## Lags compared to 'DT_NOTIFIC':
-#         ## 1999: DT_SIN_PRI (-5.5, CL: -53, 0), DT_FEBRE (21, CL: -51, 72);
-#         ## 2000: DT_SIN_PRI (-6.8, CL: -55, 0), DT_FEBRE (17, CL: -27, 1089);
-#         ## 2001: DT_SIN_PRI (-7.7, CL: -59, 0), DT_FEBRE (-54, CL: -1271, 21);
-#         ## 2002: DT_SIN_PRI (-7.7, CL: -59, 0), DT_FEBRE (-54, CL: -1271, 21);
-#         ## 2003: DT_SIN_PRI (-12.2, CL: -54, 0), DT_FEBRE (-70, CL: -1592, 3);
-#         ## 2004: DT_SIN_PRI (-18.9, CL: -61, 0), DT_FEBRE (-9.1, CL: -63, 1);
-#         ## 2005: DT_SIN_PRI (-17.4, CL: -52, 0), DT_FEBRE (-10, CL: -62, 1);
-#         ## 2006: DT_SIN_PRI (-20.6, CL: -59, 0), DT_FEBRE (-10, CL: -63, 0);
-#         ## Medians are always -3/-4 days for both variables; IQR for DT_SIN_PRI is always in the range -7 --> -1
-#         ## DT_FEBRE = UNRELIABLE, average lag of DT_SIN_PRI is OK
-#         date_columns = ['DT_NOTIFIC', 'DT_SIN_PRI']
-#         df[date_columns] = df[date_columns].apply(lambda x: pd.to_datetime(x, format='%Y-%m-%d', errors='coerce')) # errors --> NaT
+        # find most likely date
+        # DT_COLLECTA very reliable according to Laura
+        ## strategy: take minimum of columns containing a date: ['DT_NOTIFIC', 'DT_SIN_PRI', 'DT_FEBRE'] # consider adding collection date
+        ## Lags compared to 'DT_NOTIFIC':
+        ## 1999: DT_SIN_PRI (-5.5, CL: -53, 0), DT_FEBRE (21, CL: -51, 72);
+        ## 2000: DT_SIN_PRI (-6.8, CL: -55, 0), DT_FEBRE (17, CL: -27, 1089);
+        ## 2001: DT_SIN_PRI (-7.7, CL: -59, 0), DT_FEBRE (-54, CL: -1271, 21);
+        ## 2002: DT_SIN_PRI (-7.7, CL: -59, 0), DT_FEBRE (-54, CL: -1271, 21);
+        ## 2003: DT_SIN_PRI (-12.2, CL: -54, 0), DT_FEBRE (-70, CL: -1592, 3);
+        ## 2004: DT_SIN_PRI (-18.9, CL: -61, 0), DT_FEBRE (-9.1, CL: -63, 1);
+        ## 2005: DT_SIN_PRI (-17.4, CL: -52, 0), DT_FEBRE (-10, CL: -62, 1);
+        ## 2006: DT_SIN_PRI (-20.6, CL: -59, 0), DT_FEBRE (-10, CL: -63, 0);
+        ## Medians are always -3/-4 days for both variables; IQR for DT_SIN_PRI is always in the range -7 --> -1
+        ## DT_FEBRE = UNRELIABLE, average lag of DT_SIN_PRI is OK
+        date_columns = ['DT_NOTIFIC', 'DT_SIN_PRI']
+        df[date_columns] = df[date_columns].apply(lambda x: pd.to_datetime(x, format='%Y-%m-%d', errors='coerce')) # errors --> NaT
 
-#         # find minimum date
-#         df['date'] = df[date_columns].apply(choose_date, axis=1)
-#         # drop if date not present (very rare)
-#         print(f"[DROPPED] Fraction with a missing/invalid date: {100 - len(df.dropna(subset=['date'])) / len(df) * 100:.2f} %")
-#         df = df.dropna(subset=['date'])
+        # find minimum date
+        df['date'] = df[date_columns].apply(choose_date, axis=1)
+        # drop if date not present (very rare)
+        print(f"[DROPPED] Fraction with a missing/invalid date: {100 - len(df.dropna(subset=['date'])) / len(df) * 100:.2f} %")
+        df = df.dropna(subset=['date'])
 
-#         print(f"[FYI] Fraction of dates within the year {yr}: {len(df[((df['date'] >= datetime(yr,1,1)) & (df['date'] < datetime(yr+1,1,1)))]) / len(df) * 100:.2f} %")
-#         print(f"[FYI] Fraction of dates below the year {yr}: {len(df[df['date'] < datetime(yr,1,1)]) / len(df) * 100:.2f} %")
-#         print(f"[FYI] Fraction of dates above the year {yr}: {len(df[df['date'] >= datetime(yr+1,1,1)]) / len(df) * 100:.2f} %")
+        print(f"[FYI] Fraction of dates within the year {yr}: {len(df[((df['date'] >= datetime(yr,1,1)) & (df['date'] < datetime(yr+1,1,1)))]) / len(df) * 100:.2f} %")
+        print(f"[FYI] Fraction of dates below the year {yr}: {len(df[df['date'] < datetime(yr,1,1)]) / len(df) * 100:.2f} %")
+        print(f"[FYI] Fraction of dates above the year {yr}: {len(df[df['date'] >= datetime(yr+1,1,1)]) / len(df) * 100:.2f} %")
 
-#         # drop if age is missing
-#         print(f"[DROPPED] Fraction with a missing age: {100 - len(df.dropna(subset=[age_column])) / len(df) * 100} %")
-#         df = df.dropna(subset=[age_column])
-#         # convert NU_IDADE to age
-#         df = df.rename(columns={age_column: 'age'})
-#         # convert age code to an age in years
-#         l = len(df)
-#         df["age"] = df["age"].apply(parse_age).astype("Int64")
-#         print(f"[DROPPED] Fraction with an invalid age: {100 - len(df.dropna(subset=['age'])) / l * 100} %")
-#         df = df.dropna(subset=['age'])
+        # drop if age is missing
+        print(f"[DROPPED] Fraction with a missing age: {100 - len(df.dropna(subset=[age_column])) / len(df) * 100} %")
+        df = df.dropna(subset=[age_column])
+        # convert NU_IDADE to age
+        df = df.rename(columns={age_column: 'age'})
+        # convert age code to an age in years
+        l = len(df)
+        df["age"] = df["age"].apply(parse_age).astype("Int64")
+        print(f"[DROPPED] Fraction with an invalid age: {100 - len(df.dropna(subset=['age'])) / l * 100} %")
+        df = df.dropna(subset=['age'])
 
-#         # [SANITY CHECK] fraction with a serotype assigned but a missing classification
-#         print(f"[FYI] Fraction with serotype information but missing a classification: {100 - len(df.dropna(subset=serotype_column).dropna(subset=classification_column)) / len(df.dropna(subset=[serotype_column])) * 100:.2f} %")
-#         # drop if missing classification
-#         print(f"[DROPPED] Fraction with a missing classification: {100 - len(df.dropna(subset=[classification_column])) / len(df) * 100:.2f} %")
-#         df = df.dropna(subset=[classification_column])
+        # [SANITY CHECK] fraction with a serotype assigned but a missing classification
+        print(f"[FYI] Fraction with serotype information but missing a classification: {100 - len(df.dropna(subset=serotype_column).dropna(subset=classification_column)) / len(df.dropna(subset=[serotype_column])) * 100:.2f} %")
+        # drop if missing classification
+        print(f"[DROPPED] Fraction with a missing classification: {100 - len(df.dropna(subset=[classification_column])) / len(df) * 100:.2f} %")
+        df = df.dropna(subset=[classification_column])
 
-#         # how much of each classification are there
-#         print(f"[FYI] Distribution of classifications (%): \n")
-#         print(df[classification_column].value_counts() / sum(df[classification_column].value_counts()) * 100)
-#         print('\n')
-#         print(f"[DROPPED] undocumented classification '0'")
-#         # drop if classification is "0" (undocumented; only in 1999-2003)
-#         df = df[df[classification_column] != 0]
+        # how much of each classification are there
+        print(f"[FYI] Distribution of classifications (%): \n")
+        print(df[classification_column].value_counts() / sum(df[classification_column].value_counts()) * 100)
+        print('\n')
+        print(f"[DROPPED] undocumented classification '0'")
+        # drop if classification is "0" (undocumented; only in 1999-2003)
+        df = df[df[classification_column] != 0]
 
-#         # fill in discarded
-#         df['discarded'] = df[classification_column].isin([5,]).astype(int)
-#         # fill diagnosis method
-#         print(f"[FYI] Fraction with diagnosis method missing (assigned to NA): {len(df[df[criterion_column].isna()]) / len(df) * 100:.2f} %, of which {len(df[((df[criterion_column].isna()) & (df[classification_column] == 5))]) / len(df) * 100:.2f} % discarded")
-#         print(f"[FYI] Fraction with diagnosis method listed as 'under investigation' (assigned to NA): {len(df[df[criterion_column] == 3]) / len(df) * 100:.2f} %")
-#         df['diagnosis_method'] = pd.Series(None, index=df.index, dtype="Int8")
-#         df.loc[df[criterion_column]==1, 'diagnosis_method'] = 0           # lab
-#         df.loc[df[criterion_column]==2, 'diagnosis_method'] = 1           # clin_epi
+        # fill in discarded
+        df['discarded'] = df[classification_column].isin([5,]).astype(int)
+        # fill diagnosis method
+        print(f"[FYI] Fraction with diagnosis method missing (assigned to NA): {len(df[df[criterion_column].isna()]) / len(df) * 100:.2f} %, of which {len(df[((df[criterion_column].isna()) & (df[classification_column] == 5))]) / len(df) * 100:.2f} % discarded")
+        print(f"[FYI] Fraction with diagnosis method listed as 'under investigation' (assigned to NA): {len(df[df[criterion_column] == 3]) / len(df) * 100:.2f} %")
+        df['diagnosis_method'] = pd.Series(None, index=df.index, dtype="Int8")
+        df.loc[df[criterion_column]==1, 'diagnosis_method'] = 0           # lab
+        df.loc[df[criterion_column]==2, 'diagnosis_method'] = 1           # clin_epi
 
-#         # fill in diagnosis (NA if discarded  (5), 'inconclusive' if inconclusive (8))
-#         df['diagnosis'] = pd.Series(None, index=df.index, dtype="Int8")
-#         df.loc[df[classification_column]==1, 'diagnosis'] = 0   # dengue
-#         df.loc[df[classification_column]==2, 'diagnosis'] = 1   # dengue with alarm
-#         df.loc[((df[classification_column]==3) | (df[classification_column]==4)), 'diagnosis'] = 2 # severe dengue
-#         df.loc[df[classification_column]==8, 'diagnosis'] = 3   # inconclusive
-#         print(f"[FYI] Classification 'inconclusive' (8) assigned diagnosis '3'")
-#         print(f"[FYI] Unique severities when discard==FALSE: {df[df['discarded'] == 0]['diagnosis'].unique()}")
+        # fill in diagnosis (NA if discarded  (5), 'inconclusive' if inconclusive (8))
+        df['diagnosis'] = pd.Series(None, index=df.index, dtype="Int8")
+        df.loc[df[classification_column]==1, 'diagnosis'] = 0   # dengue
+        df.loc[df[classification_column]==2, 'diagnosis'] = 1   # dengue with alarm
+        df.loc[((df[classification_column]==3) | (df[classification_column]==4)), 'diagnosis'] = 2 # severe dengue
+        df.loc[df[classification_column]==8, 'diagnosis'] = 3   # inconclusive
+        print(f"[FYI] Classification 'inconclusive' (8) assigned diagnosis '3'")
+        print(f"[FYI] Unique severities when discard==FALSE: {df[df['discarded'] == 0]['diagnosis'].unique()}")
 
-#         # extract the hospitalisation column
-#         df['hospitalised'] = False
-#         df.loc[df['HOSPITALIZ']==1, 'hospitalised'] = True
+        # extract the hospitalisation column
+        df['hospitalised'] = False
+        df.loc[df['HOSPITALIZ']==1, 'hospitalised'] = True
 
-#         # Location
-#         df = df.rename(columns={'ID_MN_RESI': 'CD_MUN'})
-#         # if patient residency missing use hospital location 
-#         print(f"[DROPPED] Fraction with missing resident municipality code: {100 - len(df.dropna(subset=['CD_MUN'])) / len(df) * 100:.2f} %")
-#         print(f"[DROPPED] Fraction with missing healthcare facility municipality code: {100 - len(df.dropna(subset=['ID_MUNICIP'])) / len(df) * 100:.2f} %")
-#         df['CD_MUN'] = df['CD_MUN'].fillna(df['ID_MUNICIP'])
-#         df = df.dropna(subset=['CD_MUN'])
+        # Location
+        df = df.rename(columns={'ID_MN_RESI': 'CD_MUN'})
+        # if patient residency missing use hospital location 
+        print(f"[DROPPED] Fraction with missing resident municipality code: {100 - len(df.dropna(subset=['CD_MUN'])) / len(df) * 100:.2f} %")
+        print(f"[DROPPED] Fraction with missing healthcare facility municipality code: {100 - len(df.dropna(subset=['ID_MUNICIP'])) / len(df) * 100:.2f} %")
+        df['CD_MUN'] = df['CD_MUN'].fillna(df['ID_MUNICIP'])
+        df = df.dropna(subset=['CD_MUN'])
 
-#         pass
+        pass
 
 
-#     elif yr >= 2007:
-#         # define serotype column name
-#         serotype_column = 'SOROTIPO'
-#         age_column = 'NU_IDADE_N'
-#         classification_column = 'CLASSI_FIN'
-#         criterion_column = 'CRITERIO'
-#         # load data
-#         if yr == 2008:
-#             df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', delimiter=',', encoding="ISO-8859-1", low_memory=False)
-#             # remove b'' for 2008 (using raw data)
-#             df = df.map(decode_or_nan)
-#             # convert 'SOROTIPO' and 'SG_UF' to numerics
-#             df[serotype_column] = pd.to_numeric(df[serotype_column])
-#             df['ID_MN_RESI'] = pd.to_numeric(df['ID_MN_RESI'], errors='coerce') # Has 6 digits!
-#             df[classification_column] = pd.to_numeric(df[classification_column], errors='coerce')
-#             df[criterion_column] = pd.to_numeric(df[criterion_column], errors='coerce')
-#             df['HOSPITALIZ'] = pd.to_numeric(df['HOSPITALIZ'], errors='coerce')
-#         else:
-#             df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', delimiter=',', encoding="ISO-8859-1", low_memory=False)
+    elif yr >= 2007:
+        # define serotype column name
+        serotype_column = 'SOROTIPO'
+        age_column = 'NU_IDADE_N'
+        classification_column = 'CLASSI_FIN'
+        criterion_column = 'CRITERIO'
+        # load data
+        if yr == 2008:
+            df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', delimiter=',', encoding="ISO-8859-1", low_memory=False)
+            # remove b'' for 2008 (using raw data)
+            df = df.map(decode_or_nan)
+            # convert 'SOROTIPO' and 'SG_UF' to numerics
+            df[serotype_column] = pd.to_numeric(df[serotype_column])
+            df['ID_MN_RESI'] = pd.to_numeric(df['ID_MN_RESI'], errors='coerce') # Has 6 digits!
+            df[classification_column] = pd.to_numeric(df[classification_column], errors='coerce')
+            df[criterion_column] = pd.to_numeric(df[criterion_column], errors='coerce')
+            df['HOSPITALIZ'] = pd.to_numeric(df['HOSPITALIZ'], errors='coerce')
+        else:
+            df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', delimiter=',', encoding="ISO-8859-1", low_memory=False)
 
-#         # find most likely date
-#         ## strategy: take minimum of columns containing a date: ['DT_NOTIFIC', 'DT_SIN_PRI'] # consider adding collection date
-#         ## 2007: DT_SIN_PRI (-8.4, CL: -53, 0, IQR: -7, -2)
-#         ## 2008: DT_SIN_PRI (-21.8, CL: -68, 0, IQR: -7, -1)
-#         ## 2009: DT_SIN_PRI (-27.8, CL: -43, 0, IQR: -6, -1)
-#         ## 2010: DT_SIN_PRI (-25.1, CL: -49, 0, IQR: -6, -1)
-#         ## 2011: DT_SIN_PRI (-25.4, CL: -51, 0, IQR: -6, -1)
-#         ## Very similar to 1999-2006 
-#         date_columns = ['DT_NOTIFIC', 'DT_SIN_PRI']
-#         if yr == 2008:
-#             df[date_columns] = df[date_columns].apply(lambda x: pd.to_datetime(x, format='%Y%m%d', errors='coerce')) # drop all errors 
-#         else:
-#             df[date_columns] = df[date_columns].apply(lambda x: pd.to_datetime(x, format='%Y-%m-%d', errors='coerce')) # drop all errors 
-#         # find minimum date
-#         df['date'] = df[date_columns].apply(choose_date, axis=1)
-#         # drop if date is missing (very rare)
-#         print(f"[DROPPED] Fraction with a missing/invalid date: {100 - len(df.dropna(subset=['date'])) / len(df) * 100} %")
-#         df = df.dropna(subset=['date'])
+        # find most likely date
+        ## strategy: take minimum of columns containing a date: ['DT_NOTIFIC', 'DT_SIN_PRI'] # consider adding collection date
+        ## 2007: DT_SIN_PRI (-8.4, CL: -53, 0, IQR: -7, -2)
+        ## 2008: DT_SIN_PRI (-21.8, CL: -68, 0, IQR: -7, -1)
+        ## 2009: DT_SIN_PRI (-27.8, CL: -43, 0, IQR: -6, -1)
+        ## 2010: DT_SIN_PRI (-25.1, CL: -49, 0, IQR: -6, -1)
+        ## 2011: DT_SIN_PRI (-25.4, CL: -51, 0, IQR: -6, -1)
+        ## Very similar to 1999-2006 
+        date_columns = ['DT_NOTIFIC', 'DT_SIN_PRI']
+        if yr == 2008:
+            df[date_columns] = df[date_columns].apply(lambda x: pd.to_datetime(x, format='%Y%m%d', errors='coerce')) # drop all errors 
+        else:
+            df[date_columns] = df[date_columns].apply(lambda x: pd.to_datetime(x, format='%Y-%m-%d', errors='coerce')) # drop all errors 
+        # find minimum date
+        df['date'] = df[date_columns].apply(choose_date, axis=1)
+        # drop if date is missing (very rare)
+        print(f"[DROPPED] Fraction with a missing/invalid date: {100 - len(df.dropna(subset=['date'])) / len(df) * 100} %")
+        df = df.dropna(subset=['date'])
 
-#         print(f"[FYI] Fraction of dates within the year {yr}: {len(df[((df['date'] >= datetime(yr,1,1)) & (df['date'] < datetime(yr+1,1,1)))]) / len(df) * 100:.2f} %")
-#         print(f"[FYI] Fraction of dates below the year {yr}: {len(df[df['date'] < datetime(yr,1,1)]) / len(df) * 100:.2f} %")
-#         print(f"[FYI] Fraction of dates above the year {yr}: {len(df[df['date'] >= datetime(yr+1,1,1)]) / len(df) * 100:.2f} %")
+        print(f"[FYI] Fraction of dates within the year {yr}: {len(df[((df['date'] >= datetime(yr,1,1)) & (df['date'] < datetime(yr+1,1,1)))]) / len(df) * 100:.2f} %")
+        print(f"[FYI] Fraction of dates below the year {yr}: {len(df[df['date'] < datetime(yr,1,1)]) / len(df) * 100:.2f} %")
+        print(f"[FYI] Fraction of dates above the year {yr}: {len(df[df['date'] >= datetime(yr+1,1,1)]) / len(df) * 100:.2f} %")
 
-#         # drop if age is missing
-#         print(f"[DROPPED] Fraction with a missing age: {100 - len(df.dropna(subset=[age_column])) / len(df) * 100} %")
-#         df = df.dropna(subset=[age_column])
-#         # convert NU_IDADE to age
-#         df = df.rename(columns={age_column: 'age'})
-#         # convert age code to an age in years
-#         l = len(df)
-#         df['age'] = pd.to_numeric(df['age'].astype(str).str.strip(), errors='coerce').astype("Int64")
-#         df["age"] = df["age"].apply(parse_age).astype("Int64")
-#         print(f"[DROPPED] Fraction with an invalid age: {100 - len(df.dropna(subset=['age'])) / l * 100} %")
-#         df = df.dropna(subset=['age'])
+        # drop if age is missing
+        print(f"[DROPPED] Fraction with a missing age: {100 - len(df.dropna(subset=[age_column])) / len(df) * 100} %")
+        df = df.dropna(subset=[age_column])
+        # convert NU_IDADE to age
+        df = df.rename(columns={age_column: 'age'})
+        # convert age code to an age in years
+        l = len(df)
+        df['age'] = pd.to_numeric(df['age'].astype(str).str.strip(), errors='coerce').astype("Int64")
+        df["age"] = df["age"].apply(parse_age).astype("Int64")
+        print(f"[DROPPED] Fraction with an invalid age: {100 - len(df.dropna(subset=['age'])) / l * 100} %")
+        df = df.dropna(subset=['age'])
 
-#         # Location
-#         df = df.rename(columns={'ID_MN_RESI': 'CD_MUN'})
-#         # if patient residency missing use hospital location 
-#         print(f"[DROPPED] Fraction with missing resident municipality code: {100 - len(df.dropna(subset=['CD_MUN'])) / len(df) * 100:.2f} %")
-#         print(f"[DROPPED] Fraction with missing healthcare facility municipality code: {100 - len(df.dropna(subset=['ID_MUNICIP'])) / len(df) * 100:.2f} %")
-#         df['CD_MUN'] = df['CD_MUN'].fillna(df['ID_MUNICIP'])
-#         df = df.dropna(subset=['CD_MUN'])
+        # Location
+        df = df.rename(columns={'ID_MN_RESI': 'CD_MUN'})
+        # if patient residency missing use hospital location 
+        print(f"[DROPPED] Fraction with missing resident municipality code: {100 - len(df.dropna(subset=['CD_MUN'])) / len(df) * 100:.2f} %")
+        print(f"[DROPPED] Fraction with missing healthcare facility municipality code: {100 - len(df.dropna(subset=['ID_MUNICIP'])) / len(df) * 100:.2f} %")
+        df['CD_MUN'] = df['CD_MUN'].fillna(df['ID_MUNICIP'])
+        df = df.dropna(subset=['CD_MUN'])
 
-#         # Salvage the last m*therf*cking digit @!!*@\
-#         df['CD_MUN'] = df['CD_MUN'].astype(int)
-#         valid_codes = list(mun2uf_map.keys())
-#         # Step 1: build lookup dictionary: {six_digit: [seven_digit candidates]}
-#         lookup = {}
-#         for code in valid_codes:
-#             six_digit = code // 10  # drop last digit
-#             lookup.setdefault(six_digit, []).append(code)
-#         # Step 2: map with warnings
-#         no_hits = 0
-#         non_unique_hits = 0
-#         mapped_codes = []
-#         for six_code in df["CD_MUN"]:
-#             candidates = lookup.get(six_code, [])
-#             if len(candidates) == 0:
-#                 no_hits += 1
-#                 #print(f"WARNING: no match for {six_code}")
-#                 mapped_codes.append(None)  # or np.nan
-#             elif len(candidates) == 1:
-#                 mapped_codes.append(candidates[0])
-#             else:
-#                 non_unique_hits += 1
-#                 choice = random.choice(candidates)
-#                 #print(f"WARNING: multiple matches for {six_code} → {candidates}, picked {choice}")
-#                 mapped_codes.append(choice)
-#         df["CD_MUN_7"] = mapped_codes
-#         # Step 3: report fraction of ambiguous matches
-#         fraction_non_unique = non_unique_hits / len(df) 
-#         fraction_no_hits = no_hits / len(df)
-#         print(f"[FYI] Fraction of 6-digit municipality code with non-unique 7-digit matches (picked one at random): {fraction_non_unique:.2%}")
-#         print(f"[DROPPED] Fraction of 6-digit municipality code with no 7-digit matches: {fraction_no_hits:.2%} ({fraction_no_hits*len(df)})")
-#         # Step 4: drop nan and convert to integer
-#         df = df.dropna(subset='CD_MUN_7')
-#         df['CD_MUN'] = df['CD_MUN_7'].astype(int)
+        # Salvage the last m*therf*cking digit @!!*@\
+        df['CD_MUN'] = df['CD_MUN'].astype(int)
+        valid_codes = list(mun2uf_map.keys())
+        # Step 1: build lookup dictionary: {six_digit: [seven_digit candidates]}
+        lookup = {}
+        for code in valid_codes:
+            six_digit = code // 10  # drop last digit
+            lookup.setdefault(six_digit, []).append(code)
+        # Step 2: map with warnings
+        no_hits = 0
+        non_unique_hits = 0
+        mapped_codes = []
+        for six_code in df["CD_MUN"]:
+            candidates = lookup.get(six_code, [])
+            if len(candidates) == 0:
+                no_hits += 1
+                #print(f"WARNING: no match for {six_code}")
+                mapped_codes.append(None)  # or np.nan
+            elif len(candidates) == 1:
+                mapped_codes.append(candidates[0])
+            else:
+                non_unique_hits += 1
+                choice = random.choice(candidates)
+                #print(f"WARNING: multiple matches for {six_code} → {candidates}, picked {choice}")
+                mapped_codes.append(choice)
+        df["CD_MUN_7"] = mapped_codes
+        # Step 3: report fraction of ambiguous matches
+        fraction_non_unique = non_unique_hits / len(df) 
+        fraction_no_hits = no_hits / len(df)
+        print(f"[FYI] Fraction of 6-digit municipality code with non-unique 7-digit matches (picked one at random): {fraction_non_unique:.2%}")
+        print(f"[DROPPED] Fraction of 6-digit municipality code with no 7-digit matches: {fraction_no_hits:.2%} ({fraction_no_hits*len(df)})")
+        # Step 4: drop nan and convert to integer
+        df = df.dropna(subset='CD_MUN_7')
+        df['CD_MUN'] = df['CD_MUN_7'].astype(int)
 
-#         # Analyse lags
-#         # mean = {}
-#         # median = {}
-#         # q25 = {}
-#         # q75 = {}
-#         # q1 = {}
-#         # q99 = {}
-#         # for col in date_columns[1:]:  # Skip the reference column
-#         #     lag = (df[col] - df['DT_NOTIFIC']).dt.total_seconds() / (24 * 3600)  # convert to days
-#         #     mean[col] = lag.mean()
-#         #     median[col] = lag.median()
-#         #     q25[col] = lag.quantile(0.25)
-#         #     q75[col] = lag.quantile(0.75)
-#         #     q1[col] = lag.quantile(0.01)
-#         #     q99[col] = lag.quantile(0.99)
-#         # df = pd.DataFrame({'mean': mean, 'median': median, 'q25': q25, 'q75': q75, 'q1': q1, 'q99': q99})
+        # Analyse lags
+        # mean = {}
+        # median = {}
+        # q25 = {}
+        # q75 = {}
+        # q1 = {}
+        # q99 = {}
+        # for col in date_columns[1:]:  # Skip the reference column
+        #     lag = (df[col] - df['DT_NOTIFIC']).dt.total_seconds() / (24 * 3600)  # convert to days
+        #     mean[col] = lag.mean()
+        #     median[col] = lag.median()
+        #     q25[col] = lag.quantile(0.25)
+        #     q75[col] = lag.quantile(0.75)
+        #     q1[col] = lag.quantile(0.01)
+        #     q99[col] = lag.quantile(0.99)
+        # df = pd.DataFrame({'mean': mean, 'median': median, 'q25': q25, 'q75': q75, 'q1': q1, 'q99': q99})
 
-#         # [SANITY CHECK] fraction with a serotype assigned but a missing outcome 
-#         print(f"[FYI] Fraction with serotype information but missing a classification: {100 - len(df.dropna(subset=serotype_column).dropna(subset=classification_column)) / len(df.dropna(subset=[serotype_column])) * 100:.2f} %")
-#         # drop if missing classification
-#         print(f"[DROPPED] Fraction with a missing classification: {100 - len(df.dropna(subset=[classification_column])) / len(df) * 100:.2f} %")
-#         df = df.dropna(subset=[classification_column])
+        # [SANITY CHECK] fraction with a serotype assigned but a missing outcome 
+        print(f"[FYI] Fraction with serotype information but missing a classification: {100 - len(df.dropna(subset=serotype_column).dropna(subset=classification_column)) / len(df.dropna(subset=[serotype_column])) * 100:.2f} %")
+        # drop if missing classification
+        print(f"[DROPPED] Fraction with a missing classification: {100 - len(df.dropna(subset=[classification_column])) / len(df) * 100:.2f} %")
+        df = df.dropna(subset=[classification_column])
 
-#         # how much of each classification are there
-#         print(f"[FYI] Distribution of classifications (%): \n")
-#         print(df[classification_column].value_counts() / sum(df[classification_column].value_counts()) * 100)
-#         print('\n')
-#         print(f"[DROPPED] undocumented classification '0'")
-#         # drop if classification is "0" (undocumented; only in 1999-2003)
-#         df = df[df[classification_column] != 0]
+        # how much of each classification are there
+        print(f"[FYI] Distribution of classifications (%): \n")
+        print(df[classification_column].value_counts() / sum(df[classification_column].value_counts()) * 100)
+        print('\n')
+        print(f"[DROPPED] undocumented classification '0'")
+        # drop if classification is "0" (undocumented; only in 1999-2003)
+        df = df[df[classification_column] != 0]
 
-#         # fill in discarded
-#         df['discarded'] = df[classification_column].isin([5,]).astype(int)
-#         # fill diagnosis method
-#         print(f"[FYI] Fraction with diagnosis method missing (assigned to NA): {len(df[df[criterion_column].isna()]) / len(df) * 100:.2f} %, of which {len(df[((df[criterion_column].isna()) & (df[classification_column] == 5))]) / len(df) * 100:.2f} % discarded")
-#         print(f"[FYI] Fraction with diagnosis method listed as 'under investigation' (assigned to NA): {len(df[df[criterion_column] == 3]) / len(df) * 100:.2f} %")
-#         df['diagnosis_method'] = pd.Series(2, index=df.index, dtype="Int8")
-#         df.loc[df[criterion_column]==1, 'diagnosis_method'] = 0           # lab
-#         df.loc[df[criterion_column]==2, 'diagnosis_method'] = 1           # clin_epi
-#         df.loc[df[criterion_column]==3, 'diagnosis_method'] = 2           # unknown
+        # fill in discarded
+        df['discarded'] = df[classification_column].isin([5,]).astype(int)
+        # fill diagnosis method
+        print(f"[FYI] Fraction with diagnosis method missing (assigned to NA): {len(df[df[criterion_column].isna()]) / len(df) * 100:.2f} %, of which {len(df[((df[criterion_column].isna()) & (df[classification_column] == 5))]) / len(df) * 100:.2f} % discarded")
+        print(f"[FYI] Fraction with diagnosis method listed as 'under investigation' (assigned to NA): {len(df[df[criterion_column] == 3]) / len(df) * 100:.2f} %")
+        df['diagnosis_method'] = pd.Series(2, index=df.index, dtype="Int8")
+        df.loc[df[criterion_column]==1, 'diagnosis_method'] = 0           # lab
+        df.loc[df[criterion_column]==2, 'diagnosis_method'] = 1           # clin_epi
+        df.loc[df[criterion_column]==3, 'diagnosis_method'] = 2           # unknown
 
-#         # fill in diagnosis (NA if discarded  (5), 'inconclusive' if inconclusive (8))
-#         df['diagnosis'] = pd.Series(None, index=df.index, dtype="Int8")
-#         df.loc[((df[classification_column]==1) | (df[classification_column]==10)), 'diagnosis'] = 0   # dengue
-#         df.loc[((df[classification_column]==2) | (df[classification_column]==11)), 'diagnosis'] = 1   # dengue with alarm
-#         df.loc[((df[classification_column]==3) | (df[classification_column]==4) | (df[classification_column]==12)), 'diagnosis'] = 2 # severe dengue
-#         df.loc[df[classification_column]==8, 'diagnosis'] = 3   # inconclusive
-#         print(f"[FYI] Classification 'inconclusive' (8) assigned diagnosis '3'")
-#         print(f"[FYI] Unique severities when discard==FALSE: {df[df['discarded'] == 0]['diagnosis'].unique()}")
+        # fill in diagnosis (NA if discarded  (5), 'inconclusive' if inconclusive (8))
+        df['diagnosis'] = pd.Series(None, index=df.index, dtype="Int8")
+        df.loc[((df[classification_column]==1) | (df[classification_column]==10)), 'diagnosis'] = 0   # dengue
+        df.loc[((df[classification_column]==2) | (df[classification_column]==11)), 'diagnosis'] = 1   # dengue with alarm
+        df.loc[((df[classification_column]==3) | (df[classification_column]==4) | (df[classification_column]==12)), 'diagnosis'] = 2 # severe dengue
+        df.loc[df[classification_column]==8, 'diagnosis'] = 3   # inconclusive
+        print(f"[FYI] Classification 'inconclusive' (8) assigned diagnosis '3'")
+        print(f"[FYI] Unique severities when discard==FALSE: {df[df['discarded'] == 0]['diagnosis'].unique()}")
 
-#         # extract the hospitalisation column
-#         df['hospitalised'] = False
-#         df.loc[df['HOSPITALIZ']==1, 'hospitalised'] = True
+        # extract the hospitalisation column
+        df['hospitalised'] = False
+        df.loc[df['HOSPITALIZ']==1, 'hospitalised'] = True
 
-#         # Rename ID_MN_RES to CD_MUN
-#         df = df.rename(columns={'ID_MN_RESI': 'CD_MUN'})
+        # Rename ID_MN_RES to CD_MUN
+        df = df.rename(columns={'ID_MN_RESI': 'CD_MUN'})
 
-#         pass
+        pass
     
 
-#     # General conversions 
-#     # >>>>>>>>>>>>>>>>>>>
+    # General conversions 
+    # >>>>>>>>>>>>>>>>>>>
 
-#     # convert to the next saturday
-#     df['date'] = df['date'].apply(next_saturday)
-#     # clean the serotype column
-#     df['serotype'] = df[serotype_column].where(df[serotype_column].isin([1, 2, 3, 4]), pd.NA)
-#     # set minimal data types
-#     df = df.astype({'age': 'Int16', 'serotype': 'Int8', 'CD_MUN': 'Int32'})
+    # convert to the next saturday
+    df['date'] = df['date'].apply(next_saturday)
+    # clean the serotype column
+    df['serotype'] = df[serotype_column].where(df[serotype_column].isin([1, 2, 3, 4]), pd.NA)
+    # set minimal data types
+    df = df.astype({'age': 'Int16', 'serotype': 'Int8', 'CD_MUN': 'Int32'})
     
-#     # Convert linelist data into counts
-#     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    # Convert linelist data into counts
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-#     print("\nCounting the data..")
+    print("\nCounting the data..")
 
-#     group_cols = ["date", "CD_MUN", "age", "diagnosis_method", "diagnosis", "hospitalised"]
+    group_cols = ["date", "CD_MUN", "age", "diagnosis_method", "diagnosis", "hospitalised"]
 
-#     # retain only relevant columns
-#     df = df[["date", "CD_MUN", "age", "diagnosis_method", "diagnosis", "hospitalised", "serotype"]]
+    # retain only relevant columns
+    df = df[["date", "CD_MUN", "age", "diagnosis_method", "diagnosis", "hospitalised", "serotype"]]
 
-#     # convert to polars
-#     df = pl.from_pandas(df)
+    # convert to polars
+    df = pl.from_pandas(df)
     
-#     # sort
-#     df = df.sort(by=group_cols+['serotype',])
+    # sort
+    df = df.sort(by=group_cols+['serotype',])
 
-#     # limit age
-#     n_before = df.height
-#     df = df.filter(pl.col("age").is_between(0, 100))
-#     print(f"[DROPPED] Fraction with 0 <= age <= 100: {df.height / n_before * 100:.2f} %")
+    # limit age
+    n_before = df.height
+    df = df.filter(pl.col("age").is_between(0, 100))
+    print(f"[DROPPED] Fraction with 0 <= age <= 100: {df.height / n_before * 100:.2f} %")
 
-#     # convert dates to month end
-#     df = df.with_columns(pl.col("date").dt.month_end())
+    # convert dates to month end
+    df = df.with_columns(pl.col("date").dt.month_end())
 
-#     # Total counts
-#     total_counts = (
-#         df
-#         .group_by(group_cols)
-#         .len()
-#         .rename({"len": "DENV_total"})
-#     )
+    # Total counts
+    total_counts = (
+        df
+        .group_by(group_cols)
+        .len()
+        .rename({"len": "DENV_total"})
+    )
 
-#     # Serotype counts
-#     serotype_counts = (
-#         df
-#         .filter(pl.col("serotype").is_not_null())
-#         .group_by(group_cols + ["serotype"])
-#         .len()
-#         .pivot(
-#             index=group_cols,
-#             on="serotype",
-#             values="len",
-#         )
-#     )
+    # Serotype counts
+    serotype_counts = (
+        df
+        .filter(pl.col("serotype").is_not_null())
+        .group_by(group_cols + ["serotype"])
+        .len()
+        .pivot(
+            index=group_cols,
+            on="serotype",
+            values="len",
+        )
+    )
 
-#     # ensure all serotype columns exist
-#     for s in [1, 2, 3, 4]:
-#         if str(s) not in serotype_counts.columns:
-#             serotype_counts = serotype_counts.with_columns(
-#                 pl.lit(None).cast(pl.Int32).alias(str(s))
-#             )
+    # ensure all serotype columns exist
+    for s in [1, 2, 3, 4]:
+        if str(s) not in serotype_counts.columns:
+            serotype_counts = serotype_counts.with_columns(
+                pl.lit(None).cast(pl.Int32).alias(str(s))
+            )
 
-#     serotype_counts = serotype_counts.rename({
-#         "1": "DENV_1",
-#         "2": "DENV_2",
-#         "3": "DENV_3",
-#         "4": "DENV_4",
-#     })
+    serotype_counts = serotype_counts.rename({
+        "1": "DENV_1",
+        "2": "DENV_2",
+        "3": "DENV_3",
+        "4": "DENV_4",
+    })
 
-#     # Build Cartesian product
-#     if ((yr == start_year) & (yr == end_year)):
-#         all_months = pl.datetime_range(date(yr,1,31), date(yr,12,31), interval="1mo", eager=True).dt.month_end()
-#     elif yr == start_year:
-#         all_months = pl.datetime_range(date(yr,1,31), date(yr+1,3,1), interval="1mo", eager=True).dt.month_end()
-#     elif yr == end_year:
-#         all_months = pl.datetime_range(date(yr-1,11,30), date(yr,12,31), interval="1mo", eager=True).dt.month_end()
-#     else:
-#         all_months = pl.datetime_range(date(yr-1,11,30), date(yr+1,3,1), interval="1mo", eager=True).dt.month_end()
-#     months = pl.DataFrame({"date": all_months})
+    # Build Cartesian product
+    if ((yr == start_year) & (yr == end_year)):
+        all_months = pl.datetime_range(date(yr,1,31), date(yr,12,31), interval="1mo", eager=True).dt.month_end()
+    elif yr == start_year:
+        all_months = pl.datetime_range(date(yr,1,31), date(yr+1,3,1), interval="1mo", eager=True).dt.month_end()
+    elif yr == end_year:
+        all_months = pl.datetime_range(date(yr-1,11,30), date(yr,12,31), interval="1mo", eager=True).dt.month_end()
+    else:
+        all_months = pl.datetime_range(date(yr-1,11,30), date(yr+1,3,1), interval="1mo", eager=True).dt.month_end()
+    months = pl.DataFrame({"date": all_months})
 
-#     ages = pl.DataFrame({"age": list(range(101))})
+    ages = pl.DataFrame({"age": list(range(101))})
 
-#     all_muni = pl.from_pandas(pd.Series(gpd.read_parquet('../interim/geographic-dataset.parquet')['CD_MUN'].unique(), name='CD_MUN')).to_frame()
+    all_muni = pl.from_pandas(pd.Series(gpd.read_parquet('../interim/geographic-dataset.parquet')['CD_MUN'].unique(), name='CD_MUN')).to_frame()
 
-#     diagnosis_method = pl.DataFrame({"diagnosis_method": [0, 1, 2]})
+    diagnosis_method = pl.DataFrame({"diagnosis_method": [0, 1, 2]})
 
-#     diagnosis = pl.DataFrame({"diagnosis": [0, 1, 2, 3]})
+    diagnosis = pl.DataFrame({"diagnosis": [0, 1, 2, 3]})
 
-#     hospitalised = pl.DataFrame({"hospitalised": [False, True]})
+    hospitalised = pl.DataFrame({"hospitalised": [False, True]})
 
-#     full_df = (
-#         months
-#         .lazy()
-#         .join(ages.lazy(), how="cross")
-#         .join(all_muni.lazy(), how="cross")
-#         .join(diagnosis_method.lazy(), how="cross")
-#         .join(diagnosis.lazy(), how="cross")
-#         .join(hospitalised.lazy(), how="cross")
-#     )
+    full_df = (
+        months
+        .lazy()
+        .join(ages.lazy(), how="cross")
+        .join(all_muni.lazy(), how="cross")
+        .join(diagnosis_method.lazy(), how="cross")
+        .join(diagnosis.lazy(), how="cross")
+        .join(hospitalised.lazy(), how="cross")
+    )
 
-#     # Merge counts
-#     final_df = (
-#         full_df
-#         .join(
-#             total_counts.lazy(),
-#             on=group_cols,
-#             how="left",
-#         )
-#         .join(
-#             serotype_counts.lazy(),
-#             on=group_cols,
-#             how="left",
-#         )
-#         # remove rows without diagnosis
-#         .filter(
-#             pl.col("diagnosis").is_not_null()
-#         )
-#         .sort(group_cols)
-#         .collect(engine="streaming")
-#     )
+    # Merge counts
+    final_df = (
+        full_df
+        .join(
+            total_counts.lazy(),
+            on=group_cols,
+            how="left",
+        )
+        .join(
+            serotype_counts.lazy(),
+            on=group_cols,
+            how="left",
+        )
+        # remove rows without diagnosis
+        .filter(
+            pl.col("diagnosis").is_not_null()
+        )
+        .sort(group_cols)
+        .collect(engine="streaming")
+    )
 
-#     # Save
-#     os.makedirs("../interim/datasus_DENV-linelist/tmp/year/", exist_ok=True)
-#     final_df.write_parquet(f"../interim/datasus_DENV-linelist/tmp/year/{yr}.parquet", compression="zstd")
+    # Save
+    os.makedirs("../interim/datasus_DENV-linelist/tmp/year/", exist_ok=True)
+    final_df.write_parquet(f"../interim/datasus_DENV-linelist/tmp/year/{yr}.parquet", compression="zstd")
 
 
 # Concatenate all counts into one giant dataframe 
@@ -708,11 +708,11 @@ for i, file in enumerate(sorted(input_dir.glob("*.parquet"))):
         .alias("age_group")
         )
     )
-    group_cols = [gc for gc in group_cols if gc != 'age'] + ['age_group',]
+    group_cols_age = [gc for gc in group_cols if gc != 'age'] + ['age_group',]
     
     collapsed = (
         binned
-        .group_by(group_cols)
+        .group_by(group_cols_age)
         .agg(agg_exprs)
         .with_columns([
             pl.when(pl.col(f"{c}_count") == 0)
@@ -722,7 +722,7 @@ for i, file in enumerate(sorted(input_dir.glob("*.parquet"))):
             for c in agg_cols
         ])
         .drop([f"{c}_count" for c in agg_cols])
-        .sort(group_cols)
+        .sort(group_cols_age)
         .select(["date", "CD_MUN", "age_group", "diagnosis_method", "diagnosis", "hospitalised", "DENV_total", "DENV_1", "DENV_2", "DENV_3", "DENV_4"])
     )
 
@@ -746,7 +746,7 @@ df.write_parquet(
 ## Clean up ##
 ##############
 
-#shutil.rmtree('../interim/datasus_DENV-linelist/tmp/')
+shutil.rmtree('../interim/datasus_DENV-linelist/tmp/')
 
 
 #############################
