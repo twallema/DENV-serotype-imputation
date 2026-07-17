@@ -691,7 +691,52 @@ df.write_parquet(
     compression="zstd",
 )
 
-df_muni = df.to_pandas()
+df_muni = df.to_pandas() # to visualisations
+
+
+print(f"\n\t\tDataframe without age or diagnostics..")
+
+input_dir = Path("../interim/datasus_DENV-linelist/tmp/month")
+output_dir = Path("../interim/datasus_DENV-linelist/tmp/month_collapse_age_diagnostics")
+output_dir.mkdir(exist_ok=True)
+
+for i, file in enumerate(sorted(input_dir.glob("*.parquet"))):
+
+    monthly = pl.scan_parquet(file).collect(engine="streaming")
+
+    collapsed = (
+        monthly
+        # no inconclusive cases
+        .filter(pl.col("diagnosis") != "inconclusive")
+        # sum over all diagnosis/diagnosis methods/ outcomes
+        .group_by(["date", "CD_MUN"])
+        .agg(agg_exprs)
+        .with_columns([
+            pl.when(pl.col(f"{c}_count") == 0)
+            .then(None)
+            .otherwise(pl.col(c))
+            .alias(c)
+            for c in agg_cols
+        ])
+        .drop([f"{c}_count" for c in agg_cols])
+        .sort(by=["date", "CD_MUN"])
+        .select(["date", "CD_MUN", "DENV_total", "DENV_1", "DENV_2", "DENV_3", "DENV_4"])
+    )
+
+    collapsed.write_parquet(
+        output_dir / f"{file.name}",
+        compression="zstd",
+    )
+
+lf = pl.scan_parquet("../interim/datasus_DENV-linelist/tmp/month_collapse_age_diagnostics/*.parquet")
+
+df = lf.collect(engine="streaming")
+
+df.write_parquet(
+    "../interim/datasus_DENV-linelist/"
+    f"DENV-{start_year}_{end_year}-month-mun-no_diagnostics.parquet",
+    compression="zstd",
+)
 
 
 print(f"\n\t\tDataframe with age groups..")
