@@ -246,9 +246,6 @@ statistics = statistics.merge(
     how='inner'
 )
 
-# throw out unnecessary columns in the cases file
-cases = cases[['season', 'cluster', 'age_group', 'DENV_total', 'DENV_incidence']]
-
 
 #########################
 ## Make visualisations ##
@@ -558,7 +555,7 @@ for ax, season in zip(axes, seasons):
         )
     )
     tmp = cases[((cases['season'] == season) & (cases['cluster'] == cluster_id))]
-    ax.bar(tmp['age_group'], tmp['DENV_incidence'], alpha=1, color='black')
+    ax.bar(tmp['age_mid'], tmp['DENV_incidence'], alpha=1, color='black')
 
     ax.set_title(f'Season {season}')
     ax.tick_params(axis='x', rotation=90)
