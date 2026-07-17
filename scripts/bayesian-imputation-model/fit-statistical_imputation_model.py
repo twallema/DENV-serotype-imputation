@@ -3,6 +3,7 @@ import arviz
 import argparse
 import pymc as pm
 import numpy as np
+import polars as pl
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
@@ -14,7 +15,8 @@ pytensor.config.cxx = '/usr/bin/clang++'
 pytensor.config.on_opt_error = "ignore"
 
 # analysis startdate
-startdate = datetime(1900,1,1)
+startdate = datetime(1999,1,1)
+assert startdate.year >= 1999, "earliest start_year is 1999."
 
 # helper function for argument parsing
 def str_to_bool(value):
@@ -75,7 +77,32 @@ W = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/
 # ~~~~~~~~~~~~~~
 
 # Fetch incidence data
-df = pd.read_csv(os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv'), parse_dates=['date'])
+agg_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
+agg_exprs = []
+for c in agg_cols: 
+    agg_exprs.extend([
+        pl.col(c).sum().alias(c),
+        pl.col(c).count().alias(f"{c}_count"),  
+    ])
+
+df = (
+    pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun.parquet")
+    # no inconclusive cases
+    .filter(pl.col("diagnosis") != "inconclusive")
+    # groupby-sum out diagnosis/outcome
+    .group_by(["date", "CD_MUN"])
+    .agg(agg_exprs)
+            .with_columns([
+            pl.when(pl.col(f"{c}_count") == 0)
+            .then(None)
+            .otherwise(pl.col(c))
+            .alias(c)
+            for c in agg_cols
+        ])
+    .drop([f"{c}_count" for c in agg_cols])
+    .sort(["date", "CD_MUN"])
+    .collect(engine="streaming")
+).to_pandas()
 
 # 1. Check if all columns are present
 sero_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4"]
@@ -244,11 +271,12 @@ with pm.Model() as model:
             return new_kappa, new_vals
         
         # perform scanning
-        [_, sequence_vals], _ = pytensor.scan(
+        [_, sequence_vals] = pytensor.scan(
             fn=step,
             sequences=kappa_sequence,
             outputs_info=[kappa_init, AR_init],
             non_sequences=[rho, psi],
+            return_updates=False
         )
         return sequence_vals[:, 0, :, :] # return states
 
