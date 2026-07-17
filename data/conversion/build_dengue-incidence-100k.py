@@ -23,32 +23,7 @@ for region, name in zip(regions, names):
     geography = gpd.read_parquet("../../data/interim/geographic-dataset.parquet")
 
     # case data
-    agg_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
-    agg_exprs = []
-    for c in agg_cols: 
-        agg_exprs.extend([
-            pl.col(c).sum().alias(c),
-            pl.col(c).count().alias(f"{c}_count"),  
-        ])
-
-    denv = (
-        pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun.parquet")
-        # no inconclusive cases
-        .filter(pl.col("diagnosis") != "inconclusive")
-        # groupby-sum out diagnosis/outcome
-        .group_by(["date", "CD_MUN"])
-        .agg(agg_exprs)
-                .with_columns([
-                pl.when(pl.col(f"{c}_count") == 0)
-                .then(None)
-                .otherwise(pl.col(c))
-                .alias(c)
-                for c in agg_cols
-            ])
-        .drop([f"{c}_count" for c in agg_cols])
-        .sort(["date", "CD_MUN"])
-        .collect(engine="streaming")
-    ).to_pandas()
+    denv = pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet").collect().to_pandas()
 
     # Geography
     # >>>>>>>>>
