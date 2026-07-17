@@ -237,5 +237,4 @@ for ax, season in zip(axes, seasons):
 
 plt.tight_layout()
 plt.savefig('age_distribution.png', dpi=200)
-plt.show()
 plt.close()
