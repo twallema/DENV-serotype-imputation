@@ -2,6 +2,7 @@ import os
 import arviz
 import argparse
 import numpy as np
+import polars as pl
 import pandas as pd
 import geopandas as gpd
 from datetime import datetime
@@ -30,8 +31,6 @@ args = parser.parse_args()
 # assign to desired variables
 spatial_aggregation = args.spatial_aggregation
 ID = args.ID
-#p = args.p
-#q = args.q
 
 # pipeline output folder
 abs_dir = os.path.dirname(__file__) # make sure all referenced paths are relative to the lcoation of this file and not the terminal's pwd
@@ -82,7 +81,7 @@ demo = demo.groupby(['cluster', 'year'], as_index=False)['population'].sum()
 demo = demo[demo['year'] == start_year]
 
 # Fetch incidence data
-df = pd.read_csv(os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv'), parse_dates=['date'])
+df = pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet").collect().to_pandas()
 
 # 1. Check if all columns are present
 sero_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4"]

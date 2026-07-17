@@ -14,7 +14,9 @@ The following public data are "broken" (but we have a confidential working copy)
 
 + `composite_dataset/composite_2008.csv`
 
-All other publicy available data were downloaded from datasus (21-05-2025): https://datasus.saude.gov.br/transferencia-de-arquivos/#
+All other publicy available data were downloaded from datasus (21-05-2025): https://datasus.saude.gov.br/transferencia-de-arquivos/# [Checked you can no longer download from this website]
+
+Instead download from: https://dadosabertos.saude.gov.br/dataset/arboviroses-dengue
 
 **To use the script `data/conversion/datasus_DENV-linelist_conversion.py`, copy the files from the Bento lab Box to this folder.**
 
