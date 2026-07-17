@@ -389,7 +389,7 @@ for fn,yr in zip(filenames, extracted_years):
         df = df.rename(columns={'ID_MN_RESI': 'CD_MUN'})
 
         pass
-    
+
 
     # General conversions 
     # >>>>>>>>>>>>>>>>>>>
@@ -400,7 +400,7 @@ for fn,yr in zip(filenames, extracted_years):
     df['serotype'] = df[serotype_column].where(df[serotype_column].isin([1, 2, 3, 4]), pd.NA)
     # set minimal data types
     df = df.astype({'age': 'Int16', 'serotype': 'Int8', 'CD_MUN': 'Int32'})
-    
+
     # Convert linelist data into counts
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -413,7 +413,7 @@ for fn,yr in zip(filenames, extracted_years):
 
     # convert to polars
     df = pl.from_pandas(df)
-    
+
     # sort
     df = df.sort(by=group_cols+['serotype',])
 
@@ -580,7 +580,7 @@ for yr in range(start_year, end_year + 1):
     # put all months into carry
     # merge with any months already there
     for (month,), month_df in monthly.items():
-        
+    
         if month in carry:
             carry[month] = (
                 pl.concat([carry[month], month_df])
@@ -625,22 +625,32 @@ for month in sorted(carry):
         compression="zstd",
     )
 
-print(f"\n\tMerging into one dataframe..")
 
-lf = pl.scan_parquet("../interim/datasus_DENV-linelist/tmp/month/*.parquet")
+print(f"\n\tMerging into a yearly master dataframe..")
 
-df = lf.collect(engine="streaming")
+input_dir = Path("../interim/datasus_DENV-linelist/tmp/month")
+output_dir = Path("../interim/datasus_DENV-linelist/master")
+output_dir.mkdir(exist_ok=True)
 
-df.write_parquet(
-    "../interim/datasus_DENV-linelist/"
-    f"DENV-{start_year}_{end_year}-month-mun-age.parquet",
-    compression="zstd",
-)
+for yr in range(start_year, end_year + 1):
+
+    files = sorted(input_dir.glob(f"{yr}-*.parquet"))
+
+    if not files:
+        continue
+
+    (
+        pl.scan_parquet([str(f) for f in files])
+        .sink_parquet(
+            output_dir / f"DENV-{yr}-month-mun-age.parquet",
+            compression="zstd",
+        )
+    )
 
 
-print(f"\nMaking derivative products..")
+print(f"\n\tMaking derivative products..")
 
-print(f"\n\tDataframe without age..\n")
+print(f"\n\t\tDataframe without age..")
 
 input_dir = Path("../interim/datasus_DENV-linelist/tmp/month")
 output_dir = Path("../interim/datasus_DENV-linelist/tmp/month_collapse_age")
@@ -648,8 +658,6 @@ output_dir.mkdir(exist_ok=True)
 
 for i, file in enumerate(sorted(input_dir.glob("*.parquet"))):
 
-    print(f"\t\tProcessing {file.name}")
-    
     monthly = pl.scan_parquet(file).collect(engine="streaming")
 
     collapsed = (
@@ -686,7 +694,7 @@ df.write_parquet(
 df_muni = df.to_pandas()
 
 
-print(f"\n\tDataframe with age groups..")
+print(f"\n\t\tDataframe with age groups..")
 
 breaks = [1, 5, 10, 15, 20, 25, 35, 45, 65]
 labels = ["[00-01(", "[01-05(", "[05-10(", "[10-15", "[15-20(", "[20-25(", "[25-35(", "[35-45", "[45-65(", "[65-100("]
@@ -697,8 +705,6 @@ output_dir.mkdir(exist_ok=True)
 
 for i, file in enumerate(sorted(input_dir.glob("*.parquet"))):
 
-    print(f"\t\tProcessing {file.name}")
-    
     monthly = pl.scan_parquet(file).collect(engine="streaming")
 
     binned = (
@@ -740,7 +746,6 @@ df.write_parquet(
     f"DENV-{start_year}_{end_year}-month-mun-age_group.parquet",
     compression="zstd",
 )
-
 
 ##############
 ## Clean up ##
