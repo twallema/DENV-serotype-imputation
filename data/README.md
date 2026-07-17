@@ -1,4 +1,4 @@
-# Cornell-hierarchDENV
+# DENV-serotype-imputation
 
 Here we list a description of all datasets, raw datasets are unaltered original datasets, while interim datasets are obtained by converting raw datasets using the scripts in the conversion folder.
 
@@ -37,6 +37,7 @@ Downloaded using the instructions under '2 - Using FTPWeb' on https://sprint.mos
 #### IBGE Census 
 
 + `tabela200-2000-raw.csv`: Population by 5 year age groups and municipality from the 2000 or 2010 census (5566). Retrieved from: https://sidra.ibge.gov.br/tabela/200
+
 + `tabela200-2000-format.csv`: Formatted version of `tabela200-2000-raw.csv`. Removed total population column. Removed first 6 rows. Removed last 8 rows. Formatted age groups. Retrieved from: https://sidra.ibge.gov.br/tabela/200
 
 + `tabela9514-2022-raw.csv`: Population by 5 year age groups and municipality from the 2022 census (5570). Retrieved from: https://sidra.ibge.gov.br/tabela/200
@@ -82,13 +83,13 @@ These data are partly confidential and can be found on the Bento lab box.
 
 ### Datasus DENV linelist dataset
 
-#### UF
++ `DENV-1999_2026-month-mun.parquet`: Monthly (indexed month-end) dengue cases ('DENV_total') and serotyped cases ('DENV_x') per Brazilian municipality, diagnosis (dengue, dengue with alarm signals, severe dengue, inconclusive), diagnosis method (lab, clinical/epidemiological, unknown) and hospitalisation (False/True). Generated using `DENV_datasus_conversion.py`.
 
-+ `DENV-serotypes_1996-2025_weekly/monthly_uf.csv`: Weekly or monthly total confirmed (not discarded) DENV cases at the federative unit level, as well as number of serotyped cases per DENV serotype. Generated using `DENV_datasus_conversion.py`. 
++ `DENV-1999_2026-month-mun-age_group.parquet`: Monthly (indexed month-end) dengue cases ('DENV_total') and serotyped cases ('DENV_x') per Brazilian municipality, age group, diagnosis (dengue, dengue with alarm signals, severe dengue, inconclusive), diagnosis method (lab, clinical/epidemiological, unknown) and hospitalisation (False/True). Generated using `DENV_datasus_conversion.py`. 
 
-#### Muncipality
+#### Master
 
-+ `DENV-serotypes_1996-2025_weekly/monthly_mun.csv`: Weekly or monthly total confirmed (not discarded) DENV cases at the municipality level, as well as number of serotyped cases per DENV serotype. Generated using `DENV_datasus_conversion.py`. 
++ `DENV-XXXX-month-mun-age_group.parquet`: Monthly (indexed month-end) dengue cases ('DENV_total') and serotyped cases ('DENV_x') per Brazilian municipality, year of age, diagnosis (dengue, dengue with alarm signals, severe dengue, inconclusive), diagnosis method (lab, clinical/epidemiological, unknown) and hospitalisation (False/True). Generated using `DENV_datasus_conversion.py`. 
 
 ### IBGE population
 

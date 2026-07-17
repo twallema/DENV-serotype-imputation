@@ -4,6 +4,7 @@ import arviz
 import argparse
 import pymc as pm
 import numpy as np
+import polars as pl
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
@@ -18,7 +19,7 @@ pytensor.config.on_opt_error = "ignore"
 start_year = 2000
 start_month = 9
 end_year = 2016
-assert start_year >= 1996, "earliest start_year is 1996."
+assert start_year >= 1999, "earliest start_year is 1999."
 
 # helper function for argument parsing
 def str_to_bool(value):
@@ -95,7 +96,7 @@ W = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/
 # ~~~~~~~~~~~~~~
 
 # Fetch incidence data
-df = pd.read_csv(os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv'), parse_dates=['date'])
+df = pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet").collect().to_pandas()
 
 # 1. Check if all columns are present
 sero_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4"]
@@ -324,6 +325,7 @@ D = pt.constant(D)
 # https://pytensor.readthedocs.io/en/latest/library/scan.html 
 # https://gist.github.com/ricardoV94/a49b2cc1cf0f32a5f6dc31d6856ccb63#file-pymc_timeseries_ma-ipynb
 # https://becarioprecario.bitbucket.io/spde-gitbook/ch-intro.html
+
 
 ###############################
 ## Bayesian imputation model ##
@@ -612,7 +614,7 @@ with pm.Model() as model:
     rho_ar_beta = pm.Beta("rho_ar_beta", alpha=1, beta=3)                 # persistence
     sigma_ar_beta = pm.HalfNormal("sigma_ar_beta", sigma=1/10)             # freedom
     eps_raw = pm.Normal("eps_raw", mu=0, sigma=1, shape=(n_months, n_clusters))
-    u_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_raw[1:], outputs_info=pt.zeros(n_clusters), non_sequences=[rho_ar_beta, sigma_ar_beta])
+    u_seq = pytensor.scan(fn=ar1_step, sequences=eps_raw[1:], outputs_info=pt.zeros(n_clusters), non_sequences=[rho_ar_beta, sigma_ar_beta], return_updates=False)
     u = pt.concatenate([ pt.zeros(n_clusters)[None, :], u_seq], axis=0)
     #### Combine
     beta_t = pm.Deterministic("beta_t", pt.exp(mu_beta[:, None] + season + u.T).T) #+ u.T
@@ -621,7 +623,7 @@ with pm.Model() as model:
     # Integrate transmission model (Euler's method; dt = 1 month; 5 steps per month
     # -----------------------------------------------------------------------------
 
-    (S, I, P, Delta_I_hom, Delta_I_het, lambda_t), _ = pytensor.scan(
+    (S, I, P, Delta_I_hom, Delta_I_het, lambda_t) = pytensor.scan(
         fn=step,
         sequences=[beta_t,
                    pt.as_tensor_variable(births),
@@ -634,7 +636,8 @@ with pm.Model() as model:
         non_sequences=[
             C, W, H_het, H_hom, L, K_het, K_hom,
             gamma, omega, birth_vec
-        ]
+        ],
+        return_updates=False
     )
 
     # ---------------------------

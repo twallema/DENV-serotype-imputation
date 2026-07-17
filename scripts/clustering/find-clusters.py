@@ -1,5 +1,6 @@
 import io, sys, os
 import numpy as np
+import polars as pl
 import pandas as pd
 import geopandas as gpd
 from shapely import Point
@@ -122,8 +123,7 @@ def build_co_association_matrix(regions, clusters):
 geography = gpd.read_parquet(os.path.join(abs_dir, "../../data/interim/geographic-dataset.parquet"))
 
 # Load case data
-denv = pd.read_csv(os.path.join(abs_dir,'../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv'))
-denv['date'] = pd.to_datetime(denv['date'])
+denv = pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet").collect().to_pandas()
 
 # Load cases per 100K data
 denv_100k = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DENV_per_100K/DENV_per_100k_{spatial_aggregation}.csv'))

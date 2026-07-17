@@ -173,9 +173,8 @@ dmypy.json
 ## raw linelist data
 data/raw/datasus_DENV-linelist/composite_dataset/composite_*
 ## municipality-level interim linelist data
-data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_weekly_mun.csv
-data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv
-data/interim/datasus_DENV-linelist/mun/DENV_total_age_1999-2025_monthly_mun.csv
+data/interim/datasus_DENV-linelist/master
+data/interim/datasus_DENV-linelist/figs
 ## all simultion results
 data/interim/pipeline_output
 ## all shapefiles

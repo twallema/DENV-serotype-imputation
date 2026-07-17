@@ -1,5 +1,6 @@
 
 import pandas as pd
+import polars as pl
 import geopandas as gpd
 
 # Spatial aggregation levels
@@ -22,7 +23,7 @@ for region, name in zip(regions, names):
     geography = gpd.read_parquet("../../data/interim/geographic-dataset.parquet")
 
     # case data
-    denv = pd.read_csv('../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv', parse_dates=True)
+    denv = pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet").collect().to_pandas()
 
     # Geography
     # >>>>>>>>>
