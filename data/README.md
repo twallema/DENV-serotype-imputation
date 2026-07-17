@@ -91,7 +91,7 @@ These data are partly confidential and can be found on the Bento lab box.
 
 + `DENV-XXXX-month-mun-age_group.parquet`: Monthly (indexed month-end) dengue cases ('DENV_total') and serotyped cases ('DENV_x') per Brazilian municipality, year of age, diagnosis (dengue, dengue with alarm signals, severe dengue, inconclusive), diagnosis method (lab, clinical/epidemiological, unknown) and hospitalisation (False/True). Generated using `DENV_datasus_conversion.py`. 
 
-### IBGE population
+### Population
 
 + `IBGE_births-deaths_uf.csv`: Contains the estimated births, deaths and population of Brazil's federative units from 2000-2070. Extracted from `projecoes_2024_tab4_indicadores.xlsx` using MS Excel.
 
