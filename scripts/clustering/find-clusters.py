@@ -1,5 +1,6 @@
 import io, sys, os
 import numpy as np
+import polars as pl
 import pandas as pd
 import geopandas as gpd
 from shapely import Point
@@ -122,8 +123,32 @@ def build_co_association_matrix(regions, clusters):
 geography = gpd.read_parquet(os.path.join(abs_dir, "../../data/interim/geographic-dataset.parquet"))
 
 # Load case data
-denv = pd.read_csv(os.path.join(abs_dir,'../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv'))
-denv['date'] = pd.to_datetime(denv['date'])
+agg_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
+agg_exprs = []
+for c in agg_cols: 
+    agg_exprs.extend([
+        pl.col(c).sum().alias(c),
+        pl.col(c).count().alias(f"{c}_count"),  
+    ])
+
+denv = (
+    pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun.parquet")
+    # no inconclusive cases
+    .filter(pl.col("diagnosis") != "inconclusive")
+    # groupby-sum out diagnosis/outcome
+    .group_by(["date", "CD_MUN"])
+    .agg(agg_exprs)
+            .with_columns([
+            pl.when(pl.col(f"{c}_count") == 0)
+            .then(None)
+            .otherwise(pl.col(c))
+            .alias(c)
+            for c in agg_cols
+        ])
+    .drop([f"{c}_count" for c in agg_cols])
+    .sort(["date", "CD_MUN"])
+    .collect(engine="streaming")
+).to_pandas()
 
 # Load cases per 100K data
 denv_100k = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DENV_per_100K/DENV_per_100k_{spatial_aggregation}.csv'))
