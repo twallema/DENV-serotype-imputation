@@ -1,12 +1,38 @@
 import os
 import numpy as np
 import pandas as pd
+import polars as pl
 import matplotlib.pyplot as plt
 
 abs_dir = os.path.dirname(__file__)
 
-# load age-municipality-month dataset
-cases = pd.read_csv(os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/mun/DENV_total_age_1999-2025_monthly_mun.csv'))
+cluster_id = 11
+
+
+###############
+## Load data ##
+###############
+
+# load the case data and bin into five year age groups
+breaks = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95]
+labels = ["[00-05(", "[05-10(", "[10-15(", "[15-20(", "[20-25(", "[25-30(", "[30-35(", "[35-40(", "[40-45(", "[45-50(", "[50-55(", "[55-60(", "[60-65(", "[65-70(", "[70-75(", "[75-80(", "[80-85(", "[85-90(", "[90-95(", "[95-100("]
+
+cases = (
+    pl.scan_parquet("../../data/interim/datasus_DENV-linelist/master/DENV-*")
+    # groupby-sum out diagnosis/outcome
+    .group_by(["date", "CD_MUN", "age"])
+    .agg(pl.col("DENV_total").sum().alias("DENV_total"))
+    .sort(["date", "CD_MUN", "age"])
+    # bin it in age groups
+    .with_columns(pl.col("age")
+        .cut(breaks=breaks, labels=labels, left_closed=True)
+        .alias("age_group")
+        )
+    .group_by(["date", "CD_MUN", "age_group"])
+    .agg(pl.col("DENV_total").sum().alias("DENV_total"))
+    .sort(["date", "CD_MUN", "age_group"])
+    .collect(engine="streaming")
+).to_pandas()
 
 # load the age-municipality year demographic data
 demo = pd.read_csv(os.path.join(abs_dir, '../../data/interim/IBGE_population/municipality-age_population_2000-2022.csv'))
@@ -14,6 +40,11 @@ demo = pd.read_csv(os.path.join(abs_dir, '../../data/interim/IBGE_population/mun
 # load clusters
 clusters = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/large_clusters/clusters/clusters_rgint.csv'))
 region = clusters.columns.to_list()[0]
+
+
+#################
+## Conversions ##
+#################
 
 # convert clusters to municipalities (really need to omit this necessity)
 mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
@@ -131,8 +162,15 @@ statistics = statistics.merge(
     how='left'
 )
 
+# throw out unnecessary columns in the cases file
+cases = cases[['season', 'cluster', 'age_group', 'DENV_total', 'DENV_incidence']]
+
+
+####################
+## Visualisations ##
+####################
+
 # visualise the evolution of the medians over time
-cluster_id = 11
 df_c = statistics[statistics['cluster'] == cluster_id].copy()
 df_c['season_start'] = df_c['season'].str[:4].astype(int)
 df_c = df_c.sort_values('season_start')
