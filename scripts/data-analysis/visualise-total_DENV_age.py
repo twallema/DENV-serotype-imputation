@@ -2,11 +2,14 @@ import os
 import numpy as np
 import pandas as pd
 import polars as pl
+import seaborn as sns
 import matplotlib.pyplot as plt
 
 abs_dir = os.path.dirname(__file__)
 
 cluster_id = 11
+start_month_season = 9
+desired_age_groups = pd.IntervalIndex.from_tuples([(0, 5),(5, 15),(15, 25),(25, 45),(45, 65),(65, 120)], closed='left')
 
 
 ###############
@@ -84,6 +87,7 @@ year = cases['date'].dt.year
 month = cases['date'].dt.month
 season_start = year.where(month >= start_month_season, year - 1)
 cases['season'] = season_start.astype(str) + '-' + (season_start + 1).astype(str)
+
 
 #################################
 ## Compute relevant quantities ##
@@ -245,10 +249,10 @@ statistics = statistics.merge(
 # throw out unnecessary columns in the cases file
 cases = cases[['season', 'cluster', 'age_group', 'DENV_total', 'DENV_incidence']]
 
+
 #########################
 ## Make visualisations ##
 #########################
-
 
 # Timeseries of relative incidence anomaly
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
