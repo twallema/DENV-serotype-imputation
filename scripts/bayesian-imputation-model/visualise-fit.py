@@ -8,6 +8,9 @@ import geopandas as gpd
 from datetime import datetime
 import matplotlib.pyplot as plt
 
+# included clusters
+included_clusters = [11, 12, 13, 16]
+
 # analysis startdate
 start_year = 2000
 start_month = 9
@@ -152,7 +155,7 @@ df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
 
 # only do first X clusters
-df = df[df['cluster'].isin([11, 12, 13, 16])]
+df = df[df['cluster'].isin(included_clusters)]
 
 # 9. Build PyMC arrays
 # --- For Multinomial model (subtypes, only when typed) ---

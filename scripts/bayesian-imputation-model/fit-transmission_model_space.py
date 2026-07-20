@@ -15,6 +15,9 @@ import pytensor.tensor as pt
 pytensor.config.cxx = '/usr/bin/clang++'
 pytensor.config.on_opt_error = "ignore"
 
+# included clusters
+included_clusters = [11, 12, 13, 16]
+
 # analysis startdate
 start_year = 2000
 start_month = 9
@@ -152,7 +155,7 @@ df['delta'] = df['delta'].where(df['N_typed'] > 0, np.nan) # When N_typed == 0, 
 df["delta"] = df["delta"].clip(lower=1e-12, upper=1 - 1e-12)
 
 # only do first X clusters
-df = df[df['cluster'].isin([11, 12, 13, 16])]
+df = df[df['cluster'].isin(included_clusters)]
 
 # 3. Take only from start_year to end_year
 df_alldates = df.copy()
@@ -185,7 +188,7 @@ df_expanded["death_rate"] = df_expanded["deaths"] / df_expanded["population"]
 births = df_expanded.pivot(index="date", columns="cluster", values="births").to_numpy().astype(int) # (n_months, n_clusters)
 death_rate = df_expanded.pivot(index="date", columns="cluster", values="death_rate").to_numpy() # (n_months, n_clusters)
 # Initial demography
-demo = demo[demo['cluster'].isin([11, 12, 13, 16])]['population'].values 
+demo = demo[demo['cluster'].isin(included_clusters)]['population'].values 
 
 # --- Indices ---
 cluster_idx = df["cluster"].to_numpy().astype(int)
@@ -464,8 +467,8 @@ def build_initial_susceptibles(demo, f_P, pi_d, pi_mono2):
         shape (3,)
         dirichlet over degree of infection: [naive, mono, double]
 
-    pi_mono12 : float
-        splitting mono across DENV-1 DENV-2 [mono_1, mono_2]
+    pi_mono2 : float
+        fraction of mono infected by DENV-2
 
     Returns
     -------
