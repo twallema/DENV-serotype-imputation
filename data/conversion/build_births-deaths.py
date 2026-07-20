@@ -5,6 +5,7 @@ This scripts converts the raw datasus births and deaths data
 
 import random
 import numpy as np
+import polars as pl
 import pandas as pd
 import geopandas as gpd
 
@@ -12,6 +13,9 @@ for bd in ['births', 'deaths']:
 
     # load births and deaths
     df = pd.read_csv(f'../raw/demographics/{bd}_2000-2024_clean.csv')
+    
+    # load demography
+    pop = pl.scan_parquet('../../data/interim/demographics/population_mun-age_1999-2026.parquet').group_by([ "CD_MUN", "year"]).agg(pl.col("population").sum().alias("population")).sort([ "CD_MUN", "year"]).collect().to_pandas()
 
     # load area code mapping
     mun2uf_map = gpd.read_parquet('../interim/geographic-dataset.parquet')[['CD_UF', 'CD_MUN']].drop_duplicates().set_index('CD_MUN')['CD_UF'].to_dict()
@@ -124,7 +128,11 @@ for bd in ['births', 'deaths']:
         .astype({"year": int})
         .set_index(["CD_MUN", "year"])
         .sort_index()
+        .reset_index()
     )
 
+    # merge population
+    df = df.merge(pop, on=['CD_MUN','year'], how='left')
+
     # save result
-    df.to_csv(f'../interim/demographics/{bd}_mun_1999-2026.csv', index=True)
+    df.to_csv(f'../interim/demographics/{bd}_mun_1999-2026.csv', index=False)
