@@ -27,7 +27,7 @@ def str_to_bool(value):
     return value.lower() in ["true", "1", "yes"]
 
 # arguments determine the model + data combo used to forecast
-# How to run: python fit-model.py -ID test -p 2 -distance_matrix False
+# How to run: python fit-model.py -ID large_clusters -spatial_aggregation rgint
 parser = argparse.ArgumentParser()
 parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
@@ -237,7 +237,7 @@ unique_dates = np.sort(df["date"].unique())
 years = pd.DatetimeIndex(unique_dates).year
 intro_mask = np.ones((len(unique_dates), 4))
 intro_mask[:, 3] = (years >= 2008).astype(int)
-intro_mask[:, 2] = (years >= 200).astype(int)
+intro_mask[:, 2] = (years >= 2001).astype(int)
 
 # Load in the transmission model state mappings
 ## susceptibles
@@ -371,7 +371,7 @@ def rk4_step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_pe
         beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t,
         f, f_per_I, S_t, I_t, P_t,
         C, W, H_het, H_hom, L, K_het, K_hom,
-        gamma, omega, birth_vec, dt=None  # dt not used inside substep now
+        gamma, omega, birth_vec  # dt not used inside substep now
     )
     
     # k2: derivatives at midpoint using k1
@@ -382,7 +382,7 @@ def rk4_step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_pe
         I_t + 0.5*dt*dI1,
         P_t + 0.5*dt*dP1,
         C, W, H_het, H_hom, L, K_het, K_hom,
-        gamma, omega, birth_vec, dt=None
+        gamma, omega, birth_vec
     )
     
     # k3: derivatives at midpoint using k2
@@ -393,7 +393,7 @@ def rk4_step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_pe
         I_t + 0.5*dt*dI2,
         P_t + 0.5*dt*dP2,
         C, W, H_het, H_hom, L, K_het, K_hom,
-        gamma, omega, birth_vec, dt=None
+        gamma, omega, birth_vec
     )
     
     # k4: derivatives at end using k3
@@ -404,7 +404,7 @@ def rk4_step(beta_t, births_t, deaths_t, intro_mask_t, estimated_prop_t, f, f_pe
         I_t + dt*dI3,
         P_t + dt*dP3,
         C, W, H_het, H_hom, L, K_het, K_hom,
-        gamma, omega, birth_vec, dt=None
+        gamma, omega, birth_vec
     )
     
     # RK4 is a weighted average
@@ -566,7 +566,7 @@ with pm.Model() as model:
     rho_f1 = pm.Beta("rho_f1", alpha=3, beta=3)
     sigma_f1 = pm.HalfNormal("sigma_f1", sigma=1/3)
     eps_f1 = pm.Normal("eps_f1", 0, 1, shape=n_years+1)
-    f1_logit_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_f1[1:], outputs_info=pt.zeros(()), non_sequences=[rho_f1, sigma_f1])
+    f1_logit_seq = pytensor.scan(fn=ar1_step, sequences=eps_f1[1:], outputs_info=pt.zeros(()), non_sequences=[rho_f1, sigma_f1], return_updates=False)
     f1_logit = pm.math.logit(mu_f1) + f1_logit_seq
     f1_t = pm.math.sigmoid(f1_logit[year_idx[::n_clusters]])
     #### DENV-2
@@ -574,7 +574,7 @@ with pm.Model() as model:
     rho_f2 = pm.Beta("rho_f2", alpha=3, beta=3)
     sigma_f2 = pm.HalfNormal("sigma_f2", sigma=1/3)
     eps_f2 = pm.Normal("eps_f2", 0, 1, shape=n_years+1)
-    f2_logit_seq, _ = pytensor.scan(fn=ar1_step, sequences=eps_f2[1:], outputs_info=pt.zeros(()), non_sequences=[rho_f2, sigma_f2])
+    f2_logit_seq = pytensor.scan(fn=ar1_step, sequences=eps_f2[1:], outputs_info=pt.zeros(()), non_sequences=[rho_f2, sigma_f2], return_updates=False)
     f2_logit = pm.math.logit(mu_f2) + f2_logit_seq
     f2_t = pm.math.sigmoid(f2_logit[year_idx[::n_clusters]])
     ## time-independent for DENV-3
@@ -729,9 +729,9 @@ with pm.Model() as model:
 #######################
 
 # NUTS
-draws=500
+draws=50
 with model:
-    trace = pm.sample(draws, tune=500, target_accept=0.8,
+    trace = pm.sample(draws, tune=50, target_accept=0.8,
                      chains=chains, cores=chains, init='adapt_diag', progressbar=True,
                      initvals=chains*[{'f_P': 0.25, 'f_P2': 0.75, 'pi_d': pt.as_tensor([0.1, 0.2, 0.7]), 'pi_mono2': 0.75,
                                        'omega': 24, 'mu_f1': 0.8, 'mu_f2': 0.8, 'f3': 0.5, 'kappa0_logit': pm.math.logit(0.1),
