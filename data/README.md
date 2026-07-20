@@ -30,17 +30,7 @@ Downloaded using the instructions under '2 - Using FTPWeb' on https://sprint.mos
 
 + `environ_vars.csv`: Environmental characteristics of the municipalities (columns 'koppen' and 'biome').
 
-### Population
-
-#### IBGE Census 
-
-+ `tabela200-2000-raw.csv`: Population by 5 year age groups and municipality from the 2000 or 2010 census (5566). Retrieved from: https://sidra.ibge.gov.br/tabela/200
-
-+ `tabela200-2000-format.csv`: Formatted version of `tabela200-2000-raw.csv`. Removed total population column. Removed first 6 rows. Removed last 8 rows. Formatted age groups. Retrieved from: https://sidra.ibge.gov.br/tabela/200
-
-+ `tabela9514-2022-raw.csv`: Population by 5 year age groups and municipality from the 2022 census (5570). Retrieved from: https://sidra.ibge.gov.br/tabela/200
-
-### Datasus
+### Demographics
 
 + `births_2000-2024_clean.csv`: Live births per municipality from 2000-2024. Retrieved from: http://tabnet.datasus.gov.br/cgi/deftohtm.exe?sinasc/cnv/nvbr.def. Replaced seperator ";" with ",". Removed header and footer. Renamed column header "Municipio".
 
@@ -90,11 +80,13 @@ These data are partly confidential and can be found on the Bento lab box.
 
 + `DENV-XXXX-month-mun-age_group.parquet`: Monthly (indexed month-end) dengue cases ('DENV_total') and serotyped cases ('DENV_x') per Brazilian municipality, year of age, diagnosis (dengue, dengue with alarm signals, severe dengue, inconclusive), diagnosis method (lab, clinical/epidemiological, unknown) and hospitalisation (False/True). Generated using `DENV_datasus_conversion.py`. 
 
-### Population
+### Demographics
 
-+ `births_mun_1999-2025.csv`: Made from `~/data/raw/population/datasus/births_2000-2024_clean.csv` using `build_births-deaths.py`.
++ `births_mun_1999-2025.csv`: Made from `~/data/raw/demographics/births_2000-2024_clean.csv` using `build_births-deaths.py`.
 
-+ `deaths_mun_1999-2025.csv`: Made from `~/data/raw/population/datasus/deaths_2000-2024_clean.csv` using `build_births-deaths.py`.
++ `deaths_mun_1999-2025.csv`: Made from `~/data/raw/demographics/deaths_2000-2024_clean.csv` using `build_births-deaths.py`.
+
++ `population_mun-age_1999-2025.parquet`: Made from `~/data/raw/demographics/population/pop_age_XXXX_clean.csv` using `build_population-by-age_datasus.py`.
 
 ### DTW-MDS-embeddings
 

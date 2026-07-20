@@ -11,7 +11,7 @@ import geopandas as gpd
 for bd in ['births', 'deaths']:
 
     # load births and deaths
-    df = pd.read_csv(f'../raw/population/datasus/{bd}_2000-2024_clean.csv')
+    df = pd.read_csv(f'../raw/demographics/{bd}_2000-2024_clean.csv')
 
     # load area code mapping
     mun2uf_map = gpd.read_parquet('../interim/geographic-dataset.parquet')[['CD_UF', 'CD_MUN']].drop_duplicates().set_index('CD_MUN')['CD_UF'].to_dict()
@@ -122,4 +122,4 @@ for bd in ['births', 'deaths']:
     )
 
     # save result
-    df.to_csv(f'../interim/population/{bd}_mun_1999-2025.csv', index=True)
+    df.to_csv(f'../interim/demographics/{bd}_mun_1999-2025.csv', index=True)

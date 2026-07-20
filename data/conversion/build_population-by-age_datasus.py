@@ -1,6 +1,6 @@
 
 """
-This script estimates the population by 5-year age bins in every BR municipality between 2000-2022, by interpolating the 2000, 2010 and 2022 census years.
+This script estimates the population by year of age in every BR municipality (post-2017) between 1999-2025, using datasus population data from 2000-2025.
 """
 
 import os
@@ -16,7 +16,7 @@ mapping = pd.read_csv(os.path.join(abs_dir,'../interim/spatial_units_mapping.csv
 mapping['NM_MUN'] = mapping['NM_MUN'].apply(lambda x: unicodedata.normalize('NFKD', x).encode('ascii', 'ignore').decode('utf-8').lower())
 
 # load in the datasets
-filenames = os.listdir(os.path.join(abs_dir,'../raw/population/datasus/population/'))
+filenames = os.listdir(os.path.join(abs_dir,'../raw/demographics/population/'))
 filenames.sort()
 
 # loop over filenames
@@ -28,7 +28,7 @@ for fn in filenames:
     yr = fn[8:12]
 
     # get the data
-    df = pd.read_csv(os.path.join(abs_dir, f'../raw/population/datasus/population/{fn}'))
+    df = pd.read_csv(os.path.join(abs_dir, f'../raw/demographics/population/{fn}'))
 
     # rename 80+ into 80
     df = df.rename(columns={'80+': '80'})
@@ -53,14 +53,14 @@ for fn in filenames:
         candidates = lookup.get(six_code, [])
         if len(candidates) == 0:
             no_hits += 1
-            print(f"WARNING: no match for {six_code}")
+            print(f"WARNING: no match for {six_code} in {yr}")
             mapped_codes.append(None)  # or np.nan
         elif len(candidates) == 1:
             mapped_codes.append(candidates[0])
         else:
             non_unique_hits += 1
             choice = random.choice(candidates)
-            print(f"WARNING: multiple matches for {six_code} → {candidates}, picked {choice}")
+            print(f"WARNING: multiple matches for {six_code} in {yr} → {candidates}, picked {choice}")
             mapped_codes.append(choice)
     df["CD_MUN"] = mapped_codes
 
@@ -81,44 +81,52 @@ for fn in filenames:
     df['population'] = df['population'].replace('-', 0)
     df['population'] = df['population'].astype(int)
 
-    # cut in age bins
-    cutoff_age = 80
-    bins = np.arange(0, cutoff_age+5, 5, dtype=int).tolist() + [120,] 
-    labels = [f"[{i:02d}-{i+5:02d}(" for i in range(0, cutoff_age, 5)] + [f"[{cutoff_age}-120("]
-    df['age_group'] = pd.cut(
-        df['age'],
-        bins=bins,
-        right=False,   # intervals like [0,5)
-        labels=labels,
-        include_lowest=True
-    )
-    df_binned = (
-        df
-        .groupby(['year', 'CD_MUN', 'age_group'], as_index=False, observed=False)['population']
-        .sum()
-    )
-
     # save result
-    results.append(df_binned)
-    length.append(len(df_binned['CD_MUN'].unique()))
+    results.append(df)
+    length.append(len(df['CD_MUN'].unique()))
 
 # concatenate 
 df = pd.concat(results, ignore_index=True)
 
-# pivot back to a wide format
+# assign 2025 new municipality 510183 (Boa Esperança do Norte) back to Sorriso (5107925) and Nova Ubirata (5106182) lazily (50/50 split)
+if yr == '2025':
+    df.loc[((df['CD_MUN'] == 5107925) & (df['year'] == yr)), 'population'] += np.round(0.5 * df.loc[((df['CD_MUN'].isna()) & (df['year'] == yr)), 'population'].values)
+    df.loc[((df['CD_MUN'] == 5106182) & (df['year'] == yr)), 'population'] += np.round(0.5 * df.loc[((df['CD_MUN'].isna()) & (df['year'] == yr)), 'population'].values)
+
+# drop 510183 (Boa Esperança do Norte) 
+df = df.dropna()
+
+# sort dataframe
+df = df.sort_values(by=['CD_MUN', 'age', 'year'])
+
+# extrapolate results to 1999
+X = np.array([2000, 2001, 2002, 2003, 2004], dtype=float)
+Y = df.loc[df['year'].isin(["2000", "2001", "2002", "2003", "2004"]), ('CD_MUN', 'age', 'year', 'population')]['population'].to_numpy().reshape([5570,81,5])
+
+x = X - X.mean()
+slope = np.sum(x * Y, axis=2) / np.sum(x**2)
+intercept = Y.mean(axis=2) - slope * X.mean()
+
+prediction = np.round(np.maximum(intercept + slope * 1999, 0))
+
+muns = np.sort(df["CD_MUN"].unique())
+ages = np.sort(df["age"].unique())
+df1999 = pd.DataFrame({
+    "CD_MUN": np.repeat(muns, len(ages)),
+    "age": np.tile(ages, len(muns)),
+    "year": 1999,
+    "population": prediction.ravel()
+})
+
 df = (
-    df.pivot(
-        index=['CD_MUN', 'year'],
-        columns='age_group',
-        values='population'
-    )
-    .reset_index()
+    pd.concat([df1999, df], ignore_index=True)
+      .sort_values(["CD_MUN", "age", "year"])
+      .reset_index(drop=True)
 )
 
-# make sure CD_MUN is int
-df['CD_MUN'] = df['CD_MUN'].astype(int)
+# set types
+df['year'] = pd.to_numeric(df['year'])
+df = df.astype({'CD_MUN': 'int32', 'population': 'int32', 'year': 'int16', 'age': 'int8'})
 
-# print("Length per year:")
-# print(length) # all lengths equal to 5570
-
-df.to_csv(os.path.join(abs_dir, f'../../data/interim/population/municipality-age_population_2000-2025_datasus.csv'), index=False)
+# save result
+df.to_parquet(os.path.join(abs_dir, f'../../data/interim/demographics/population_mun-age_1999-2025.parquet'), index=False, compression='zstd')
