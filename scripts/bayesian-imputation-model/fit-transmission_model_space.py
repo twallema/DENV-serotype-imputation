@@ -68,24 +68,22 @@ region = clusters.columns.to_list()[0]
 mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
 mapping = mapping.merge(clusters[[region, 'cluster']], on=region, how='left')
 
-# Compute demography in start_year per cluster
+# Compute population in start_year per cluster
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-demo = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/population/pop-births-deaths_mun_1996-2024.csv'))
-demo = demo.rename(columns={'geocode': 'CD_MUN'})
+demo = pl.scan_parquet(os.path.join(abs_dir,'../../data/interim/demographics/population_mun-age_1999-2026.parquet')).group_by([ "CD_MUN", "year"]).agg(pl.col("population").sum().alias("population")).sort([ "CD_MUN", "year"]).filter(pl.col("year") == start_year).select("CD_MUN","population").collect().to_pandas()
 demo = demo.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
-demo = demo.groupby(['cluster', 'year'], as_index=False)['population'].sum()
-
-print(demo)
-import sys
-sys.exit()
+demo = demo.groupby('cluster', as_index=False)['population'].sum()
 
 # Compute births and death rates per cluster
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-bd = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/population/pop-births-deaths_mun_1996-2024.csv'))
+births = pd.read_csv(os.path.join(abs_dir,'../../data/interim/demographics/births_mun_1999-2026.csv'))
+deaths = pd.read_csv(os.path.join(abs_dir,'../../data/interim/demographics/deaths_mun_1999-2026.csv'))
+bd = births.merge(deaths, on=['CD_MUN', 'year', 'population'], how='left')
+
 bd = bd.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
-bd = bd.groupby(['year', 'cluster'], as_index=False).agg(estimated_births=('estimated_births', 'sum'),estimated_deaths=('estimated_deaths', 'sum'), population=('population', 'sum'))
+bd = bd.groupby(['year', 'cluster'], as_index=False).agg(births=('births', 'sum'), deaths=('deaths', 'sum'), population=('population', 'sum'))
 
 # Adjacency matrix
 # ~~~~~~~~~~~~~~~~
@@ -181,13 +179,13 @@ Y_multinomial = np.stack(Y_list, axis=2).astype(int)    # (n_months, n_clusters,
 DENV_total = df.pivot(index="date", columns="cluster", values="DENV_total").to_numpy().astype(int)  # (n_months, n_clusters)
 # Births (absolute) and death rate
 df_expanded = df.merge(bd, on=["year", "cluster"], how="left")
-df_expanded["estimated_births"] = df_expanded["estimated_births"] / 12
-df_expanded["estimated_deaths"] = df_expanded["estimated_deaths"] / 12
-df_expanded["estimated_death_rate"] = df_expanded["estimated_deaths"] / df_expanded["population"]
-births = df_expanded.pivot(index="date", columns="cluster", values="estimated_births").to_numpy().astype(int) # (n_months, n_clusters)
-death_rate = df_expanded.pivot(index="date", columns="cluster", values="estimated_death_rate").to_numpy() # (n_months, n_clusters)
+df_expanded["births"] = df_expanded["births"] / 12
+df_expanded["deaths"] = df_expanded["deaths"] / 12
+df_expanded["death_rate"] = df_expanded["deaths"] / df_expanded["population"]
+births = df_expanded.pivot(index="date", columns="cluster", values="births").to_numpy().astype(int) # (n_months, n_clusters)
+death_rate = df_expanded.pivot(index="date", columns="cluster", values="death_rate").to_numpy() # (n_months, n_clusters)
 # Initial demography
-demo = demo[((demo['year'] == start_year) & (demo['cluster'].isin([11, 12, 13, 16])))]['population'].values 
+demo = demo[demo['cluster'].isin([11, 12, 13, 16])]['population'].values 
 
 # --- Indices ---
 cluster_idx = df["cluster"].to_numpy().astype(int)
