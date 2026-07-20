@@ -1,6 +1,6 @@
 
 """
-This script estimates the population by year of age in every BR municipality (post-2017) between 1999-2025, using datasus population data from 2000-2025.
+This script estimates the population by year of age in every BR municipality (post-2017) between 1999-2025, using datasus population data from 2000-2026.
 """
 
 import os
@@ -118,15 +118,35 @@ df1999 = pd.DataFrame({
     "population": prediction.ravel()
 })
 
-df = (
-    pd.concat([df1999, df], ignore_index=True)
-      .sort_values(["CD_MUN", "age", "year"])
-      .reset_index(drop=True)
-)
+df = pd.concat([df1999, df], ignore_index=True)
+
+# extrapolate results to 2026
+X = np.array([2021, 2022, 2023, 2024, 2025], dtype=float)
+Y = df.loc[df['year'].isin(["2021", "2022", "2023", "2024", "2025"]), ('CD_MUN', 'age', 'year', 'population')]['population'].to_numpy().reshape([5570,81,5])
+
+x = X - X.mean()
+slope = np.sum(x * Y, axis=2) / np.sum(x**2)
+intercept = Y.mean(axis=2) - slope * X.mean()
+
+prediction = np.round(np.maximum(intercept + slope * 2026, 0))
+
+muns = np.sort(df["CD_MUN"].unique())
+ages = np.sort(df["age"].unique())
+df2026 = pd.DataFrame({
+    "CD_MUN": np.repeat(muns, len(ages)),
+    "age": np.tile(ages, len(muns)),
+    "year": 2026,
+    "population": prediction.ravel()
+})
+
+df = pd.concat([df2026, df], ignore_index=True)
 
 # set types
 df['year'] = pd.to_numeric(df['year'])
 df = df.astype({'CD_MUN': 'int32', 'population': 'int32', 'year': 'int16', 'age': 'int8'})
 
+# sort
+df = df.sort_values(["CD_MUN", "age", "year"])
+
 # save result
-df.to_parquet(os.path.join(abs_dir, f'../../data/interim/demographics/population_mun-age_1999-2025.parquet'), index=False, compression='zstd')
+df.to_parquet(os.path.join(abs_dir, f'../../data/interim/demographics/population_mun-age_1999-2026.parquet'), index=False, compression='zstd')
