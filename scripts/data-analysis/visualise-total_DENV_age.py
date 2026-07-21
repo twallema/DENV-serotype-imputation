@@ -55,8 +55,8 @@ demo = (
     .collect(engine="streaming")
 )
 
-cases.write_parquet("cases.interim.parquet")
-demo.write_parquet("demo.interim.parquet")
+#cases.write_parquet("cases.interim.parquet")
+#demo.write_parquet("demo.interim.parquet")
 
 #cases = pl.scan_parquet("cases.interim.parquet").collect()
 #demo = pl.scan_parquet("demo.interim.parquet").collect()
