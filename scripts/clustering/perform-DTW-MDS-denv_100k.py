@@ -16,10 +16,10 @@ from glasbey import create_palette
 from matplotlib.colors import ListedColormap
 
 # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
-region_filename = 'rgint'
-region = 'CD_RGINT'
+region_filename = 'mun'
+region = 'CD_MUN'
 # dynamic time warping
-sakoe_chiba_radius = 0  # 0 will emphasise similarities in seasonality, 12/24/36 emphasizes similarity in magnitudes
+sakoe_chiba_radius = 12  # 0 will emphasise similarities in seasonality, 12/24/36 emphasizes similarity in magnitudes
 # number of dimensions to project the DTW matrix onto (bigger = better representation of DTW matrix BUT clustering becomes harder)
 n_mds_components = 5
 # use all data
