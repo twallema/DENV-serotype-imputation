@@ -17,6 +17,7 @@ from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform, pdist
 from glasbey import create_palette
 from matplotlib.colors import ListedColormap
+from sklearn.manifold import MDS
 
 ##############
 ## Settings ##
@@ -28,13 +29,14 @@ region = 'CD_RGINT'         # NOTE: script intended to work with 'CD_RGINT'
 
 # sampler
 n_chains = 4
-n_tune = 25
-n_draw = 25
+n_tune = 5
+n_draw = 5
 
 start_month_season = 9
 
-# dtw
+# dtw/mds
 n_dtw_clusters = [2,3,4,5,6,7,8,9,10]
+n_mds_components = 5
 
 ###############
 ## Data prep ##
@@ -162,7 +164,7 @@ for n_clusters in n_dtw_clusters:
     ax.set_title(f"Median number of serotyped cases per season", fontsize=12)
     ax.axis("off")
     os.makedirs(f'../../data/interim/DTW-MDS-embeddings/serotypes/serotyping_effort', exist_ok=True)
-    plt.savefig(f'../../data/interim/DTW-MDS-embeddings/serotypes/serotyping_effort/median_clusters_{n_clusters}.pdf')
+    plt.savefig(f'../../data/interim/DTW-MDS-embeddings/serotypes/serotyping_effort/median_clusters_{n_clusters}.png', dpi=600)
     plt.close()
 
 
@@ -268,6 +270,7 @@ for var in variables2plot:
 with model:
     posterior_predictive = pm.sample_posterior_predictive(trace)
 
+
 #################################################
 ## DTW imputed serotype trajectories + cluster ##
 #################################################
@@ -315,8 +318,24 @@ for n_clusters in n_dtw_clusters:
     )
     ax.set_title(f"Serotype trajectory DTW distance", fontsize=12)
     ax.axis("off")
-    plt.savefig(f'../../data/interim/DTW-MDS-embeddings/serotypes/dtw/clusters_{n_clusters}.pdf')
+    plt.savefig(f'../../data/interim/DTW-MDS-embeddings/serotypes/dtw/clusters_{n_clusters}.png', dpi=600)
     plt.close()
+
+
+#########
+## MDS ##
+#########
+
+# perform MDS
+mds = MDS(n_components=n_mds_components, dissimilarity="precomputed", random_state=42, max_iter=10000, normalized_stress=True)
+coords = mds.fit_transform(dtw_matrix)
+# evaluate performance metric (0.025=excellent, 0.05=good, 0.10=fair, 0.20=poor)
+print(mds.stress_)
+# convert to dataframe
+embedding = pd.DataFrame(coords, index=cases[f"{region}"].unique(), columns=[f"serotypes_mds{i+1}" for i in range(n_mds_components)]).reset_index()
+# save dataframe
+embedding.to_csv(f'../../data/interim/DTW-MDS-embeddings/serotypes/DTW-MDS-embedding_{region_filename}.csv', index=False)
+
 
 #########################
 ## Partial mantel test ##
@@ -357,8 +376,6 @@ p_value = result.rx2('signif')[0]
 print(f"R vegan Partial r: {partial_r:.4f}")
 print(f"R vegan p-value:   {p_value:.4e}")
 
-import sys
-sys.exit()
 
 ##############################################
 ## Visualise imputed serotype trajectories  ##
