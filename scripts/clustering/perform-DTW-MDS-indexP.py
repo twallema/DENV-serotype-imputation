@@ -3,12 +3,13 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import geopandas as gpd
-from datetime import datetime
 import matplotlib.pyplot as plt
-from scipy.ndimage import gaussian_filter1d
 from tslearn.metrics import cdist_dtw
 from sklearn.manifold import MDS
-from sklearn.preprocessing import StandardScaler
+from scipy.cluster.hierarchy import linkage, fcluster
+from scipy.spatial.distance import squareform
+from pygam import LinearGAM, s
+
 
 # glasbey color map
 from glasbey import create_palette
@@ -16,12 +17,12 @@ from matplotlib.colors import ListedColormap
 
 
 # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
-region_filename = 'mun'
-region = 'CD_MUN'
+region_filename = 'rgi'
+region = 'CD_RGI'
+# dynamic time warping
+sakoe_chiba_radius = 0
 # number of dimensions to project the DTW matrix onto (bigger = better representation of DTW matrix BUT clustering becomes harder)
 n_mds_components = 3
-# sigma of gaussian filter used to smooth DENV incidence per 100K
-sigma = 1
 
 
 # --- Step 1: Prepare and smooth incidence time series ---
@@ -29,17 +30,19 @@ sigma = 1
 # get the index P data
 indexP = pd.read_csv(f'../../data/interim/indexP/indexP_{region_filename}.csv')
 
+# GAM smooth log1p timeseries
+indexP["month_num"] = indexP["month"] - indexP["month"].min()
 
-# define gaussian smoother
-def smooth_gaussian(x, sigma):
-    values = x.fillna(0).to_numpy()
-    return gaussian_filter1d(values, sigma=sigma)
+indexP["indexP_smooth"] = np.nan
+for _, group in indexP.groupby(f"{region}"):
 
-# perform smoothing with guassian filter
-indexP['indexP_smooth'] = (
-    indexP.groupby(f'{region}')['indexP']
-      .transform(lambda x: smooth_gaussian(x, sigma=sigma))
-)
+    X = group[["month_num"]].values
+    y = group["indexP"].values
+
+    gam = LinearGAM(s(0), n_splines=10, lam=0.2).fit(X, y)
+
+    indexP.loc[group.index, "indexP_smooth"] = gam.predict(X)
+
 
 # # visualise results
 # fig,ax=plt.subplots()
@@ -51,6 +54,7 @@ indexP['indexP_smooth'] = (
 # plt.show()
 # plt.close()
 
+
 # --- Step 2: Compute DTW distance matrix ---
 
 # pivot to wide format
@@ -60,7 +64,7 @@ ts = indexP.pivot(index=f'{region}', columns='month', values='indexP_smooth')
 X = ts.fillna(0).to_numpy()[:, :, np.newaxis]
 
 # compute pairwise DTW distances
-dtw_dist = cdist_dtw(X, sakoe_chiba_radius=1, n_jobs=-1, verbose=True)
+dtw_dist = cdist_dtw(X, sakoe_chiba_radius=sakoe_chiba_radius, n_jobs=-1, verbose=True)
 
 # visualise raw matrx
 plt.figure(figsize=(10, 8))
@@ -75,25 +79,19 @@ plt.close()
 sns.clustermap(dtw_dist, cmap="viridis", figsize=(12, 12))
 plt.savefig(f'../../data/interim/DTW-MDS-embeddings/indexP/DTW-mat-clustermap_{region_filename}.pdf')
 
-# --- Step 3: Cluster DTW matrix and visualise on a map ---
 
-from sklearn.cluster import SpectralClustering
-from scipy.cluster.hierarchy import linkage, fcluster
-from scipy.spatial.distance import squareform
+# --- Step 3: Cluster DTW matrix and visualise on a map ---
 
 # Load geodata
 geography = gpd.read_parquet("../../data/interim/geographic-dataset.parquet")
 # Dissolve to desired spatial level
 geography = geography.dissolve(by=f'{region}', aggfunc={'POP': 'sum'})
 # Perform hierarchical clustering (average linkage)
-n_clusters_list = [5, 10, 15, 25, 50, 100]
+n_clusters_list = [2, 3, 4, 5, 6, 7, 10]
 for n_clusters in n_clusters_list:  
     # Hierarchical clustering
     Z = linkage(squareform(dtw_dist), method='average')
     geography[f'dtw_clusters_{n_clusters}'] = fcluster(Z, n_clusters, criterion='maxclust')
-    # Spectral clustering
-    #sc = SpectralClustering(n_clusters=n_clusters, affinity='precomputed', random_state=0)
-    #geography[f'dtw_clusters_{n_clusters}'] = sc.fit_predict(dtw_dist)
 
 # Visualise DTW clusters 
 fig,ax=plt.subplots(ncols=len(n_clusters_list))

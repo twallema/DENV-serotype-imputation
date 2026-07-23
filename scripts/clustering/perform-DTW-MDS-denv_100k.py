@@ -21,7 +21,7 @@ region = 'CD_MUN'
 # dynamic time warping
 sakoe_chiba_radius = 12  # 0 will emphasise similarities in seasonality, 12/24/36 emphasizes similarity in magnitudes
 # number of dimensions to project the DTW matrix onto (bigger = better representation of DTW matrix BUT clustering becomes harder)
-n_mds_components = 5
+n_mds_components = 10
 # use all data
 start_date = datetime(1000, 1, 1)
 end_date = datetime(3000, 1, 1)
@@ -38,26 +38,31 @@ denv = denv[((denv['date'] >= start_date) & (denv['date'] <= end_date))]
 
 # GAM smooth log1p timeseries
 denv["date_num"] = (denv["date"] - denv["date"].min()).dt.days
-denv["y_log1p"] = np.log1p(denv["DENV_per_100k"])
+denv["DENV_per_100k_log1p"] = np.log1p(denv["DENV_per_100k"])
 
 denv["pred_DENV_per_100k_log1p"] = np.nan
 for cd_rgi, group in denv.groupby(f"{region}"):
 
     X = group[["date_num"]].values
-    y = group["y_log1p"].values
+    y = group["DENV_per_100k_log1p"].values
 
-    gam = LinearGAM(s(0, n_splines=27*4, lam=0.05)).fit(X, y)
+    gam = LinearGAM(s(0, n_splines=27*5, lam=0.1)).fit(X, y)
 
     denv.loc[group.index, "pred_DENV_per_100k_log1p"] = gam.predict(X)
+
+denv["pred_DENV_per_100k"] = np.expm1(denv["pred_DENV_per_100k_log1p"])
 
 # # visualise results
 # fig,ax=plt.subplots()
 # ax.plot(denv.date.unique(), denv[denv['CD_RGI'] == 530001]['pred_DENV_per_100k_log1p'], color='black', label='530001')
 # ax.plot(denv.date.unique(), denv[denv['CD_RGI'] == 110001]['pred_DENV_per_100k_log1p'], color='red', label='110001')
+# ax.plot(denv.date.unique(), denv[denv['CD_RGI'] == 110002]['pred_DENV_per_100k_log1p'], color='green', label='110002')
 # ax.legend()
 # plt.show()
 # plt.close()
 
+# import sys
+# sys.exit()
 
 # --- Step 2: Dynamic time warping ---
 
