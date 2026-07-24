@@ -29,14 +29,14 @@ region = 'CD_RGINT'         # NOTE: script intended to work with 'CD_RGINT'
 
 # sampler
 n_chains = 4
-n_tune = 5
-n_draw = 5
+n_tune = 25
+n_draw = 25
 
 start_month_season = 9
 
 # dtw/mds
 n_dtw_clusters = [2,3,4,5,6,7,8,9,10]
-n_mds_components = 5
+n_mds_components = 8
 
 ###############
 ## Data prep ##
@@ -69,7 +69,7 @@ cases = (
         .alias(c)
         for c in agg_cols
     ])
-    #.with_columns(DENV_serotyped_count=pl.sum_horizontal("^DENV_[1-4]_count$"))
+    # count serotyping effort
     .with_columns(
         DENV_serotyped_count=(
             pl.when(pl.sum_horizontal("^DENV_[1-4]$") == 0)
