@@ -279,10 +279,11 @@ output.to_csv(f'../../data/interim/nearest-largest-sampling-effort/nearest-large
 region_cluster_map = output.set_index(f'{region}').to_dict()['largest_sampling_effort']
 
 # get regions with insufficient data
-threshold = 5
+threshold = 2
 insufficient_regions = cases_season_stats.filter(pl.col("median") <= threshold).select(pl.col(f"{region}")).to_series().to_list()
+print(f"Removed {len(insufficient_regions)} regions")
 
-# group the cases to the newly defined regions
+# group the cases to the newly defined regions (# no filtering after 2020!)
 cases_wo_filtering = (
     cases
     # aggregate to regions
@@ -343,14 +344,14 @@ for cluster_id in output['largest_sampling_effort'].unique():
     fig,ax=plt.subplots(nrows=5, ncols=2, sharex=True, figsize=(8.3, 11.7))
 
     fig.suptitle(f"cluster: {cluster_id}")
-    
+
     # wo filtering
     ax[0,0].plot(dates, cases_wo_filtering.loc[cases_wo_filtering['largest_sampling_effort'] == cluster_id, 'DENV_serotyped_count'], color='black')
-    ax[0,1].set_title("Without filtering")
+    ax[0,0].set_title("Without filtering")
     ax[0,0].set_ylabel("Total serotyped (-)")
     # w filtering
     ax[0,1].plot(dates, cases_w_filtering.loc[cases_w_filtering['largest_sampling_effort'] == cluster_id, 'DENV_serotyped_count'], color='black')
-    ax[0,1].set_title("With filtering")
+    ax[0,1].set_title(f"With filtering (threshold: {threshold})")
 
     for i in range(1,5):
         # wo filtering
