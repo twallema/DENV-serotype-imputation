@@ -267,7 +267,7 @@ plt.close()
 #################
 
 output = geography_regions[[f'{region}', 'cluster_id']]
-output = output.rename(columns={'cluster_id': 'largest_sampling_effort'})
+output = output.rename(columns={'cluster_id': 'largest_sampling_effort_id'})
 output.to_csv(f'../../data/interim/nearest-largest-sampling-effort/nearest-largest-sampling-effort_{region_filename}.csv', index=False)
 
 
