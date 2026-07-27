@@ -332,7 +332,7 @@ coords = mds.fit_transform(dtw_matrix)
 # evaluate performance metric (0.025=excellent, 0.05=good, 0.10=fair, 0.20=poor)
 print(mds.stress_)
 # convert to dataframe
-embedding = pd.DataFrame(coords, index=cases[f"{region}"].unique(), columns=[f"serotypes_mds{i+1}" for i in range(n_mds_components)]).reset_index()
+embedding = pd.DataFrame(coords, index=pd.Index(cases[f"{region}"].unique(), name=f"{region}"), columns=[f"serotypes_mds{i+1}" for i in range(n_mds_components)]).reset_index()
 # save dataframe
 embedding.to_csv(f'../../data/interim/DTW-MDS-embeddings/serotypes/DTW-MDS-embedding_{region_filename}.csv', index=False)
 
