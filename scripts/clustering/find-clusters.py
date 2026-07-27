@@ -6,9 +6,6 @@ import geopandas as gpd
 from shapely import Point
 from datetime import datetime
 import matplotlib.pyplot as plt
-from spopt.region import MaxPHeuristic
-from libpysal.weights import Rook, Queen
-from scipy.ndimage import gaussian_filter1d
 from sklearn.preprocessing import StandardScaler
 import numpy as np
 from contextlib import redirect_stdout
@@ -37,19 +34,23 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
 parser.add_argument("-n", type=int, help="Number of clustering runs to average.", default=250)
 parser.add_argument("-max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=10)
-parser.add_argument("-threshold", type=float, help="Minimal number of serotyped cases in a cluster.", default=75)
+parser.add_argument("-threshold", type=float, help="Minimal number of serotyped cases in a cluster.", default=100)
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
 parser.add_argument("-validation_bw", type=float, help="Fraction of spatial units left out for within-sample validation.", default=0)
 # covariates
-parser.add_argument("-compactness", type=str_to_bool, help="Include cluster compactness as a covariate in clustering.", default=True)
-parser.add_argument("-nearest_hypermetro", type=str_to_bool, help="Include nearest hypermetro area as a covariate in clustering.", default=True)
-parser.add_argument("-biome", type=str_to_bool, help="Include biome covariate in clustering.", default=True)
-parser.add_argument("-koppen", type=str_to_bool, help="Include Koppen climate classification covariate in clustering.", default=False)
-parser.add_argument("-human_footprint", type=str_to_bool, help="Include human footprint classification covariate in clustering.", default=True)
-parser.add_argument("-denv_100k_cumulative", type=str_to_bool, help="Include confirmed cumulative DENV incidence per 100K as a covariate in clustering.", default=False)
-parser.add_argument("-denv_100k_DTW", type=str_to_bool, help="Include DTW of confirmed cumulative DENV incidence per 100K as a covariate in clustering.", default=False)
+## defaults
+parser.add_argument("-compactness", type=str_to_bool, help="Include x and y coordinates of areas as a covariate in clustering to enhance compactness of clusters.", default=True)
+parser.add_argument("-nearest_largest_sampling_effort", type=str_to_bool, help="Include nearest area with a large serotype sampling effort as a covariate in clustering.", default=True)
 parser.add_argument("-indexP_DTW", type=str_to_bool, help="Include DTW of index P as a covariate in clustering.", default=True)
-parser.add_argument("-serotypes_DTW", type=str_to_bool, help="Include DTW of recent (2020-2025) serotyped cases as a covariate in clustering.", default=False)
+parser.add_argument("-denv_100k_DTW", type=str_to_bool, help="Include DTW of confirmed cumulative DENV incidence per 100K as a covariate in clustering.", default=True)
+## optional
+parser.add_argument("-nearest_hypermetro", type=str_to_bool, help="Include nearest hypermetro area as a covariate in clustering.", default=False)
+parser.add_argument("-biome", type=str_to_bool, help="Include biome covariate in clustering.", default=False)
+parser.add_argument("-koppen", type=str_to_bool, help="Include Koppen climate classification covariate in clustering.", default=False)
+parser.add_argument("-denv_100k_cumulative", type=str_to_bool, help="Include confirmed cumulative DENV incidence per 100K as a covariate in clustering.", default=False)
+## disencouraged
+parser.add_argument("-human_footprint", type=str_to_bool, help="Include human footprint classification covariate in clustering. Disencouraged because this splits urban areas from the surrounding hinterland.", default=False)
+parser.add_argument("-serotypes_DTW", type=str_to_bool, help="Include DTW of statistically imputed serotype trajectories as a covariate in clustering. Disencouraged.", default=False)
 args = parser.parse_args()
 
 # assign to desired variables
@@ -59,14 +60,15 @@ max_iterations_sa = args.max_iterations_sa
 threshold = args.threshold
 spatial_aggregation = args.spatial_aggregation
 validation_bw = args.validation_bw
+include_compactness = args.compactness
+include_nearest_largest_sampling_effort = args.nearest_largest_sampling_effort
+include_indexP_DTW = args.indexP_DTW
+include_denv_100k_DTW = args.denv_100k_DTW
+include_nearest_hypermetro = args.nearest_hypermetro
 include_biome = args.biome
 include_koppen = args.koppen
-include_human_footprint = args.human_footprint
-include_compactness = args.compactness
-include_nearest_hypermetro = args.nearest_hypermetro
 include_denv_100k_cumulative = args.denv_100k_cumulative
-include_denv_100k_DTW = args.denv_100k_DTW
-include_indexP_DTW = args.indexP_DTW
+include_human_footprint = args.human_footprint
 include_serotypes_DTW = args.serotypes_DTW
 
 
@@ -145,6 +147,9 @@ region = DTW_covariates_indexP.columns.to_list()[0]
 # Load nearest hypermetro area
 nearest_hypermetro = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/nearest-hypermetro/nearest-hypermetro_{spatial_aggregation}.csv'))
 
+# Load nearest largest sampling effort
+nearest_largest_sampling_effort = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/nearest-largest-sampling-effort/nearest-largest-sampling-effort_{spatial_aggregation}.csv'))
+
 
 # Aggregate incidence and geographical dataset to the intermediate/immediate regions
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -216,21 +221,19 @@ if region:
     )
 
 
-
 # Compute threshold & leave out within-sample validation
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # Compute the mimimum sum of serotyped cases across all years (will have to be changed)
-# limit time window (before 1999 will likely be excluded because it's way too limited; from 2019 onwards all regions have good subtyping)
-denv = denv[((denv['date'] > datetime(2000,1,1)) & (denv['date'] < datetime(2019,1,1)))]
+denv = denv[denv['date'] < datetime(2020,1,1)]
 # extract year
 denv["year"] = pd.to_datetime(denv["date"]).dt.year
 # compute total cases per month
 denv["N_typed"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
 # sum cases by year
 yearly_sum = denv.groupby([f'{region}',"year"])['N_typed'].sum().reset_index()
-# take mean across years
-yearly_sum_median = yearly_sum.groupby(f'{region}')["N_typed"].mean() # array for clustering
+# take median across years
+yearly_sum_median = yearly_sum.groupby(f'{region}')["N_typed"].median() # array for clustering
 yearly_sum_median.rename("N_typed_yearly_median", inplace=True)
 
 # perform training-validation split
@@ -262,10 +265,12 @@ ax.axis("off")
 plt.savefig(os.path.join(output_folder, 'validation_labels.png'), dpi=300)
 plt.close()
 
-
-# merge min_yearly_sum
-geography = geography.merge(yearly_sum_median, on=f'{region}', how="left")
-
+# merge them to the geography dataframe
+geography = geography.merge(
+    yearly_sum_median, 
+    on=f"{region}",
+    how="left"
+)
 
 
 # Make biome covariate
@@ -286,7 +291,6 @@ for col in biome_dummies.columns:
 covariate_names = []
 if include_biome:
     covariate_names.extend(biome_dummies.columns.to_list())
-
 
 
 # Make Koppen climate covariate
@@ -328,6 +332,26 @@ if include_nearest_hypermetro:
     covariate_names.extend(nearest_hypermetro_dummies.columns.to_list())
 
 
+# Make nearest largest sampling area covariate
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# Make dummies for the nearest hypermetro covariate
+nearest_largest_sampling_effort_dummies = pd.get_dummies(nearest_largest_sampling_effort['largest_sampling_effort_id'], prefix="nearest_largest_sampling_effort")
+# Merge to the geography dataframe
+geography = geography.merge(
+    nearest_largest_sampling_effort_dummies, 
+    left_index=True, 
+    right_index=True, 
+    how="left"
+)
+# Ensure nearest_hypermetro dummies are int (0/1)
+for col in nearest_largest_sampling_effort_dummies.columns:
+    geography[col] = geography[col].astype(float)
+# add to covariate name mapping
+if include_nearest_largest_sampling_effort:
+    covariate_names.extend(nearest_largest_sampling_effort_dummies.columns.to_list())
+
+
 # Make human footprint covariate
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -337,7 +361,6 @@ geography['human_footprint'] = sc.fit_transform(human_footprint[["human_footprin
 # add to covariate name mapping
 if include_human_footprint:
     covariate_names.extend(['human_footprint',])
-
 
 
 # Make cumulative DENV per 100K covariate
@@ -351,7 +374,6 @@ geography['denv_100k_cumulative'] = sc.fit_transform(denv_100k.values.reshape(-1
 # add to covariate name mapping
 if include_denv_100k_cumulative:
     covariate_names.extend(['denv_100k_cumulative',])
-
 
 
 # Make compactness covariate
@@ -380,7 +402,6 @@ if include_compactness:
 geography = geography.to_crs(epsg=4674)
 
 
-
 # Make DENV per 100k DTW-MDS covariate
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -396,7 +417,6 @@ geography[DTW_covariates_denv_100k_names] = sc.fit_transform(geography[DTW_covar
 # Add to covariate name mapping
 if include_denv_100k_DTW:
     covariate_names.extend(DTW_covariates_denv_100k_names)
-
 
 
 # Make indexP DTW-MDS covariate
@@ -416,7 +436,6 @@ if include_indexP_DTW:
     covariate_names.extend(DTW_covariates_indexP_names)
 
 
-
 # Make serotypes DTW-MDS covariate
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -432,7 +451,6 @@ geography[DTW_covariates_serotypes_names] = sc.fit_transform(geography[DTW_covar
 # Add to covariate name mapping
 if include_serotypes_DTW:
     covariate_names.extend(DTW_covariates_serotypes_names)
-
 
 
 # Run max-p regionalization model `n` times in parallel
@@ -542,7 +560,6 @@ if __name__ == '__main__':
     )
 
 
-
 # Assign weights to every run using tuned softmax
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -550,13 +567,11 @@ T = (25/1300) * (np.mean(best_obj_vals))
 weights = softmax(-np.asarray(best_obj_vals)/T)
 
 
-
 # Save individual runs in geography dataframe
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 for i in range(n):
     geography[f'run_{i}'] = labels[i]
-
 
 
 # Average co-association matrices across runs
@@ -575,7 +590,6 @@ n_clusters = int(np.median([len(np.unique(l)) for l in labels]))
 
 # make a categorical color palette with n_clusters distinct colors
 glasbey_cmap = ListedColormap(create_palette(palette_size=n_clusters))
-
 
 
 # Randomly select and visualize 12 runs on a 3x4 grid
@@ -610,7 +624,6 @@ plt.savefig(os.path.join(output_folder, f'clusters_{spatial_aggregation}.png'), 
 plt.close()
 
 
-
 # Recluster mean co-association matrix using hierarchical clustering
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -631,13 +644,11 @@ plt.savefig(os.path.join(output_folder, f'clustermap_probmatrix_{spatial_aggrega
 plt.close()
 
 
-
 # Recluster mean co-association matrix using spectral clustering
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 sc = SpectralClustering(n_clusters=n_clusters, affinity='precomputed', random_state=0)
 geography['consensus_clusters_spectral'] = sc.fit_predict(prob_matrix)+1
-
 
 
 # Save and visualise the mean clustering results
@@ -681,8 +692,9 @@ plt.close()
 # Save the consensus clusters (hierarchical)
 clusters = geography[[f'{region}', 'consensus_clusters_hierarchical']]
 clusters = clusters.rename(columns={'consensus_clusters_hierarchical': 'cluster'})
-clusters.to_csv(os.path.join(output_folder, f"clusters_{spatial_aggregation}.csv"), index=False)
-
+clusters = pd.merge(muncipality_region_map, clusters, on='CD_RGINT')
+clusters = clusters.set_index('CD_MUN').drop(columns=['CD_RGINT']).reset_index()
+clusters.to_csv(os.path.join(output_folder, f"clusters.csv"), index=False)
 
 
 # Save a map of Brazil with every cluster highlighted
@@ -746,7 +758,6 @@ for uf in cluster_list:
 
 # Save in a .csv
 adj_matrix.to_csv(os.path.join(output_folder, f'adjacency_matrix_{spatial_aggregation}.csv'))
-
 
 
 # Build the clusters' weighted distance matrix for the Bayesian imputation model
