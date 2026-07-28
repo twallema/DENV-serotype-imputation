@@ -17,6 +17,20 @@ from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform
 import argparse
 
+N_per_quartile = 2
+season_start_month = 9
+
+# bayesian imputation model
+import arviz
+import pymc as pm
+import pytensor.tensor as pt
+from patsy import dmatrix
+
+n_draw = 5
+n_tune = 5
+n_chains = 8
+
+
 # parse arguments
 # >>>>>>>>>>>>>>>
 
@@ -34,9 +48,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
 parser.add_argument("-n", type=int, help="Number of clustering runs to average.", default=250)
 parser.add_argument("-max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=10)
-parser.add_argument("-threshold", type=float, help="Minimal number of serotyped cases in a cluster.", default=100)
+parser.add_argument("-threshold", type=float, help="Minimal number of serotyped cases in a cluster. Larger values result in less clusters.", default=90)
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
-parser.add_argument("-validation_bw", type=float, help="Fraction of spatial units left out for within-sample validation.", default=0)
+parser.add_argument("-validation_bw", type=float, help="Fraction of spatial units left out for within-sample validation.", default=0.05)
 # covariates
 ## defaults
 parser.add_argument("-compactness", type=str_to_bool, help="Include x and y coordinates of areas as a covariate in clustering to enhance compactness of clusters.", default=True)
@@ -44,10 +58,10 @@ parser.add_argument("-nearest_largest_sampling_effort", type=str_to_bool, help="
 parser.add_argument("-indexP_DTW", type=str_to_bool, help="Include DTW of index P as a covariate in clustering.", default=True)
 parser.add_argument("-denv_100k_DTW", type=str_to_bool, help="Include DTW of confirmed cumulative DENV incidence per 100K as a covariate in clustering.", default=True)
 ## optional
-parser.add_argument("-nearest_hypermetro", type=str_to_bool, help="Include nearest hypermetro area as a covariate in clustering.", default=False)
 parser.add_argument("-biome", type=str_to_bool, help="Include biome covariate in clustering.", default=False)
 parser.add_argument("-koppen", type=str_to_bool, help="Include Koppen climate classification covariate in clustering.", default=False)
 parser.add_argument("-denv_100k_cumulative", type=str_to_bool, help="Include confirmed cumulative DENV incidence per 100K as a covariate in clustering.", default=False)
+parser.add_argument("-nearest_hypermetro", type=str_to_bool, help="Include nearest hypermetro area as a covariate in clustering.", default=False)
 ## disencouraged
 parser.add_argument("-human_footprint", type=str_to_bool, help="Include human footprint classification covariate in clustering. Disencouraged because this splits urban areas from the surrounding hinterland.", default=False)
 parser.add_argument("-serotypes_DTW", type=str_to_bool, help="Include DTW of statistically imputed serotype trajectories as a covariate in clustering. Disencouraged.", default=False)
@@ -123,6 +137,10 @@ def build_co_association_matrix(regions, clusters):
 
 # Load geodata
 geography = gpd.read_parquet(os.path.join(abs_dir, "../../data/interim/geographic-dataset.parquet"))
+geography = geography.to_crs('EPSG:5880')
+
+# load state boundaries
+gdf_states = geography.dissolve(by='CD_UF')
 
 # Load case data
 denv = pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet").collect().to_pandas()
@@ -226,23 +244,60 @@ if region:
 
 # Compute the mimimum sum of serotyped cases across all years (will have to be changed)
 denv = denv[denv['date'] < datetime(2020,1,1)]
-# extract year
-denv["year"] = pd.to_datetime(denv["date"]).dt.year
+# append a season label
+before_start_month = denv['date'].dt.month < season_start_month
+season_year = denv['date'].dt.year
+season_year = season_year.where(~before_start_month, season_year - 1)
+denv['season'] = season_year.astype(str) + '-' + (season_year + 1).astype(str)
 # compute total cases per month
 denv["N_typed"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
 # sum cases by year
-yearly_sum = denv.groupby([f'{region}',"year"])['N_typed'].sum().reset_index()
+yearly_sum = denv.groupby([f'{region}',"season"])['N_typed'].sum().reset_index()
 # take median across years
 yearly_sum_median = yearly_sum.groupby(f'{region}')["N_typed"].median() # array for clustering
 yearly_sum_median.rename("N_typed_yearly_median", inplace=True)
 
-# perform training-validation split
-## Take validation_bw around Q1 territories
-validation_center = 0.25
-validation_labels = yearly_sum_median.loc[((yearly_sum_median > np.quantile(yearly_sum_median, q=validation_center-validation_bw)) & (yearly_sum_median < np.quantile(yearly_sum_median, q=validation_center+validation_bw)))].index.values.tolist()
-## Take validation_bw around Q2 territories
-validation_center = 0.50
-validation_labels.extend(yearly_sum_median.loc[((yearly_sum_median > np.quantile(yearly_sum_median, q=validation_center-validation_bw)) & (yearly_sum_median < np.quantile(yearly_sum_median, q=validation_center+validation_bw)))].index.values.tolist())
+# Randomly select `N_per_quartile` areas from a band of Q1, Q2, Q3 +/- BW
+quartiles = [0.25, 0.50, 0.75]
+rng = np.random.default_rng(42)
+
+yearly_sum_median = yearly_sum_median.sort_values()
+validation_labels = []
+used_states_globally = set()
+
+for q in quartiles:
+    quartile_selections = []
+
+    lower_q = max(0.0, q - validation_bw)
+    upper_q = min(1.0, q + validation_bw)
+    
+    lower_bound = np.quantile(yearly_sum_median, lower_q)
+    upper_bound = np.quantile(yearly_sum_median, upper_q)
+    
+    candidates = yearly_sum_median.loc[
+        (yearly_sum_median >= lower_bound) & (yearly_sum_median <= upper_bound)
+    ].index.tolist()
+
+    rng.shuffle(candidates)
+
+    for c in candidates:
+        if len(quartile_selections) >= N_per_quartile:
+            break
+
+        state_code = str(c)[:2]
+        
+        if state_code not in used_states_globally and c not in validation_labels:
+            quartile_selections.append(c)
+            used_states_globally.add(state_code) # Lock this state globally
+
+    # 6. Check if we failed to meet the requested N due to data constraints
+    if len(quartile_selections) < N_per_quartile:
+        print(f"Warning: Only found {len(quartile_selections)} valid regions for Q={q:.2f} "
+              f"due to strict global state constraints (Requested: {N_per_quartile}).")
+
+    # 7. Save the selections for this quartile band
+    validation_labels.extend(quartile_selections)
+
 yearly_sum_median.loc[validation_labels] = 0
 
 # convert validation labels to municipality level (because the incidence data used in the bayesian model is too)
@@ -251,18 +306,22 @@ validation_labels_muni.to_csv(os.path.join(output_folder, 'validation_labels.csv
 
 # visualise where the left out areas are
 geography['validation_labels'] = geography[f'{region}'].isin(validation_labels)
+
 fig,ax=plt.subplots()
-geography.plot(
-    column='validation_labels',
-    categorical=True,
+gdf_states.boundary.plot(ax=ax, linewidth=0.5, color="black")
+geography.boundary.plot(ax=ax, linewidth=0.1, alpha=0.3, color="black")
+geography.loc[geography['validation_labels'] == True].plot(
     linewidth=0.2,
+    hatch='////',
+    color='grey',
+    alpha=0.5,
     edgecolor="grey",
     legend=False,
     ax=ax
 )
 ax.set_title('Areas left out during within-sample validation', fontsize=10)
 ax.axis("off")
-plt.savefig(os.path.join(output_folder, 'validation_labels.png'), dpi=300)
+plt.savefig(os.path.join(output_folder, 'validation_labels.png'), dpi=600)
 plt.close()
 
 # merge them to the geography dataframe
@@ -458,8 +517,9 @@ if include_serotypes_DTW:
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 from contextlib import redirect_stdout
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing as mp
+from tqdm import tqdm
 
 def run_single_maxp(
     run_index, geography_df, region_col, covariate_names, threshold,
@@ -518,7 +578,8 @@ def run_parallel_maxp(n_cores, n, geography, region, covariate_names, threshold,
 
     results = []
     with ProcessPoolExecutor(max_workers=n_cores) as ex:
-        futures = [
+
+        future_to_index = {
             ex.submit(
                 run_single_maxp,
                 run_index=i,
@@ -527,12 +588,15 @@ def run_parallel_maxp(n_cores, n, geography, region, covariate_names, threshold,
                 covariate_names=covariate_names,
                 threshold=threshold,
                 max_iterations_sa=max_iterations_sa,
-            )
+            ): i
             for i in range(n)
-        ]
+        }
 
-        for fut in futures:
-            results.append(fut.result())
+        # Iterate over completed futures with a progress bar
+        with tqdm(total=n, desc="Running Max-P optimization") as pbar:
+            for fut in as_completed(future_to_index):
+                results.append(fut.result())
+                pbar.update(1)  # Advance progress bar by 1 as each job finishes
 
     # Sort by run index so output ordering is guaranteed
     results.sort(key=lambda x: x[0])
@@ -595,9 +659,6 @@ glasbey_cmap = ListedColormap(create_palette(palette_size=n_clusters))
 # Randomly select and visualize 12 runs on a 3x4 grid
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-# load state boundaries
-gdf_states = gpd.read_parquet(os.path.join(abs_dir, "../../data/interim/geographic-dataset.parquet")).dissolve(by='CD_UF')
-
 # 1. Get all run columns
 run_columns = [col for col in geography.columns if col.startswith("run_")]
 # 2. Randomly pick 12 runs
@@ -620,7 +681,7 @@ for ax, run in zip(axes, selected_runs):
     ax.set_title(run, fontsize=10)
     ax.axis("off")
 plt.tight_layout()
-plt.savefig(os.path.join(output_folder, f'clusters_{spatial_aggregation}.png'), dpi=300)
+plt.savefig(os.path.join(output_folder, f'clusters_{spatial_aggregation}.png'), dpi=600)
 plt.close()
 
 
@@ -640,7 +701,7 @@ geography['consensus_clusters_hierarchical'] = fcluster(Z, n_clusters, criterion
 # Save clustermap
 import seaborn as sns
 sns.clustermap(1-distance, cmap='viridis')
-plt.savefig(os.path.join(output_folder, f'clustermap_probmatrix_{spatial_aggregation}.png'), dpi=300)
+plt.savefig(os.path.join(output_folder, f'clustermap_probmatrix_{spatial_aggregation}.png'), dpi=600)
 plt.close()
 
 
@@ -686,7 +747,7 @@ ax[1].set_title(f"Spectral clustering", fontsize=14)
 ax[1].axis("off")
 fig.suptitle('Consensus clusters')
 plt.tight_layout()
-plt.savefig(os.path.join(output_folder, f'consensus_clusters_{spatial_aggregation}.png'), dpi=300)
+plt.savefig(os.path.join(output_folder, f'consensus_clusters_{spatial_aggregation}.png'), dpi=600)
 plt.close()
 
 # Save the consensus clusters (hierarchical)
@@ -714,7 +775,7 @@ for cluster_id in geography["consensus_clusters_hierarchical"].unique():
     cluster_centroid = gdf.union_all().centroid
     #ax.text(cluster_centroid.x, cluster_centroid.y, str(cluster_id), ha="center", va="center", fontsize=12, fontweight="bold", color="black")
     ax.set_axis_off()
-    plt.savefig(os.path.join(output_folder, f'clusters/cluster_{cluster_id}.png'), dpi=300)
+    plt.savefig(os.path.join(output_folder, f'clusters/cluster_{cluster_id}.png'), dpi=600)
     plt.close()
 
 
@@ -796,3 +857,261 @@ for i, row_i in centroids_gdf.iterrows():
 
 # Save the distance matrix to a csv file
 dist_matrix.to_csv(os.path.join(output_folder, f'distance_matrix_{spatial_aggregation}.csv'))
+
+
+# Impute the case data
+# >>>>>>>>>>>>>>>>>>>>
+
+# write a NaN-retaining aggregation function
+agg_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
+agg_exprs = []
+for c in agg_cols: 
+    agg_exprs.extend([
+        pl.col(c).sum().alias(c),
+        pl.col(c).count().alias(f"{c}_count"),  
+    ])
+
+# make a map from CD_MUN to clusters
+muncipality_cluster_map = clusters.set_index('CD_MUN').to_dict()['cluster']
+
+# get case data, omit the validation dataset and do a groupby-sum to the clusters
+cases = (
+    pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet")
+    # set to null if CD_MUN is in the validation dataset
+    .with_columns([
+        pl.when(pl.col("CD_MUN").is_in(validation_labels_muni))
+        .then(None)
+        .otherwise(pl.col(c))
+        .alias(c)
+        for c in agg_cols
+    ])
+    # aggregate to regions
+    .with_columns(pl.col("CD_MUN").replace_strict(muncipality_cluster_map).alias(f"cluster"))
+    .group_by(["date", "cluster"])
+    .agg(agg_exprs)
+    .with_columns([
+        pl.when(pl.col(f"{c}_count") == 0)
+        .then(None)
+        .otherwise(pl.col(c))
+        .alias(c)
+        for c in agg_cols
+    ])
+    # count serotyping effort
+    .with_columns(
+        DENV_serotyped_count=(
+            pl.when(pl.sum_horizontal("^DENV_[1-4]$") == 0)
+            .then(None)
+            .otherwise(pl.sum_horizontal("^DENV_[1-4]$"))
+        )
+    )
+    .drop([f"{c}_count" for c in agg_cols])
+    .sort(["date", "cluster"])
+    .collect()
+).to_pandas()
+
+
+# total number of serotyped cases
+N_typed = cases.pivot(index="date", columns="cluster", values="DENV_serotyped_count").fillna(0).to_numpy().astype(int) # (n_months, n_regions)
+
+# number of cases per DENV serotype
+Y_list = []
+for col in ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']:
+    Y_mat = cases.pivot(index="date", columns="cluster", values=col).to_numpy()
+    Y_list.append(Y_mat)
+Y_multinomial = np.stack(Y_list, axis=2).astype(int)    # (n_months, n_regions, n_serotypes)
+
+# lengths
+n_months = Y_multinomial.shape[0]
+n_regions = Y_multinomial.shape[1]
+n_serotypes = Y_multinomial.shape[2]
+
+# precision matrix
+I = pt.eye(len(adj_matrix))
+W = pt.as_tensor_variable(adj_matrix)
+D = pt.diag(pt.sum(W, axis=1))
+
+# build a spline basis
+t = np.arange(n_months)
+X = np.asarray(
+    dmatrix(
+        f"bs(t, df={int(np.round(n_months/9))}, degree=3, include_intercept=True)",
+        {"t": t},
+    )
+)
+n_basis = X.shape[1]
+X_pt = pt.constant(X)
+
+# construct model coordinates
+coords = {
+    "date": cases['date'].unique(),
+    "cluster": cases["cluster"].unique(),
+    "serotype": np.array([1, 2, 3, 4]),
+    "spline_basis": np.arange(n_basis),
+}
+
+# build pymc imputation model
+with pm.Model(coords=coords) as model:
+
+    # spatially correlated spline coefficients
+    psi = pm.Beta("psi", 3, 3)
+    sigma_beta = pm.HalfNormal("sigma_beta", 1)
+    Q = (1 - psi) * I + psi * (D - W)
+    L_Q = pt.linalg.cholesky(Q)
+    L_cov = pt.linalg.solve(L_Q, I)
+
+    beta_raw = pm.Normal("beta_raw", 0, 1, shape=(n_basis, n_serotypes - 1, n_regions))
+    beta_corr = sigma_beta * pt.einsum("ij,bsj->bsi", L_cov, beta_raw)
+    beta = pm.Deterministic("beta", beta_corr.dimshuffle(2, 1, 0))
+    
+    # build splined latent state 
+    theta_log = pm.Deterministic("theta_log", pt.concatenate([pt.einsum("tb,rsb->trs", X, beta), pt.zeros((n_months,n_regions,1))], axis=2), dims=("date", "cluster", "serotype"))
+
+    # softmax splined latent state to obtain latent serotype distribution
+    p = pm.Deterministic("p", pm.math.softmax(theta_log, axis=2), dims=("date", "cluster", "serotype"))
+
+    # overdispersion model
+    ## time-independent hierarchical overdispersion (per region)
+    d_region_hierarch = pm.HalfNormal("d_region_hierarch", sigma=1/3)    # --> phi ~ 1000 --> low overdispersion
+    d_region = pm.HalfNormal("d_region", sigma=d_region_hierarch, dims="cluster")
+    phi = pm.Deterministic("phi", pt.repeat((1.0 / pm.math.maximum(d_region, 1e-12))[None, :], n_months, axis=0), dims=("date", "cluster"))
+    alpha = phi[:, :, None] * p # Broadcast phi over serotypes
+
+    # observed subtyped incidences ---
+    Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial, dims=("date", "cluster", "serotype"))
+
+# NUTS
+with model:
+    trace = pm.sample(n_draw, tune=n_tune, target_accept=0.8, chains=n_chains, cores=n_chains, init='adapt_diag', progressbar=True)
+
+# save traces
+variables2plot = ['sigma_beta', 'psi', 'd_region_hierarch', 'd_region']
+os.makedirs(os.path.join(output_folder, 'imputation_model/trace'), exist_ok=True)
+for var in variables2plot:
+    arviz.plot_trace(trace, var_names=[var]) 
+    plt.savefig(os.path.join(output_folder, f'imputation_model/trace/trace-{var}_typing-effort-model.pdf'))
+    plt.close()
+
+# make a posterior predictive
+with model:
+    posterior_predictive = pm.sample_posterior_predictive(trace)
+
+
+# Visualise the imputed case data
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# loop over clusters
+dates = cases['date'].unique()
+for cluster_id in cases['cluster'].unique():
+
+    fig = plt.figure(figsize=(8.3, 11.7/6*8))
+    fig.suptitle(f"Cluster: {cluster_id}")
+    gs = fig.add_gridspec(8, 2)
+
+    # map highlighting the region
+    ax = fig.add_subplot(gs[0, 1])
+    gdf_states.boundary.plot(ax=ax, linewidth=0.5, color="black")
+    geography.boundary.plot(ax=ax, linewidth=0.1, color="black", alpha=0.2)
+    geography.make_valid()
+    gdf = geography.loc[geography['consensus_clusters_hierarchical'] == cluster_id]
+    gdf.plot(ax=ax, color="#d35052", edgecolor="none")
+    ax.set_axis_off()
+
+    # set up rows below to span columns
+    ax = []
+    ax.append(fig.add_subplot(gs[1, :]))
+
+    for r in range(2, 8):
+        ax.append(fig.add_subplot(gs[r, :], sharex=ax[0]))
+
+    for a in ax[:-1]:
+        plt.setp(a.get_xticklabels(), visible=False)
+
+
+    ax[0].plot(dates, cases.loc[cases['cluster'] == cluster_id, 'DENV_total'], color='black')
+    ax[0].set_ylabel("DENV cases (-)")
+
+    ax[1].plot(dates, cases.loc[cases['cluster'] == cluster_id, 'DENV_serotyped_count'], color='black')
+    ax[1].set_ylabel("Serotyped cases (-)")
+
+    for s in range(1,5):
+        ax[s+1].set_ylabel(f"DENV {s} (%)")
+        # data
+        ax[s+1].plot(dates, cases.loc[cases['cluster'] == cluster_id, f'DENV_{s}'].values / cases.loc[cases['cluster'] == cluster_id, 'DENV_serotyped_count'].values * 100, marker='o', markersize=2, linewidth=1, color='black')
+        # model
+        ax[s+1].plot(dates, trace.posterior['p'].median(dim=['chain', 'draw']).sel({'serotype': s, "cluster": cluster_id}).values * 100, color='red')
+        ax[s+1].fill_between(dates,
+                                trace.posterior['p'].quantile(dim=['chain', 'draw'], q=0.025).sel({'serotype': s, 'cluster': cluster_id}).values * 100,
+                                trace.posterior['p'].quantile(dim=['chain', 'draw'], q=0.975).sel({'serotype': s, 'cluster': cluster_id}).values * 100,
+                                color='red', alpha=0.1
+                            )
+        ax[s+1].fill_between(dates,
+                                trace.posterior['p'].quantile(dim=['chain', 'draw'], q=0.25).sel({'serotype': s, 'cluster': cluster_id}).values * 100,
+                                trace.posterior['p'].quantile(dim=['chain', 'draw'], q=0.75).sel({'serotype': s, 'cluster': cluster_id}).values * 100,
+                                color='red', alpha=0.2
+                            )
+        
+    ax[-1].stackplot(dates, [trace.posterior['p'].mean(dim=['chain', 'draw']).sel({'serotype': serotype, "cluster": cluster_id}).values * 100 for serotype in range(1,5)], labels=['1', '2', '3', '4'], colors=['black', 'red', 'green', 'blue'], alpha=0.9)
+    ax[-1].set_ylabel(f"Serotype distribution (%)")
+
+    plt.tight_layout()
+    os.makedirs(os.path.join(output_folder, 'imputation_model/posterior_predictive'), exist_ok=True)
+    plt.savefig(os.path.join(output_folder, f'imputation_model/posterior_predictive/cluster_{cluster_id}.pdf'))
+    plt.close()
+
+
+##############################################
+## Compute within-sample validation metrics ##
+##############################################
+
+# df with inferred serotype probability per left out municipality
+df_p = pd.DataFrame(
+    index=pd.MultiIndex.from_product([dates, validation_labels_muni], names=["date", "CD_MUN"]),
+    columns=['p_1', 'p_2', 'p_3', 'p_4', 'phi']
+    ).reset_index()
+
+muncipality_cluster_map = clusters[clusters['CD_MUN'].isin(validation_labels_muni)]
+
+for CD_MUN_id in df_p['CD_MUN'].unique():
+    cluster_id = muncipality_cluster_map.loc[muncipality_cluster_map['CD_MUN'] == CD_MUN_id, 'cluster'].values[0]
+    df_p.loc[df_p['CD_MUN'] == CD_MUN_id, ('p_1', 'p_2', 'p_3', 'p_4')] = np.squeeze(trace.posterior['p'].median(dim=['chain', 'draw']).sel({"cluster": cluster_id}).values)
+    df_p.loc[df_p['CD_MUN'] == CD_MUN_id, 'phi'] = trace['posterior']['phi'].mean(dim=['chain','draw']).sel({"cluster": cluster_id}).values
+df_p[['a_1', 'a_2', 'a_3', 'a_4']] = df_p[['p_1', 'p_2', 'p_3', 'p_4']].values * df_p[['phi']].values
+
+# dataframe with the data per left out municipality
+cases = (
+    pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet")
+    # set to null if CD_MUN is in the validation dataset
+    .filter(pl.col("CD_MUN").is_in(validation_labels_muni))
+    # count serotyping effort
+    .with_columns(
+        N_typed=(
+            pl.when(pl.sum_horizontal("^DENV_[1-4]$") == 0)
+            .then(None)
+            .otherwise(pl.sum_horizontal("^DENV_[1-4]$"))
+        )
+    )
+    .sort(["date", "CD_MUN"])
+    .collect()
+).to_pandas()
+
+# Only evaluate log-likelihood when data are valid
+mask = ~cases[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].isna().all(axis=1)
+cases = cases.dropna(subset=['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4'], how='all')
+cases = cases.fillna(0)
+df_p = df_p.loc[mask]
+
+# Compute log likelihood
+from scipy.stats import dirichlet_multinomial
+x = cases[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].values
+n = np.sum(x, axis=1)
+alpha = df_p[['a_1', 'a_2', 'a_3', 'a_4']].apply(pd.to_numeric)
+logp = dirichlet_multinomial.logpmf(x=x, alpha=alpha, n=n)
+
+# Save result
+cases['ll_dirichletmultinomial'] = logp
+cases[['p_1', 'p_2', 'p_3', 'p_4']] = df_p[['p_1', 'p_2', 'p_3', 'p_4']].values
+cases[['phi']] = df_p[['phi']].values
+cases[['date', 'CD_MUN', 'DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'phi', 'p_1', 'p_1', 'p_3', 'p_4', 'll_dirichletmultinomial']].to_csv(os.path.join(output_folder,f'validation_loglikelihood.csv'), index=False)
+
+# TODO: add a column per covariate so we know what covariates were used + add ID so we can track repeated runs
+# --> we can then concat all runs and compute metrics programatically
