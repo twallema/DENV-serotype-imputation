@@ -29,8 +29,8 @@ region = 'CD_RGINT'         # NOTE: script intended to work with 'CD_RGINT'
 
 # sampler
 n_chains = 4
-n_tune = 25
-n_draw = 25
+n_tune = 50
+n_draw = 50
 
 start_month_season = 9
 
@@ -275,13 +275,15 @@ with model:
 ## DTW imputed serotype trajectories + cluster ##
 #################################################
 
-# DTW the latent serotype trajectory --> z-score?
-theta_log = trace.posterior['theta_log'].mean(dim=['chain', 'draw'])
+# DTW the latent serotype trajectory from 2020 onwards and save it
+theta_log = trace.posterior['p'].mean(dim=['chain', 'draw']).sel(date=slice("2020-01-01", None))
 data_3d = theta_log.transpose("CD_RGINT", "date", "serotype").values
-dtw_matrix = cdist_dtw(data_3d, global_constraint="sakoe_chiba", sakoe_chiba_radius=12)
+dtw_matrix = cdist_dtw(data_3d[:,:,(0,1,2)], global_constraint="sakoe_chiba", sakoe_chiba_radius=1)
+pd.DataFrame(data=dtw_matrix, index=sorted(geography[f"{region}"].unique()), columns=sorted(geography[f"{region}"].unique())).to_csv(f'../../data/interim/DTW-MDS-embeddings/serotypes/dtw/dtw-matrix_post-2020_{region}.csv', index=True)
+
 
 # cluster it
-Z = linkage(squareform(dtw_matrix, checks=False), method='average')
+Z = linkage(squareform(dtw_matrix, checks=False), method='ward')
 geography_regions = geography.dissolve(by=f'{region}').reset_index()
 
 glasbey_cmap = ListedColormap(create_palette(palette_size=max(n_dtw_clusters)))
@@ -320,7 +322,6 @@ for n_clusters in n_dtw_clusters:
     ax.axis("off")
     plt.savefig(f'../../data/interim/DTW-MDS-embeddings/serotypes/dtw/clusters_{n_clusters}.png', dpi=600)
     plt.close()
-
 
 #########
 ## MDS ##
@@ -388,6 +389,8 @@ geography_regions = geography.dissolve(by=f'{region}').reset_index()
 dates = posterior_predictive.posterior_predictive.coords['date'].values
 
 for region_id in cases[f"{region}"].unique():
+
+    print(f"Visualising region {region_id}\n")
 
     N_typed = posterior_predictive.observed_data["Y_obs"].sum(dim="serotype").sel({f"{region}": region_id}).values
     
