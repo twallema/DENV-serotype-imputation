@@ -44,6 +44,11 @@ Population by age, municipality and year were downloaded from: https://tabnet.da
 
 These data are partly confidential and can be found on the Bento lab box.
 
+### Overland travel time matrices
+
++ `brazil-260729.osm.pbf`:  OpenStreetMaps database for Brazil. Downloaded from: https://download.geofabrik.de/south-america/brazil.html. This dataset is too large (2 GB) for GH.
+
+
 ## Interim
 
 + `geographic-dataset.parquet`: Compressed (brotli compression) geographical dataset. Dataset containing geometries of Brazilian municipalities, along with variables relevant for clustering. Made using `data/conversion/build_geographic-dataset.py` from the data in `data/raw/BR_Municipios_2023`.
@@ -110,6 +115,10 @@ Contains all output of the max-p regionalization `~/scripts/clustering/find-clus
 
 Contains all output of the Bayesian serotype imputation model `~/scripts/bayesian-imputation-model/fit-imputation-model.py`. The latent serotype distribution per municipality from 1996-2025 and per month -- the output of this pipeline -- is named `DENV-serotypes-imputed_1996-2025_monthly.parquet`.
 
+### Travel time matrices
+
++ `car_travel_time_median_matrix_rgint.csv`: Median travel time between Brazilian intermediate regions in hours.
+
 ## Conversion scripts
 
 + `build_human-footprint.py`: Averages the raw human footprint data over the years 2013-2019 and spatially aggregates from the municipality to the immediate region and intermediate regions by computing the demographically weighted average over constitutent municipalities. One missing municipality's human footprint was set to 25.
@@ -125,3 +134,5 @@ Contains all output of the Bayesian serotype imputation model `~/scripts/bayesia
 + `build_municipality-population-backcast.Rmd`: Script used to estimate municipality populations, births, and deaths for 1996-2000 by fitting municipality-specific linear regressions, predicting backwards in time. 
 
 + `build_population-by-age_census.py`: Script used to format the 2000, 2010 and 2022 census population by 5-year age groups and by municipality, and linearily intrapolate them from 2000-2022 (`~/data/interim/population/municipality-age_population_2000-2022.csv`).
+
++ `construct_travel-time-matrices.R`: Script used to construct travel time origin-destination matrices for the Brazilian intermediate and immediate regions. Uses a Monte Carlo approach to connect municipalities in the origin and destination regions by populated-weighted random sampling.
