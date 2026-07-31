@@ -6,7 +6,7 @@ import geopandas as gpd
 from glasbey import create_palette
 from matplotlib.colors import ListedColormap
 import matplotlib.pyplot as plt
-
+import networkx as nx
 
 ##############
 ## Settings ##
@@ -174,12 +174,18 @@ good_regions_quality = pd.read_csv("../../data/interim/DTW-MDS-embeddings/seroty
 # plt.savefig(f'../../data/interim/nearest-largest-sampling-effort/qualitative-quantitative-comparison_{region_filename}.png', dpi=600)
 # plt.close()
 
-#####################
-## Turn into a map ##
-#####################
 
-# load the DTW distance
-dtw_matrix = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/serotypes/dtw/dtw-matrix_post-2020_{region}.csv', index_col=0).values
+########################################################################
+## Base clusters on geographic distance, DTW distance and travel time ##
+########################################################################
+
+good_regions = good_regions_quality[good_regions_quality["has_quality"] == 1][f"{region}"].values
+geography_regions = geography.dissolve(by=f'{region}').reset_index()
+gdf = geography_regions.copy(deep=True)
+
+# load the overland travel time
+travel_time_matrix = pd.read_csv(f'../../data/interim/travel_time_matrices/travel-time_car_mean_{region_filename}.csv', index_col=0)
+travel_time_matrix.columns = travel_time_matrix.columns.astype(int)
 
 # make a distance matrix of the regions
 geography_regions = geography.dissolve(by=f'{region}').reset_index()
@@ -194,59 +200,38 @@ distance_matrix = pd.DataFrame(
     dist_array, 
     index=geography_regions['CD_RGINT'], 
     columns=geography_regions['CD_RGINT']
-).values
+)
 
+# load the DTW distance
+dtw_matrix = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/serotypes/dtw/dtw-matrix_post-2020_{region}.csv', index_col=0)
+dtw_matrix.columns = dtw_matrix.columns.astype(int)
 
-geography_regions_copy = geography_regions.copy(deep=True)
+# make into a function
+def build_nearest_largest_sampling_effort_clusters(good_regions, distance_matrix, gdf, region):
 
-gammas = [0, 0.005, 0.1]
-
-for gamma in gammas:
-
-    gdf = geography_regions_copy
-
-    # convolve DTW distance and geographic distance
-    weighted_dtw = pd.DataFrame(
-        data = dtw_matrix * np.exp(-gamma * distance_matrix),
-        index = geography_regions[f'{region}'], 
-        columns = geography_regions[f'{region}']
-    )
-
-    # for each region select the closest match
-    good_regions = good_regions_quality[good_regions_quality["has_quality"] == 1][f"{region}"]
-    gdf['closest'] = np.nan
-
-    for idx, region_id in enumerate(gdf[f'{region}']):
-
-        if region_id not in good_regions.values:
-            geography_regions.loc[geography_regions[f'{region}'] == region_id, 'closest'] = int(weighted_dtw.loc[region_id, good_regions.values].idxmax())
+    # Step 1: for each region select the closest match
+    gdf['closest'] = pd.Series(pd.NA, dtype="Int64", index=gdf.index)
+    for region_id in gdf[f'{region}']:
+        if region_id not in good_regions:
+            gdf.loc[gdf[f'{region}'] == region_id, 'closest'] = int(distance_matrix.loc[region_id, good_regions].idxmin())
         else:
-            geography_regions.loc[geography_regions[f'{region}'] == region_id, 'closest'] = region_id
+            gdf.loc[gdf[f'{region}'] == region_id, 'closest'] = region_id
 
-    # merge the good quality regions
-    gdf = geography_regions.merge(good_regions_quality, on=f"{region}")
-
-    import networkx as nx
-
-    # Define your region ID column variable for flexibility
-    region_col = f"{region}"  # Update this to match your variable if named differently
-
-    # Step 1: Identify all regions that have quality == 1
-    quality_gdf = gdf[gdf['has_quality'] == 1].copy()
 
     # Step 2: Group adjacent "has_quality" regions into unified cluster components using spatial touch/overlaps
-    # We create a temporary spatial adjacency graph for quality regions
+    gdf = gdf.merge(good_regions_quality, on=f"{region}")
+    quality_gdf = gdf[gdf['has_quality'] == 1].copy()
     quality_gdf['temp_geom_idx'] = quality_gdf.index
     spatial_adj_graph = nx.Graph()
 
-    for idx, row in quality_gdf.iterrows():
-        spatial_adj_graph.add_node(row[region_col])
+    for _, row in quality_gdf.iterrows():
+        spatial_adj_graph.add_node(row[f"{region}"])
 
     # Find which quality regions touch each other
     for i, row1 in quality_gdf.iterrows():
         for j, row2 in quality_gdf.iterrows():
             if i < j and row1['geometry'].touches(row2['geometry']):
-                spatial_adj_graph.add_edge(row1[region_col], row2[region_col])
+                spatial_adj_graph.add_edge(row1[f"{region}"], row2[f"{region}"])
 
     # Find connected components of adjacent quality regions (these form unified cluster centers)
     quality_components = list(nx.connected_components(spatial_adj_graph))
@@ -262,14 +247,15 @@ for gamma in gammas:
     # Flatten list of all valid cluster center root IDs
     cluster_centers = list(set(quality_to_center.values()))
 
+
     # Step 3: Build the Directed Graph for the rest of the matching logic
     G = nx.DiGraph()
 
-    for idx, row in gdf.iterrows():
-        G.add_node(row[region_col], has_quality=row['has_quality'], geometry=row['geometry'])
+    for _, row in gdf.iterrows():
+        G.add_node(row[f"{region}"], has_quality=row['has_quality'], geometry=row['geometry'])
 
-    for idx, row in gdf.iterrows():
-        region_id = row[region_col]
+    for _, row in gdf.iterrows():
+        region_id = row[f"{region}"]
         closest_target = row['closest']
         
         # If the region is a quality region, point it directly to its group's unified center root
@@ -304,9 +290,20 @@ for gamma in gammas:
             region_to_cluster[node] = node
 
     # Step 5: Map the cluster assignments back to your main GeoDataFrame
-    geography_regions[f'cluster_id_{gamma}'] = gdf[region_col].map(region_to_cluster)
-    geography_regions[f"cluster_id_{gamma}"] = pd.factorize(geography_regions[f"cluster_id_{gamma}"])[0]
+    gdf[f'cluster_id'] = gdf[f"{region}"].map(region_to_cluster)
+    gdf[f"cluster_id"] = pd.factorize(gdf[f"cluster_id"])[0]
 
+    return gdf["cluster_id"].values
+
+# run functions on both distance matrices
+geography_regions[f'cluster_id_dist'] = build_nearest_largest_sampling_effort_clusters(good_regions, travel_time_matrix, gdf, region)
+geography_regions[f'cluster_id_time'] = build_nearest_largest_sampling_effort_clusters(good_regions, distance_matrix, gdf, region)
+geography_regions[f'cluster_id_dtw'] = build_nearest_largest_sampling_effort_clusters(good_regions, dtw_matrix, gdf, region)
+
+
+#####################
+## Turn into a map ##
+#####################
 
 # Visualise on a map 
 glasbey_cmap = ListedColormap(create_palette(palette_size=len(good_regions_quality[good_regions_quality['has_quality'] == 1])))
@@ -314,21 +311,30 @@ glasbey_cmap = ListedColormap(create_palette(palette_size=len(good_regions_quali
 geography_states = geography.dissolve(by='CD_UF')
 geography_regions = geography_regions.merge(good_regions_quality, on="CD_RGINT")
 
-titles = ["DTW distance", f"Blend ($\\gamma$ = {gammas[1]})", "Geographic distance"]
+geography_states = geography_states.to_crs('EPSG:4674')
+geography_regions = geography_regions.to_crs('EPSG:4674')
+
+columns = ["dist", "time", "dtw"]
+titles = ["Travel time (car)", "Centroid distance", "Serotype DTW distance"]
 
 fig, ax = plt.subplots(ncols=3, figsize=(11.7, 8.3/2))
 
-for i, gamma in enumerate(gammas):
+for i, col in enumerate(columns):
 
     geography_states.boundary.plot(ax=ax[i], linewidth=0.5, color="black")   # state boundaries
 
+    if i == 2:
+        legend=True
+    else:
+        legend=False
+
     geography_regions.plot(
-        column=f"cluster_id_{gamma}",          # color regions by cluster label
+        column=f"cluster_id_{col}",          # color regions by cluster label
         categorical=True,
         cmap = glasbey_cmap,
         linewidth=0.2,
         edgecolor="grey",
-        legend=True,
+        legend=legend,
         ax=ax[i],
         legend_kwds={'fontsize': 4, 'ncol': 2, 'loc': 'lower right', 'markerscale': 0.4}
     )
@@ -349,14 +355,13 @@ os.makedirs(f'../../data/interim/nearest-largest-sampling-effort/', exist_ok=Tru
 plt.savefig(f'../../data/interim/nearest-largest-sampling-effort/nearest-largest-sampling-effort_{region_filename}.png', dpi=600)
 plt.close()
 
+
 #################
 ## Save output ##
 #################
 
-gamma_save = 0.1
-
-output = geography_regions[[f'{region}', f'cluster_id_{gamma_save}']]
-output = output.rename(columns={f'cluster_id_{gamma_save}': 'largest_sampling_effort_id'})
+output = geography_regions[[f'{region}', f'cluster_id_time']]
+output = output.rename(columns={f'cluster_id_time': 'largest_sampling_effort_id'})
 output.to_csv(f'../../data/interim/nearest-largest-sampling-effort/nearest-largest-sampling-effort_{region_filename}.csv', index=False)
 
 
@@ -368,7 +373,7 @@ output.to_csv(f'../../data/interim/nearest-largest-sampling-effort/nearest-large
 region_cluster_map = output.set_index(f'{region}').to_dict()['largest_sampling_effort_id']
 
 # get regions with insufficient data
-threshold = 2
+threshold = 5
 insufficient_regions = cases_season_stats.filter(pl.col("median") <= threshold).select(pl.col(f"{region}")).to_series().to_list()
 print(f"Removed {len(insufficient_regions)} regions")
 
@@ -450,5 +455,5 @@ for cluster_id in output['largest_sampling_effort_id'].unique():
         ax[i,1].plot(dates, cases_w_filtering.loc[cases_w_filtering['largest_sampling_effort_id'] == cluster_id, f'DENV_{i}'] / cases_w_filtering.loc[cases_w_filtering['largest_sampling_effort_id'] == cluster_id, 'DENV_serotyped_count'] * 100, marker='o', markersize=2, linewidth=1, color='black')
         
     plt.tight_layout()
-    os.makedirs(f'../../data/interim/nearest-largest-sampling-effort/cases/', exist_ok=True)
-    plt.savefig(f'../../data/interim/nearest-largest-sampling-effort/cases/cluster_{cluster_id}.pdf')
+    os.makedirs(f'../../data/interim/nearest-largest-sampling-effort/filtering_cases_threshold_{threshold}/', exist_ok=True)
+    plt.savefig(f'../../data/interim/nearest-largest-sampling-effort/filtering_cases_threshold_{threshold}/cluster_{cluster_id}.pdf')

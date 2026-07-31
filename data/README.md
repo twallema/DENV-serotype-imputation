@@ -117,7 +117,11 @@ Contains all output of the Bayesian serotype imputation model `~/scripts/bayesia
 
 ### Travel time matrices
 
-+ `car_travel_time_median_matrix_rgint.csv`: Median travel time between Brazilian intermediate regions in hours.
++ `travel-time_car_mean_rgint.csv`: Mean travel time between Brazilian intermediate regions in hours.
+
++ `travel-time_car_sd.csv`: Standard deviation of the travel time between Brazilian intermediate regions in hours.
+
++ `fraction_max-attempts-reached_rgint.csv`: Fraction of Monte Carlo runs that timed out unsuccesfully after reaching the maximum number of server queries. 
 
 ## Conversion scripts
 
@@ -131,8 +135,10 @@ Contains all output of the Bayesian serotype imputation model `~/scripts/bayesia
 
 + `build_indexP.py`: A script to aggregate the municipality level index P per month to the immediate and intermediate Brazilian regions.
 
-+ `build_municipality-population-backcast.Rmd`: Script used to estimate municipality populations, births, and deaths for 1996-2000 by fitting municipality-specific linear regressions, predicting backwards in time. 
-
 + `build_population-by-age_census.py`: Script used to format the 2000, 2010 and 2022 census population by 5-year age groups and by municipality, and linearily intrapolate them from 2000-2022 (`~/data/interim/population/municipality-age_population_2000-2022.csv`).
 
 + `construct_travel-time-matrices.R`: Script used to construct travel time origin-destination matrices for the Brazilian intermediate and immediate regions. Uses a Monte Carlo approach to connect municipalities in the origin and destination regions by populated-weighted random sampling.
+
++ `build-nearest-largest-sampling-effort.py`: 
+
++ `build_closest-hypermetro-area.R`: 

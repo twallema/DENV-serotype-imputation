@@ -9,9 +9,10 @@ library(dplyr)
 
 geo_level <- "CD_RGINT"
 year = 2022
-N_runs <- 10 # Number of random municipality pairs to sample per region pair
+N_runs <- 50 # Number of random municipality pairs to sample per region pair
 max_attempts <- 10
-
+travel_duration_threshold <- 999
+  
 # Set working directory to location of this script
 if(!require(rstudioapi)) install.packages("rstudioapi")
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
@@ -72,7 +73,7 @@ regions <- sort(unique(muni_region_map$region_code))
 n_regions <- length(regions)
 
 # Initialize matrices for mean and standard deviation
-median_matrix <- matrix(NA, nrow = n_regions, ncol = n_regions, dimnames = list(regions, regions))
+mean_matrix <- matrix(NA, nrow = n_regions, ncol = n_regions, dimnames = list(regions, regions))
 sd_matrix   <- matrix(NA, nrow = n_regions, ncol = n_regions, dimnames = list(regions, regions))
 max_attempts_reached_matrix <- matrix(0, nrow = n_regions, ncol = n_regions, dimnames = list(regions, regions))
 
@@ -90,7 +91,7 @@ for (i in seq_along(regions)) {
   for (j in seq_along(regions)) {
     
     if (i == j) {
-      median_matrix[i, j] <- 0
+      mean_matrix[i, j] <- 0
       sd_matrix[i, j]   <- 0
       max_attempts_reached_matrix[i, j] <- 0
       next
@@ -156,12 +157,15 @@ for (i in seq_along(regions)) {
     # Clean failed runs (NAs)
     valid_durations <- run_durations[!is.na(run_durations)]
     
+    # Clean runs greater than a "sanity" threshold
+    run_durations[run_durations > travel_duration_threshold] <- NA
+    
     if (length(valid_durations) > 0) {
-      median_matrix[i, j] <- median(valid_durations)
+      mean_matrix[i, j] <- mean(valid_durations)
       sd_matrix[i, j]   <- sd(valid_durations)
       if (length(valid_durations) == 1) sd_matrix[i, j] <- 0 
     } else {
-      median_matrix[i, j] <- NA
+      mean_matrix[i, j] <- NA
       sd_matrix[i, j]   <- NA
     }
     
@@ -182,6 +186,6 @@ osrm_stop()
 ## Save Results ##
 ##################
 
-write.csv(as.data.frame(median_matrix), sprintf("../interim/travel_time_matrices/car_travel_time_median_matrix_%s.csv", save_name))
-write.csv(as.data.frame(sd_matrix), sprintf("../interim/travel_time_matrices/car_travel_time_sd_matrix_%s.csv", save_name))
-write.csv(as.data.frame(sd_matrix), sprintf("../interim/travel_time_matrices/fraction_max_attempts_reached_%s.csv", save_name))
+write.csv(as.data.frame(mean_matrix), sprintf("../interim/travel_time_matrices/travel-time_car_mean_%s.csv", save_name))
+write.csv(as.data.frame(sd_matrix), sprintf("../interim/travel_time_matrices/travel-time_car_sd_%s.csv", save_name))
+write.csv(as.data.frame(max_attempts_reached_matrix), sprintf("../interim/travel_time_matrices/fraction_max-attempts-reached_%s.csv", save_name))
