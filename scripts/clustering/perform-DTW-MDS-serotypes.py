@@ -133,43 +133,43 @@ geography_regions = geography.dissolve(by=f'{region}').reset_index()
 centroids = np.column_stack([geography_regions.geometry.centroid.x, geography_regions.geometry.centroid.y])
 spatial_dist_matrix = squareform(pdist(centroids, metric='euclidean'))
 
-# # cluster and plot on map
-# features = cases_season.select("median_serotyped").to_numpy()
-# Z = linkage(features, method="ward")
+# cluster and plot on map
+features = cases_season.select("median_serotyped").to_numpy()
+Z = linkage(features, method="ward")
 
-# geography_states = geography.dissolve(by='CD_UF')
+geography_states = geography.dissolve(by='CD_UF')
 
-# geography_regions = geography.dissolve(by=f'{region}').reset_index()
+geography_regions = geography.dissolve(by=f'{region}').reset_index()
 
-# for n_clusters in n_dtw_clusters:
+for n_clusters in n_dtw_clusters:
 
-#     clusters = fcluster(Z, n_clusters, criterion="maxclust")
+    clusters = fcluster(Z, n_clusters, criterion="maxclust")
 
-#     cases_per_cluster = cases_season.with_columns(pl.Series(name="cluster_id", values=clusters)).group_by('cluster_id').agg(pl.col('median_serotyped').mean()).sort('cluster_id')
+    cases_per_cluster = cases_season.with_columns(pl.Series(name="cluster_id", values=clusters)).group_by('cluster_id').agg(pl.col('median_serotyped').mean()).sort('cluster_id')
 
-#     label_map = {row["cluster_id"]: f"Cluster {row['cluster_id']} ({row['median_serotyped']:.1f})" for row in cases_per_cluster.iter_rows(named=True)}
+    label_map = {row["cluster_id"]: f"Cluster {row['cluster_id']} ({row['median_serotyped']:.1f})" for row in cases_per_cluster.iter_rows(named=True)}
     
-#     geography_regions["median_serotyped_cluster"] = [label_map[c] for c in clusters]
+    geography_regions["median_serotyped_cluster"] = [label_map[c] for c in clusters]
 
-#     glasbey_cmap = ListedColormap(create_palette(palette_size=n_clusters))
+    glasbey_cmap = ListedColormap(create_palette(palette_size=n_clusters))
 
-#     fig, ax = plt.subplots()
-#     geography_states.boundary.plot(ax=ax, linewidth=0.5, color="black")   # state boundaries
-#     geography_regions.plot(
-#         column="median_serotyped_cluster",          # color regions by cluster label
-#         cmap = glasbey_cmap,
-#         categorical=True,
-#         linewidth=0.2,
-#         edgecolor="grey",
-#         legend=True,
-#         ax=ax,
-#         legend_kwds={'fontsize': 4, 'ncol': 2, 'loc': 'lower right', 'markerscale': 0.4}
-#     )
-#     ax.set_title(f"Median number of serotyped cases per season", fontsize=12)
-#     ax.axis("off")
-#     os.makedirs(os.path.join(output_folder, 'serotyping_effort'), exist_ok=True)
-#     plt.savefig(os.path.join(output_folder, f'serotyping_effort/median_clusters_{n_clusters}.png'), dpi=600)
-#     plt.close()
+    fig, ax = plt.subplots()
+    geography_states.boundary.plot(ax=ax, linewidth=0.5, color="black")   # state boundaries
+    geography_regions.plot(
+        column="median_serotyped_cluster",          # color regions by cluster label
+        cmap = glasbey_cmap,
+        categorical=True,
+        linewidth=0.2,
+        edgecolor="grey",
+        legend=True,
+        ax=ax,
+        legend_kwds={'fontsize': 4, 'ncol': 2, 'loc': 'lower right', 'markerscale': 0.4}
+    )
+    ax.set_title(f"Median number of serotyped cases per season", fontsize=12)
+    ax.axis("off")
+    os.makedirs(os.path.join(output_folder, 'serotyping_effort'), exist_ok=True)
+    plt.savefig(os.path.join(output_folder, f'serotyping_effort/median_clusters_{n_clusters}.png'), dpi=600)
+    plt.close()
 
 
 ######################
@@ -258,9 +258,15 @@ with pm.Model(coords=coords) as model:
     # observed subtyped incidences ---
     Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial, dims=("date", f"{region}", "serotype"))
 
-# NUTS
+# script crashes when using CD_RGI and using multiple cores
+if region == 'CD_RGINT':
+    n_cores = n_chains
+else:
+    n_cores = 1
+
+# sample
 with model:
-    trace = pm.sample(n_draw, tune=n_tune, target_accept=0.8, chains=n_chains, cores=1, init='adapt_diag', progressbar=True)    # crashes when using CD_RGI and using multiple cores
+    trace = pm.sample(n_draw, tune=n_tune, target_accept=0.8, chains=n_chains, cores=n_cores, init='adapt_diag', progressbar=True)    
 
 # save traces
 variables2plot = ['sigma_beta', 'psi', 'd_region_hierarch', 'd_region']
