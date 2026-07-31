@@ -35,11 +35,10 @@ n_tune = 25
 parser = argparse.ArgumentParser()
 
 parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
-parser.add_argument("-n_cores", type=int, help="Number of available CPU cores.", default=12)
-parser.add_argument("-n_maxp", type=int, help="Number of max-p clustering runs to average.", default=100)
+parser.add_argument("-n_cores", type=int, help="Number of available CPU cores.", default=8)
+parser.add_argument("-n_maxp", type=int, help="Number of max-p clustering runs to average.", default=200)
 parser.add_argument("-n_repeats", type=int, help="Number of repeated within-sample validations.", default=10)
 parser.add_argument("-max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=10)
-parser.add_argument("-threshold", type=float, help="Minimal number of serotyped cases in a cluster. Larger values result in less clusters.", default=90)
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
 parser.add_argument("-validation_bw", type=float, help="Bandwidth around Q1, Q2 and Q3 median serotype sampling effort to sample within-sample validation areas from.", default=0.05)
 parser.add_argument("-validation_n", type=int, help="Number of within-sample validation areas to sample around each Q1, Q2, Q3 +/- bandwith.", default=2)
@@ -51,7 +50,6 @@ n_cores = args.n_cores
 n_maxp = args.n_maxp
 n_repeats = args.n_repeats
 max_iterations_sa = args.max_iterations_sa
-threshold = args.threshold
 spatial_aggregation = args.spatial_aggregation
 validation_bw = args.validation_bw
 validation_n = args.validation_n
@@ -67,30 +65,44 @@ if not os.path.exists(output_folder):
 # make an experimental design matrix
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-grid_covariates = ["indexP_DTW", "denv_100k_DTW", "biome", "koppen", "denv_100k_cumulative", "human_footprint"]
+grid_covariates = ["indexP_DTW", "denv_100k_DTW", "koppen"] # "biome", "denv_100k_cumulative", "human_footprint"]
 
-design_matrix = pd.DataFrame(
-    list(itertools.product([True, False], repeat=len(grid_covariates))),
-    columns=grid_covariates,
+threshold_values = [60, 75, 90]
+
+# Generate combinations of grid_covariates (True/False) AND thresholds
+covariate_combinations = list(
+    itertools.product([True, False], repeat=len(grid_covariates))
+)
+all_combinations = list(
+    itertools.product(covariate_combinations, threshold_values)
 )
 
+rows = []
+for cov_combo, thresh in all_combinations:
+    row = dict(zip(grid_covariates, cov_combo))
+    row["threshold"] = thresh
+    rows.append(row)
+design_matrix = pd.DataFrame(rows)
+
+# Add variables that are always True
 design_matrix["compactness"] = True
 design_matrix["nearest_largest_sampling_effort"] = True
 
+# Handle repeats and initialize results column
 design_matrix = (
     design_matrix.loc[design_matrix.index.repeat(n_repeats)]
     .assign(repeat_id=np.tile(range(1, n_repeats + 1), len(design_matrix)))
     .reset_index(drop=True)
 )
 
-design_matrix['log_likelihood'] = np.nan
+design_matrix["log_likelihood"] = np.nan
 
-print(f"\nNumber of covariate combinations: {len(list(itertools.product([True, False], repeat=len(grid_covariates))))}")
-print(f"Number of repeated within-sample validations per covariate combination: {n_repeats}")
+print(f"\nNumber of covariate combinations: {len(covariate_combinations)}")
+print(f"Number of thresholds: {len(threshold_values)}")
+print(f"Number of repeated within-sample validations: {n_repeats}")
 print(f"Total number of runs: {len(design_matrix)}\n")
 
 print(f"Preparing data..\n")
-
 
 # helper function
 # >>>>>>>>>>>>>>>
@@ -153,12 +165,12 @@ human_footprint = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/human-f
 # Load DENV per 100K DTW-MDS embedding
 DTW_covariates_denv_100k = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-MDS-embedding_{spatial_aggregation}.csv'))
 
-# Load serotypes DTW-MDS embedding
-DTW_covariates_serotypes = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/serotypes/DTW-MDS-embedding_{spatial_aggregation}.csv'))
-
 # Load indexP DTW-MDS embedding
 DTW_covariates_indexP = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/indexP/DTW-MDS-embedding_{spatial_aggregation}.csv'))
 region = DTW_covariates_indexP.columns.to_list()[0]
+
+# Load serotypes DTW-MDS embedding
+DTW_covariates_serotypes = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/serotypes/{region}/DTW-MDS-embedding_{spatial_aggregation}.csv'))
 
 # Load nearest hypermetro area
 nearest_hypermetro = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/nearest-hypermetro/nearest-hypermetro_{spatial_aggregation}.csv'))
@@ -487,6 +499,8 @@ for repeat_id in design_matrix['repeat_id'].unique():
         os.makedirs(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}'), exist_ok=True)
         
         covariate_names = [col for col, val in row.to_dict().items() if val is True] # Filter covariate columns that evaluate to True
+
+        threshold = row['threshold']
 
         # convert to custom inclusion of dummies etc.
         covariate_names_raw = []
@@ -1044,7 +1058,6 @@ for repeat_id in design_matrix['repeat_id'].unique():
 
         # Save result
         design_matrix.loc[index, 'log_likelihood'] = sum(logp)
-
 
 # Save result
 design_matrix.to_csv(os.path.join(output_folder, 'results.csv'), index=False)
