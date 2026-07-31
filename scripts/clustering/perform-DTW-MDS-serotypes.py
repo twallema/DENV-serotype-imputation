@@ -24,8 +24,12 @@ from sklearn.manifold import MDS
 ##############
 
 # spatial aggregation: 'rgint' (130 intermediate regions) ONLY
-region_filename = 'rgint'   # NOTE: script intended to work with 'rgint'
-region = 'CD_RGINT'         # NOTE: script intended to work with 'CD_RGINT'
+region_filename = 'rgi'   # NOTE: script intended to work with 'rgint'
+region = 'CD_RGI'         # NOTE: script intended to work with 'CD_RGINT'
+
+abs_dir = os.path.dirname(__file__)
+output_folder = os.path.join(abs_dir, f"../../data/interim/DTW-MDS-embeddings/serotypes/{region}")
+os.makedirs(output_folder, exist_ok=True)
 
 # sampler
 n_chains = 4
@@ -129,43 +133,43 @@ geography_regions = geography.dissolve(by=f'{region}').reset_index()
 centroids = np.column_stack([geography_regions.geometry.centroid.x, geography_regions.geometry.centroid.y])
 spatial_dist_matrix = squareform(pdist(centroids, metric='euclidean'))
 
-# cluster and plot on map
-features = cases_season.select("median_serotyped").to_numpy()
-Z = linkage(features, method="ward")
+# # cluster and plot on map
+# features = cases_season.select("median_serotyped").to_numpy()
+# Z = linkage(features, method="ward")
 
-geography_states = geography.dissolve(by='CD_UF')
+# geography_states = geography.dissolve(by='CD_UF')
 
-geography_regions = geography.dissolve(by=f'{region}').reset_index()
+# geography_regions = geography.dissolve(by=f'{region}').reset_index()
 
-for n_clusters in n_dtw_clusters:
+# for n_clusters in n_dtw_clusters:
 
-    clusters = fcluster(Z, n_clusters, criterion="maxclust")
+#     clusters = fcluster(Z, n_clusters, criterion="maxclust")
 
-    cases_per_cluster = cases_season.with_columns(pl.Series(name="cluster_id", values=clusters)).group_by('cluster_id').agg(pl.col('median_serotyped').mean()).sort('cluster_id')
+#     cases_per_cluster = cases_season.with_columns(pl.Series(name="cluster_id", values=clusters)).group_by('cluster_id').agg(pl.col('median_serotyped').mean()).sort('cluster_id')
 
-    label_map = {row["cluster_id"]: f"Cluster {row['cluster_id']} ({row['median_serotyped']:.1f})" for row in cases_per_cluster.iter_rows(named=True)}
+#     label_map = {row["cluster_id"]: f"Cluster {row['cluster_id']} ({row['median_serotyped']:.1f})" for row in cases_per_cluster.iter_rows(named=True)}
     
-    geography_regions["median_serotyped_cluster"] = [label_map[c] for c in clusters]
+#     geography_regions["median_serotyped_cluster"] = [label_map[c] for c in clusters]
 
-    glasbey_cmap = ListedColormap(create_palette(palette_size=n_clusters))
+#     glasbey_cmap = ListedColormap(create_palette(palette_size=n_clusters))
 
-    fig, ax = plt.subplots()
-    geography_states.boundary.plot(ax=ax, linewidth=0.5, color="black")   # state boundaries
-    geography_regions.plot(
-        column="median_serotyped_cluster",          # color regions by cluster label
-        cmap = glasbey_cmap,
-        categorical=True,
-        linewidth=0.2,
-        edgecolor="grey",
-        legend=True,
-        ax=ax,
-        legend_kwds={'fontsize': 4, 'ncol': 2, 'loc': 'lower right', 'markerscale': 0.4}
-    )
-    ax.set_title(f"Median number of serotyped cases per season", fontsize=12)
-    ax.axis("off")
-    os.makedirs(f'../../data/interim/DTW-MDS-embeddings/serotypes/serotyping_effort', exist_ok=True)
-    plt.savefig(f'../../data/interim/DTW-MDS-embeddings/serotypes/serotyping_effort/median_clusters_{n_clusters}.png', dpi=600)
-    plt.close()
+#     fig, ax = plt.subplots()
+#     geography_states.boundary.plot(ax=ax, linewidth=0.5, color="black")   # state boundaries
+#     geography_regions.plot(
+#         column="median_serotyped_cluster",          # color regions by cluster label
+#         cmap = glasbey_cmap,
+#         categorical=True,
+#         linewidth=0.2,
+#         edgecolor="grey",
+#         legend=True,
+#         ax=ax,
+#         legend_kwds={'fontsize': 4, 'ncol': 2, 'loc': 'lower right', 'markerscale': 0.4}
+#     )
+#     ax.set_title(f"Median number of serotyped cases per season", fontsize=12)
+#     ax.axis("off")
+#     os.makedirs(os.path.join(output_folder, 'serotyping_effort'), exist_ok=True)
+#     plt.savefig(os.path.join(output_folder, f'serotyping_effort/median_clusters_{n_clusters}.png'), dpi=600)
+#     plt.close()
 
 
 ######################
@@ -192,9 +196,9 @@ n_serotypes = Y_multinomial.shape[2]
 # build an adjacency matrix
 from libpysal.weights import Queen
 regions = (
-    geography[["CD_RGINT", "geometry"]]
-    .dissolve(by="CD_RGINT", as_index=False)
-    .sort_values("CD_RGINT")
+    geography[[f"{region}", "geometry"]]
+    .dissolve(by=f"{region}", as_index=False)
+    .sort_values(f"{region}")
     .reset_index(drop=True)
 )
 queen = Queen.from_dataframe(regions)
@@ -256,14 +260,14 @@ with pm.Model(coords=coords) as model:
 
 # NUTS
 with model:
-    trace = pm.sample(n_draw, tune=n_tune, target_accept=0.8, chains=n_chains, cores=n_chains, init='adapt_diag', progressbar=True)
+    trace = pm.sample(n_draw, tune=n_tune, target_accept=0.8, chains=n_chains, cores=1, init='adapt_diag', progressbar=True)    # crashes when using CD_RGI and using multiple cores
 
 # save traces
 variables2plot = ['sigma_beta', 'psi', 'd_region_hierarch', 'd_region']
-os.makedirs(f'../../data/interim/DTW-MDS-embeddings/serotypes/trace', exist_ok=True)
+os.makedirs(os.path.join(output_folder, 'trace'), exist_ok=True)
 for var in variables2plot:
     arviz.plot_trace(trace, var_names=[var]) 
-    plt.savefig(f'../../data/interim/DTW-MDS-embeddings/serotypes/trace/trace-{var}_typing-effort-model.pdf')
+    plt.savefig(os.path.join(output_folder, f'trace/trace-{var}_typing-effort-model.pdf'))
     plt.close()
 
 # make a posterior predictive
@@ -277,10 +281,10 @@ with model:
 
 # DTW the latent serotype trajectory from 2020 onwards and save it
 theta_log = trace.posterior['p'].mean(dim=['chain', 'draw']).sel(date=slice("2020-01-01", None))
-data_3d = theta_log.transpose("CD_RGINT", "date", "serotype").values
+data_3d = theta_log.transpose(f"{region}", "date", "serotype").values
 dtw_matrix = cdist_dtw(data_3d[:,:,(0,1,2)], global_constraint="sakoe_chiba", sakoe_chiba_radius=1)
-pd.DataFrame(data=dtw_matrix, index=sorted(geography[f"{region}"].unique()), columns=sorted(geography[f"{region}"].unique())).to_csv(f'../../data/interim/DTW-MDS-embeddings/serotypes/dtw/dtw-matrix_post-2020_{region}.csv', index=True)
-
+os.makedirs(os.path.join(output_folder, 'dtw'), exist_ok=True)
+pd.DataFrame(data=dtw_matrix, index=sorted(geography[f"{region}"].unique()), columns=sorted(geography[f"{region}"].unique())).to_csv(os.path.join(output_folder, f'dtw/dtw-matrix_post-2020_{region}.csv'), index=True)
 
 # cluster it
 Z = linkage(squareform(dtw_matrix, checks=False), method='ward')
@@ -299,8 +303,7 @@ for n_clusters in n_dtw_clusters:
     geography_regions['dtw_cluster'] = [label_map[c] for c in clusters]
 
     sns.clustermap(dtw_matrix, cmap='viridis', row_linkage=Z, col_linkage=Z, method='precomputed')
-    os.makedirs(f'../../data/interim/DTW-MDS-embeddings/serotypes/dtw', exist_ok=True)
-    plt.savefig(f'../../data/interim/DTW-MDS-embeddings/serotypes/dtw/clustermap.pdf')
+    plt.savefig(os.path.join(output_folder, 'dtw/clustermap.pdf'))
     plt.close()
 
     # visualise clusters on a map
@@ -320,8 +323,9 @@ for n_clusters in n_dtw_clusters:
     )
     ax.set_title(f"Serotype trajectory DTW distance", fontsize=12)
     ax.axis("off")
-    plt.savefig(f'../../data/interim/DTW-MDS-embeddings/serotypes/dtw/clusters_{n_clusters}.png', dpi=600)
+    plt.savefig(os.path.join(output_folder,f'dtw/clusters_{n_clusters}.png'), dpi=600)
     plt.close()
+
 
 #########
 ## MDS ##
@@ -335,7 +339,7 @@ print(mds.stress_)
 # convert to dataframe
 embedding = pd.DataFrame(coords, index=pd.Index(cases[f"{region}"].unique(), name=f"{region}"), columns=[f"serotypes_mds{i+1}" for i in range(n_mds_components)]).reset_index()
 # save dataframe
-embedding.to_csv(f'../../data/interim/DTW-MDS-embeddings/serotypes/DTW-MDS-embedding_{region_filename}.csv', index=False)
+embedding.to_csv(os.path.join(output_folder, f'DTW-MDS-embedding_{region_filename}.csv'), index=False)
 
 
 #########################
@@ -441,6 +445,6 @@ for region_id in cases[f"{region}"].unique():
     ax[-1].set_ylabel(f"Serotype distribution (%)")
 
     plt.tight_layout()
-    os.makedirs(f'../../data/interim/DTW-MDS-embeddings/serotypes/posterior_predictive', exist_ok=True)
-    plt.savefig(f'../../data/interim/DTW-MDS-embeddings/serotypes/posterior_predictive/{region}_{region_id}.pdf')
+    os.makedirs(os.path.join(output_folder, 'posterior_predictive'), exist_ok=True)
+    plt.savefig(os.path.join(output_folder, f'posterior_predictive/{region_id}.pdf'))
     plt.close()

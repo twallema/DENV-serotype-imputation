@@ -115,7 +115,7 @@ cases_season_stats = (
 ## Perform selection based on quality ##
 ########################################
 
-good_regions_quality = pd.read_csv("../../data/interim/DTW-MDS-embeddings/serotypes/serotype_trajectory_quality.csv")
+good_regions_quality = pd.read_csv(f"../../data/interim/DTW-MDS-embeddings/serotypes/{region}/serotype_trajectory_quality_{region}.csv")
 
 
 #####################################################
