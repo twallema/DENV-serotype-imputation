@@ -290,7 +290,7 @@ theta_log = trace.posterior['p'].mean(dim=['chain', 'draw']).sel(date=slice("202
 data_3d = theta_log.transpose(f"{region}", "date", "serotype").values
 dtw_matrix = cdist_dtw(data_3d[:,:,(0,1,2)], global_constraint="sakoe_chiba", sakoe_chiba_radius=1)
 os.makedirs(os.path.join(output_folder, 'dtw'), exist_ok=True)
-pd.DataFrame(data=dtw_matrix, index=sorted(geography[f"{region}"].unique()), columns=sorted(geography[f"{region}"].unique())).to_csv(os.path.join(output_folder, f'dtw/dtw-matrix_post-2020_{region}.csv'), index=True)
+pd.DataFrame(data=dtw_matrix, index=sorted(geography[f"{region}"].unique()), columns=sorted(geography[f"{region}"].unique())).to_csv(os.path.join(output_folder, f'dtw/dtw-matrix_post-2020_{region_filename}.csv'), index=True)
 
 # cluster it
 Z = linkage(squareform(dtw_matrix, checks=False), method='ward')
