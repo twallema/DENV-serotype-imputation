@@ -190,3 +190,4 @@ data/interim/DTW-MDS-embeddings/indexP/DTW-mat-clustermap_mun.pdf
 data/interim/DTW-MDS-embeddings/DENV_100k/DTW-mat-clustermap_mun.pdf
 ## Openstreetmaps files
 data/raw/travel_time_matrices
+.Rproj.user
