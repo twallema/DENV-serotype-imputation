@@ -158,7 +158,7 @@ for (i in seq_along(regions)) {
     valid_durations <- run_durations[!is.na(run_durations)]
     
     # Clean runs greater than a "sanity" threshold
-    run_durations[run_durations > travel_duration_threshold] <- NA
+    valid_durations[valid_durations > travel_duration_threshold] <- NA
     
     if (length(valid_durations) > 0) {
       mean_matrix[i, j] <- mean(valid_durations)
