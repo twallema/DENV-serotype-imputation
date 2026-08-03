@@ -1065,4 +1065,4 @@ for repeat_id in design_matrix['repeat_id'].unique():
 
 
 # Save result
-design_matrix.to_csv(os.path.join(output_folder, 'results.csv'), index=False)
+design_matrix.to_csv(os.path.join(output_folder, 'hyperoptimisation_results.csv'), index=False)
