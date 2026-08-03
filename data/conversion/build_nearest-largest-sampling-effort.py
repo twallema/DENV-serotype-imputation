@@ -115,7 +115,7 @@ cases_season_stats = (
 ## Perform selection based on quality ##
 ########################################
 
-good_regions_quality = pd.read_csv(f"../../data/interim/DTW-MDS-embeddings/serotypes/{region}/serotype_trajectory_quality_{region}.csv")
+good_regions_quality = pd.read_csv(f"../../data/interim/DTW-MDS-embeddings/serotypes/{region}/serotype_trajectory_quality_{region_filename}.csv")
 
 
 #####################################################
@@ -203,7 +203,7 @@ distance_matrix = pd.DataFrame(
 )
 
 # load the DTW distance
-dtw_matrix = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/serotypes/dtw/dtw-matrix_post-2020_{region}.csv', index_col=0)
+dtw_matrix = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/serotypes/{region}/dtw/dtw-matrix_post-2020_{region_filename}.csv', index_col=0)
 dtw_matrix.columns = dtw_matrix.columns.astype(int)
 
 # make into a function
