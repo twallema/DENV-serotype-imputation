@@ -95,7 +95,9 @@ design_matrix = (
     .reset_index(drop=True)
 )
 
+# Pre-initialise the likelihood and number of clusters
 design_matrix["log_likelihood"] = np.nan
+design_matrix["n_clusters"] = np.nan
 
 print(f"\nNumber of covariate combinations: {len(covariate_combinations)}")
 print(f"Number of thresholds: {len(threshold_values)}")
@@ -1058,6 +1060,9 @@ for repeat_id in design_matrix['repeat_id'].unique():
 
         # Save result
         design_matrix.loc[index, 'log_likelihood'] = sum(logp)
+        design_matrix.loc[index, 'n_clusters'] = n_clusters
+
+
 
 # Save result
 design_matrix.to_csv(os.path.join(output_folder, 'results.csv'), index=False)
