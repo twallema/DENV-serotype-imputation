@@ -473,16 +473,16 @@ for repeat_id in design_matrix['repeat_id'].unique():
     geography.boundary.plot(ax=ax, linewidth=0.1, alpha=0.3, color="black")
     geography.loc[geography['validation_labels'] == True].plot(
         linewidth=0.2,
-        hatch='////',
-        color='grey',
-        alpha=0.5,
+        hatch='/////',
+        color='red',
+        alpha=0.8,
         edgecolor="grey",
         legend=False,
         ax=ax
     )
     ax.set_title('Areas left out during within-sample validation', fontsize=10)
     ax.axis("off")
-    plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/validation_labels.png'), dpi=600)
+    plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/validation_labels.svg'))
     plt.close()
 
     # merge them to the geography dataframe
