@@ -9,9 +9,9 @@ library(dplyr)
 
 geo_level <- "CD_RGINT"
 year = 2022
-N_runs <- 50 # Number of random municipality pairs to sample per region pair
+N_runs <- 5 # Number of random municipality pairs to sample per region pair
 max_attempts <- 10
-travel_duration_threshold <- 999
+travel_duration_threshold <- 7*24   # use threshold for CD_RGINT to disregard ferry trips along Amazon
   
 # Set working directory to location of this script
 if(!require(rstudioapi)) install.packages("rstudioapi")
@@ -89,7 +89,7 @@ for (i in seq_along(regions)) {
   orig_pool <- region_muni_list[[as.character(orig_reg)]]
   
   for (j in seq_along(regions)) {
-    
+
     if (i == j) {
       mean_matrix[i, j] <- 0
       sd_matrix[i, j]   <- 0
@@ -103,15 +103,10 @@ for (i in seq_along(regions)) {
     run_durations <- numeric(N_runs)
    
     pair_max_failures <- 0
-    
+
     for (r in 1:N_runs) {
       sampled_orig <- orig_pool[sample(nrow(orig_pool), size = 1, prob = orig_pool$pop_fraction), ]
       sampled_dest <- dest_pool[sample(nrow(dest_pool), size = 1, prob = dest_pool$pop_fraction), ]
-      
-      if (i == j) {
-        run_durations[r] <- 0
-        next
-      }
       
       # Retry loop until successful response or max retries reached
       success <- FALSE
@@ -129,7 +124,6 @@ for (i in seq_along(regions)) {
               osrm.profile = "car"
             )
           })
-          
           dur <- route["duration"]
           if (!is.na(dur) && length(dur) > 0) {
             run_durations[r] <- dur / 60
@@ -137,7 +131,7 @@ for (i in seq_along(regions)) {
           } else {
             Sys.sleep(0.01) # Brief pause before retrying
           }
-          
+
         }, error = function(e) {
           # If connection fails, pause briefly and let the while loop try again
           Sys.sleep(0.01)
@@ -154,11 +148,11 @@ for (i in seq_along(regions)) {
     # Register number of runs with all attempts failed
     max_attempts_reached_matrix[i, j] <- pair_max_failures / N_runs
     
+    # Clean runs greater than a "sanity" threshold
+    run_durations[run_durations > travel_duration_threshold] <- NA
+    
     # Clean failed runs (NAs)
     valid_durations <- run_durations[!is.na(run_durations)]
-    
-    # Clean runs greater than a "sanity" threshold
-    valid_durations[valid_durations > travel_duration_threshold] <- NA
     
     if (length(valid_durations) > 0) {
       mean_matrix[i, j] <- mean(valid_durations)
