@@ -296,8 +296,8 @@ def build_nearest_largest_sampling_effort_clusters(good_regions, distance_matrix
     return gdf["cluster_id"].values
 
 # run functions on both distance matrices
-geography_regions[f'cluster_id_dist'] = build_nearest_largest_sampling_effort_clusters(good_regions, travel_time_matrix, gdf, region)
-geography_regions[f'cluster_id_time'] = build_nearest_largest_sampling_effort_clusters(good_regions, distance_matrix, gdf, region)
+geography_regions[f'cluster_id_time'] = build_nearest_largest_sampling_effort_clusters(good_regions, travel_time_matrix, gdf, region)
+geography_regions[f'cluster_id_dist'] = build_nearest_largest_sampling_effort_clusters(good_regions, distance_matrix, gdf, region)
 geography_regions[f'cluster_id_dtw'] = build_nearest_largest_sampling_effort_clusters(good_regions, dtw_matrix, gdf, region)
 
 
@@ -315,7 +315,7 @@ geography_states = geography_states.to_crs('EPSG:4674')
 geography_regions = geography_regions.to_crs('EPSG:4674')
 
 columns = ["dist", "time", "dtw"]
-titles = ["Travel time (car)", "Centroid distance", "Serotype DTW distance"]
+titles = ["Centroid distance", "Travel time (car)", "Serotype DTW distance"]
 
 fig, ax = plt.subplots(ncols=3, figsize=(11.7, 8.3/2))
 
