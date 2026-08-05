@@ -55,6 +55,10 @@ These data are partly confidential and can be found on the Bento lab box.
 
 + `spatial_units_mapping.csv`: Area codes and names of the municipalities, immediate regions, intermediate regions, federative units and regions. Also available in `geographic-dataset.parquet` but saved seperately to lower IO burden.
 
+### Climate
+
++ `temperature_normals.csv`: Average minimum, median and maximum temperature per CD_MUN and month of year. Based on daily minimum, median and maximum temperatures from 2010 until 2026. Raw file obtained from Elvira D'Bastiani.
+
 ### Human footprint
 
 + `human-footprint_mun/rgi/rgint.csv`: Human footprint (averaged 2013-2019) per municipality, immediate region or intermediate region.
