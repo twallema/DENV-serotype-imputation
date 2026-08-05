@@ -171,7 +171,7 @@ good_regions_quality = pd.read_csv(f"../../data/interim/DTW-MDS-embeddings/serot
 # ax.set_title(f"Median number of serotyped cases per season", fontsize=12)
 # ax.axis("off")
 # os.makedirs(f'../../data/interim/nearest-largest-sampling-effort/', exist_ok=True)
-# plt.savefig(f'../../data/interim/nearest-largest-sampling-effort/qualitative-quantitative-comparison_{region_filename}.png', dpi=600)
+# plt.savefig(f'../../data/interim/nearest-largest-sampling-effort/qualitative-quantitative-comparison_{region_filename}.svg', dpi=600)
 # plt.close()
 
 
@@ -206,6 +206,12 @@ distance_matrix = pd.DataFrame(
 dtw_matrix = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/serotypes/{region}/dtw/dtw-matrix_post-2020_{region_filename}.csv', index_col=0)
 dtw_matrix.columns = dtw_matrix.columns.astype(int)
 
+# build a manual assignment dictionary
+manual_assigment_dictionary = {
+    'CD_RGINT': {1302: 1301, 1304: 1301},
+    'CD_RGI': {130002: 130001, 130005: 130001, 130006: 130001, 130007: 130001, 130010: 130001, 130011: 130001}
+    }
+
 # make into a function
 def build_nearest_largest_sampling_effort_clusters(good_regions, distance_matrix, gdf, region):
 
@@ -213,10 +219,12 @@ def build_nearest_largest_sampling_effort_clusters(good_regions, distance_matrix
     gdf['closest'] = pd.Series(pd.NA, dtype="Int64", index=gdf.index)
     for region_id in gdf[f'{region}']:
         if region_id not in good_regions:
-            gdf.loc[gdf[f'{region}'] == region_id, 'closest'] = int(distance_matrix.loc[region_id, good_regions].idxmin())
+            if region_id in manual_assigment_dictionary[f"{region}"].keys():
+                gdf.loc[gdf[f'{region}'] == region_id, 'closest'] = manual_assigment_dictionary[f"{region}"][region_id]
+            else:
+                gdf.loc[gdf[f'{region}'] == region_id, 'closest'] = int(distance_matrix.loc[region_id, good_regions].idxmin())
         else:
             gdf.loc[gdf[f'{region}'] == region_id, 'closest'] = region_id
-
 
     # Step 2: Group adjacent "has_quality" regions into unified cluster components using spatial touch/overlaps
     gdf = gdf.merge(good_regions_quality, on=f"{region}")
@@ -352,7 +360,35 @@ for i, col in enumerate(columns):
     ax[i].set_title(titles[i])
 
 os.makedirs(f'../../data/interim/nearest-largest-sampling-effort/', exist_ok=True)
-plt.savefig(f'../../data/interim/nearest-largest-sampling-effort/nearest-largest-sampling-effort_{region_filename}.png', dpi=600)
+plt.savefig(f'../../data/interim/nearest-largest-sampling-effort/nearest-largest-sampling-effort_{region_filename}.svg', dpi=600)
+plt.close()
+
+
+# Visualise on a map 
+fig, ax = plt.subplots()
+
+geography_states.boundary.plot(ax=ax, linewidth=0.5, color="black")   # state boundaries
+
+geography_regions.plot(
+    column=f"cluster_id_time",          # color regions by cluster label
+    categorical=True,
+    cmap = glasbey_cmap,
+    linewidth=0.2,
+    edgecolor="grey",
+    legend=False,
+    ax=ax,
+)
+
+quality_regions.plot(
+    ax=ax,
+    color="grey",
+    edgecolor="black",
+    hatch="////",
+    linewidth=0.5,
+    alpha=0.4  # Slight transparency softens the grey
+)
+ax.axis("off")
+plt.savefig(f'../../data/interim/nearest-largest-sampling-effort/nearest-largest-sampling-effort_time_{region_filename}.svg')
 plt.close()
 
 
