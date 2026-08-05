@@ -7,10 +7,10 @@ library(dplyr)
 # Fetch the OpenStreetMap for Brazil
 # https://download.geofabrik.de/south-america/brazil.html --> Download brazil-latest.osm.pbf
 
-geo_level <- "CD_RGI"
+geo_level <- "CD_RGINT"
 year = 2022
-N_runs <- 2 # Number of random municipality pairs to sample per origin-destination pair
-max_attempts <- 2
+N_runs <- 500 # Number of random municipality pairs to sample per origin-destination pair
+max_attempts <- 10
 travel_duration_threshold <- 4*24   # use maximum trip length of one week to discard ferry trips along Amazon
 
 # Amazon region and how it connects to Manaus requires special care
