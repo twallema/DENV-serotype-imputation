@@ -16,8 +16,8 @@ from glasbey import create_palette
 from matplotlib.colors import ListedColormap
 
 # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
-region_filename = 'mun'
-region = 'CD_MUN'
+region_filename = 'rgi'
+region = 'CD_RGI'
 # dynamic time warping
 sakoe_chiba_radius = 12  # 0 will emphasise similarities in seasonality, 12/24/36 emphasizes similarity in magnitudes
 # number of dimensions to project the DTW matrix onto (bigger = better representation of DTW matrix BUT clustering becomes harder)
@@ -81,12 +81,12 @@ plt.imshow(dtw_dist, cmap="viridis", aspect="auto")
 plt.colorbar(label="DTW distance")
 plt.title(f"DTW distance matrix")
 plt.axis("off")  # hide axis labels since 508 is too dense
-plt.savefig(f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-mat-raw_{region_filename}.pdf')
+plt.savefig(f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-mat-raw_{region_filename}.png', dpi=600)
 plt.close()
 
 # visualise clustermap
 sns.clustermap(dtw_dist, cmap="viridis", figsize=(12, 12))
-plt.savefig(f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-mat-clustermap_{region_filename}.pdf')
+plt.savefig(f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-mat-clustermap_{region_filename}.png', dpi=600)
 plt.close()
 
 
@@ -94,6 +94,8 @@ plt.close()
 
 # Load geodata
 geography = gpd.read_parquet("../../data/interim/geographic-dataset.parquet")
+# Dissolve to states
+gdf_states = geography.dissolve(by='CD_UF')
 # Dissolve to desired spatial level
 geography = geography.dissolve(by=f'{region}', aggfunc={'POP': 'sum'})
 # Perform hierarchical clustering (average linkage)
@@ -125,7 +127,27 @@ plt.savefig(f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-mat-clustered_
 plt.close()
 
 
-# --- Step 4: Multidimensional Scaling (MDS) ---
+# --- Step 4: Visualise our favorite on a map and export to svg ---
+
+# Visualise DTW clusters 
+fig,ax=plt.subplots()
+gdf_states.boundary.plot(ax=ax, linewidth=0.5, color="black")
+geography.boundary.plot(ax=ax, linewidth=0.1, alpha=0.3, color="black")
+geography.plot(
+    column=f"dtw_clusters_7",          # color regions by cluster label
+    categorical=True,
+    linewidth=0,
+    edgecolor=None,
+    legend=False,
+    ax=ax,
+)
+ax.axis("off")
+
+plt.tight_layout()
+plt.savefig(f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-mat-favorite_{region_filename}.svg')
+plt.close()
+
+# --- Step 5: Multidimensional Scaling (MDS) ---
 
 # perform MDS
 mds = MDS(n_components=n_mds_components, dissimilarity="precomputed", random_state=42, max_iter=10000, normalized_stress=True)

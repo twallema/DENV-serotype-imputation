@@ -1,4 +1,5 @@
 import io, sys, os
+import math
 import itertools
 import numpy as np
 import polars as pl
@@ -65,9 +66,9 @@ if not os.path.exists(output_folder):
 # make an experimental design matrix
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-grid_covariates = ["indexP_DTW", "denv_100k_DTW", "koppen"] # "biome", "denv_100k_cumulative", "human_footprint"]
+grid_covariates = ["indexP_DTW", "denv_100k_DTW", "koppen"] # "denv_100k_DTW", "biome", "denv_100k_cumulative", "human_footprint"]
 
-threshold_values = [60, 75, 90]
+threshold_values = [40, 55, 90] # CD_RGINT: 40, 55, 90, 110 results in 8, 10, 15 or 20 clusters
 
 # Generate combinations of grid_covariates (True/False) AND thresholds
 covariate_combinations = list(
@@ -498,6 +499,8 @@ for repeat_id in design_matrix['repeat_id'].unique():
 
     for index, row in design_matrix[design_matrix['repeat_id'] == repeat_id][ [col for col in design_matrix.columns if col != 'log_likelihood'] ].iterrows():
 
+        print(f"\nWorking on index: {index}\n")
+
         os.makedirs(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}'), exist_ok=True)
         
         covariate_names = [col for col, val in row.to_dict().items() if val is True] # Filter covariate columns that evaluate to True
@@ -668,7 +671,7 @@ for repeat_id in design_matrix['repeat_id'].unique():
         prob_matrix.to_csv(os.path.join(output_folder, f"repeat_{repeat_id}/index_{index}/prob_matrix_{spatial_aggregation}.csv"))
 
         # compute median number of clusters
-        n_clusters = int(np.median([len(np.unique(l)) for l in labels]))
+        n_clusters = math.ceil(np.mean([len(np.unique(l)) for l in labels]))
 
         # make a categorical color palette with n_clusters distinct colors
         glasbey_cmap = ListedColormap(create_palette(palette_size=n_clusters))
@@ -690,7 +693,7 @@ for repeat_id in design_matrix['repeat_id'].unique():
         # Save clustermap
         import seaborn as sns
         sns.clustermap(1-distance, cmap='viridis')
-        plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/clustermap_probmatrix_{spatial_aggregation}.png'), dpi=600)
+        plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/clustermap_probmatrix_{spatial_aggregation}.svg'))
         plt.close()
 
 
@@ -736,7 +739,7 @@ for repeat_id in design_matrix['repeat_id'].unique():
         ax[1].axis("off")
         fig.suptitle('Consensus clusters')
         plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/consensus_clusters_{spatial_aggregation}.png'), dpi=600)
+        plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/consensus_clusters_{spatial_aggregation}.svg'))
         plt.close()
 
         # Save the consensus clusters (hierarchical)
@@ -764,7 +767,7 @@ for repeat_id in design_matrix['repeat_id'].unique():
             cluster_centroid = gdf.union_all().centroid
             #ax.text(cluster_centroid.x, cluster_centroid.y, str(cluster_id), ha="center", va="center", fontsize=12, fontweight="bold", color="black")
             ax.set_axis_off()
-            plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/clusters/cluster_{cluster_id}.png'), dpi=600)
+            plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/clusters/cluster_{cluster_id}.svg'))
             plt.close()
 
 
