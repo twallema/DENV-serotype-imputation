@@ -197,3 +197,5 @@ data/raw/travel_time_matrices
 data/interim/nearest-largest-sampling-effort
 data/interim/DTW-MDS-embeddings/serotypes/CD_RGI/posterior_predictive/*.pdf
 data/interim/DTW-MDS-embeddings/serotypes/CD_RGINT/posterior_predictive/*.pdf
+### Flowchart
+scripts/clustering/flowchart_extended.svg
