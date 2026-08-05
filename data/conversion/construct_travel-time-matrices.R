@@ -7,12 +7,21 @@ library(dplyr)
 # Fetch the OpenStreetMap for Brazil
 # https://download.geofabrik.de/south-america/brazil.html --> Download brazil-latest.osm.pbf
 
-geo_level <- "CD_RGINT"
+geo_level <- "CD_RGI"
 year = 2022
-N_runs <- 5 # Number of random municipality pairs to sample per region pair
-max_attempts <- 10
-travel_duration_threshold <- 7*24   # use threshold for CD_RGINT to disregard ferry trips along Amazon
-  
+N_runs <- 2 # Number of random municipality pairs to sample per origin-destination pair
+max_attempts <- 2
+travel_duration_threshold <- 4*24   # use maximum trip length of one week to discard ferry trips along Amazon
+
+# Amazon region and how it connects to Manaus requires special care
+## Region 1301: Made a list of all municipalities with road access (12/21 municipalities)
+## Region 1302: Does not have a single municipality with road access
+## Region 1303: 157 hour ferry from Tapauá (1304104) to Manaus, all other municipalities have road access and reasonable travel times to Manaus
+## Region 1304: 105 hour ferry from Nhamundá (1303007) to Manaus, all other municipalities have road access. However, driving to Manaus is through Porto Velho, which is a massive unrepresentative detour given most of 1304's region's lie along the Amazon river directly connecting them to Manaus.
+### Skip regions 1302 and 1304; region 1303: use max traveltime threshold to omit ferry trip to Manaus; region 1301: Sample only from municipalities with road access to avoid skew due to long ferries below max traveltime threshold
+
+road_access_1301 <- c("Caapiranga", "Careiro", "Careiro da Várzea", "Coari", "Codajás", "Iranduba",  "Manacapuru", "Manaquiri", "Manaus", "Novo Airão", "Presidente Figueiredo", "Rio Preto da Eva")
+
 # Set working directory to location of this script
 if(!require(rstudioapi)) install.packages("rstudioapi")
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
@@ -89,22 +98,50 @@ for (i in seq_along(regions)) {
   orig_pool <- region_muni_list[[as.character(orig_reg)]]
   
   for (j in seq_along(regions)) {
-
-    if (i == j) {
-      mean_matrix[i, j] <- 0
-      sd_matrix[i, j]   <- 0
-      max_attempts_reached_matrix[i, j] <- 0
-      next
-    }
     
     dest_reg <- regions[j]
     dest_pool <- region_muni_list[[as.character(dest_reg)]]
+    
+    # Region 1302: Accessible only via the Amazon river to Manaus --> SKIP
+    if (any(orig_pool$CD_RGINT == 1302) || any(dest_pool$CD_RGINT == 1302)) {
+      mean_matrix[i, j] <- NA
+      sd_matrix[i, j]   <- NA
+      max_attempts_reached_matrix[i, j] <- NA
+      next
+    }
+    
+    # Region 1304: Road access is not representative of actual connectivity due to massive detour --> SKIP
+    if (any(orig_pool$CD_RGINT == 1304) || any(dest_pool$CD_RGINT == 1304)) {
+      mean_matrix[i, j] <- NA
+      sd_matrix[i, j]   <- NA
+      max_attempts_reached_matrix[i, j] <- NA
+      next
+    }
+    
+    # Region 130002: (in region 1301) has no road access
+    if (any(orig_pool$CD_RGI == 130002) || any(dest_pool$CD_RGI == 130002)) {
+      mean_matrix[i, j] <- NA
+      sd_matrix[i, j]   <- NA
+      max_attempts_reached_matrix[i, j] <- NA
+      next
+    }
     
     run_durations <- numeric(N_runs)
    
     pair_max_failures <- 0
 
     for (r in 1:N_runs) {
+      
+      # Region 1301: filter by having road access
+      if (any(orig_pool$CD_RGINT == 1301)){
+        orig_pool <- orig_pool %>%
+          filter(NM_MUN %in% road_access_1301)
+      }
+      if (any(dest_pool$CD_RGINT == 1301)){
+        dest_pool <- dest_pool %>%
+          filter(NM_MUN %in% road_access_1301)
+      }
+      
       sampled_orig <- orig_pool[sample(nrow(orig_pool), size = 1, prob = orig_pool$pop_fraction), ]
       sampled_dest <- dest_pool[sample(nrow(dest_pool), size = 1, prob = dest_pool$pop_fraction), ]
       
