@@ -1,4 +1,5 @@
 
+import os
 import pandas as pd
 import numpy as np
 import seaborn as sns
@@ -15,59 +16,53 @@ from pygam import LinearGAM, s
 from glasbey import create_palette
 from matplotlib.colors import ListedColormap
 
+metric = 'temp_med'
 
 # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
-region_filename = 'rgint'
-region = 'CD_RGINT'
+region_filename = 'rgi'
+region = 'CD_RGI'
 # dynamic time warping
-sakoe_chiba_radius = 0
+sakoe_chiba_radius = 3
 # number of dimensions to project the DTW matrix onto (bigger = better representation of DTW matrix BUT clustering becomes harder)
 n_mds_components = 3
 
 
 # --- Step 1: Prepare and smooth incidence time series ---
 
-# get the index P data
-indexP = pd.read_csv(f'../../data/interim/indexP/indexP_{region_filename}.csv')
+# get the temperature data
+temp = pd.read_csv(f'../../data/interim/climate/temperature_normals_{region_filename}.csv')
 
 # GAM smooth timeseries
-indexP["month_num"] = indexP["month"] - indexP["month"].min()
+temp["month_num"] = temp["month"] - temp["month"].min()
 
-indexP["indexP_smooth"] = np.nan
-for _, group in indexP.groupby(f"{region}"):
+temp[f"{metric}" + "_smooth"] = np.nan
+for _, group in temp.groupby(f"{region}"):
 
     X = group[["month_num"]].values
-    y = group["indexP"].values
+    y = group[f"{metric}"].values
 
-    gam = LinearGAM(s(0), n_splines=10, lam=0.2).fit(X, y)
+    gam = LinearGAM(s(0), n_splines=10, lam=0.1).fit(X, y)
 
-    indexP.loc[group.index, "indexP_smooth"] = gam.predict(X)
+    temp.loc[group.index, f"{metric}" + "_smooth"] = gam.predict(X)
+
 
 # Repeat 3 times to mimic circularity
-indexP = indexP.sort_values(by=[f"{region}", "month"])
+temp = temp.sort_values(by=[f"{region}", "month"])
 
-indexP = (
-    indexP.groupby(f"{region}", as_index=True)
+temp = (
+    temp.groupby(f"{region}", as_index=True)
     .apply(lambda g: pd.concat([g, g, g], ignore_index=True))
     .reset_index(drop=False)
 )
 
-indexP["month"] = indexP.groupby(f"{region}").cumcount()
-
-
-# # If you want to z-score --> Doesn't work
-# g = indexP.groupby("CD_RGI")["indexP_smooth"]
-# indexP["indexP_smooth"] = (
-#     (indexP["indexP_smooth"] - g.transform("mean"))
-#     / g.transform("std")
-# )
+temp["month"] = temp.groupby(f"{region}").cumcount()
 
 # # visualise results
 # fig,ax=plt.subplots()
-# ax.plot(indexP.month.unique(), indexP[indexP['CD_RGI'] == 530001]['indexP'], color='black', label='530001')
-# ax.plot(indexP.month.unique(), indexP[indexP['CD_RGI'] == 530001]['indexP_smooth'], color='red', label='530001 (smooth)')
-# ax.plot(indexP.month.unique(), indexP[indexP['CD_RGI'] == 110001]['indexP'], color='black', linestyle='--', label='110001')
-# ax.plot(indexP.month.unique(), indexP[indexP['CD_RGI'] == 110001]['indexP_smooth'], color='red', linestyle='--', label='110001 (smooth)')
+# ax.plot(temp.month.unique(), temp[temp['CD_RGI'] == 530001]['temp_med'], color='black', label='530001')
+# ax.plot(temp.month.unique(), temp[temp['CD_RGI'] == 530001]['temp_med_smooth'], color='red', label='530001 (smooth)')
+# ax.plot(temp.month.unique(), temp[temp['CD_RGI'] == 110001]['temp_med'], color='black', linestyle='--', label='110001')
+# ax.plot(temp.month.unique(), temp[temp['CD_RGI'] == 110001]['temp_med_smooth'], color='red', linestyle='--', label='110001 (smooth)')
 # ax.legend()
 # plt.show()
 # plt.close()
@@ -76,7 +71,7 @@ indexP["month"] = indexP.groupby(f"{region}").cumcount()
 # --- Step 2: Compute DTW distance matrix ---
 
 # pivot to wide format
-ts = indexP.pivot(index=f'{region}', columns='month', values='indexP_smooth')
+ts = temp.pivot(index=f'{region}', columns='month', values=f"{metric}" + "_smooth")
 
 # tslearn expects 3D array: (n_ts, n_timesteps, 1)
 X = ts.fillna(0).to_numpy()[:, :, np.newaxis]
@@ -90,12 +85,13 @@ plt.imshow(dtw_dist, cmap="viridis", aspect="auto")
 plt.colorbar(label="DTW distance")
 plt.title(f"DTW distance matrix")
 plt.axis("off")  # hide axis labels since 508 is too dense
-plt.savefig(f'../../data/interim/DTW-MDS-embeddings/indexP/DTW-mat-raw_{region_filename}.png', dpi=600)
+os.makedirs(f'../../data/interim/DTW-MDS-embeddings/climate/{metric}/', exist_ok=True)
+plt.savefig(f'../../data/interim/DTW-MDS-embeddings/climate/{metric}/DTW-mat-raw_{region_filename}.png', dpi=600)
 plt.close()
 
 # visualise clustermap
 sns.clustermap(dtw_dist, cmap="viridis", figsize=(12, 12))
-plt.savefig(f'../../data/interim/DTW-MDS-embeddings/indexP/DTW-mat-clustermap_{region_filename}.png', dpi=600)
+plt.savefig(f'../../data/interim/DTW-MDS-embeddings/climate/{metric}/DTW-mat-clustermap_{region_filename}.png', dpi=600)
 
 
 # --- Step 3: Cluster DTW matrix and visualise on a map ---
@@ -131,19 +127,18 @@ for i,n_clusters in enumerate(n_clusters_list):
     ax[i].axis("off")
     ax[i].set_title(f'{n_clusters} clusters')
 plt.tight_layout()
-plt.savefig(f'../../data/interim/DTW-MDS-embeddings/indexP/DTW-mat-clustered_{region_filename}.png', dpi=600)
+plt.savefig(f'../../data/interim/DTW-MDS-embeddings/climate/{metric}/DTW-mat-clustered_{region_filename}.png', dpi=600)
 plt.close()
 
 
 # --- Step 4: Visualise our favorite on a map and export to svg ---
-
 
 # Visualise DTW clusters 
 fig,ax=plt.subplots()
 gdf_states.boundary.plot(ax=ax, linewidth=0.5, color="black")
 geography.boundary.plot(ax=ax, linewidth=0.1, alpha=0.3, color="black")
 geography.plot(
-    column=f"dtw_clusters_7",          # color regions by cluster label
+    column=f"dtw_clusters_10",          # color regions by cluster label
     categorical=True,
     linewidth=0,
     edgecolor=None,
@@ -153,7 +148,7 @@ geography.plot(
 ax.axis("off")
 
 plt.tight_layout()
-plt.savefig(f'../../data/interim/DTW-MDS-embeddings/indexP/DTW-mat-favorite_{region_filename}.svg')
+plt.savefig(f'../../data/interim/DTW-MDS-embeddings/climate/{metric}/DTW-mat-favorite_{region_filename}.svg')
 plt.close()
 
 
@@ -165,6 +160,6 @@ coords = mds.fit_transform(dtw_dist)
 # evaluate performance metric (0.025=excellent, 0.05=good, 0.10=fair, 0.20=poor)
 print(mds.stress_)
 # convert to dataframe
-embedding = pd.DataFrame(coords, index=ts.index, columns=[f"indexP_mds{i+1}" for i in range(n_mds_components)]).reset_index()
+embedding = pd.DataFrame(coords, index=ts.index, columns=[f"temp_med_mds{i+1}" for i in range(n_mds_components)]).reset_index()
 # save dataframe
-embedding.to_csv(f'../../data/interim/DTW-MDS-embeddings/indexP/DTW-MDS-embedding_{region_filename}.csv', index=False)
+embedding.to_csv(f'../../data/interim/DTW-MDS-embeddings/climate/{metric}/DTW-MDS-embedding_{region_filename}.csv', index=False)
