@@ -17,8 +17,8 @@ from matplotlib.colors import ListedColormap
 
 
 # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
-region_filename = 'rgi'
-region = 'CD_RGI'
+region_filename = 'rgint'
+region = 'CD_RGINT'
 # dynamic time warping
 sakoe_chiba_radius = 0
 # number of dimensions to project the DTW matrix onto (bigger = better representation of DTW matrix BUT clustering becomes harder)
@@ -30,7 +30,7 @@ n_mds_components = 3
 # get the index P data
 indexP = pd.read_csv(f'../../data/interim/indexP/indexP_{region_filename}.csv')
 
-# GAM smooth log1p timeseries
+# GAM smooth timeseries
 indexP["month_num"] = indexP["month"] - indexP["month"].min()
 
 indexP["indexP_smooth"] = np.nan
@@ -43,6 +43,12 @@ for _, group in indexP.groupby(f"{region}"):
 
     indexP.loc[group.index, "indexP_smooth"] = gam.predict(X)
 
+# # If you want to z-score --> Doesn't work
+# g = indexP.groupby("CD_RGI")["indexP_smooth"]
+# indexP["indexP_smooth"] = (
+#     (indexP["indexP_smooth"] - g.transform("mean"))
+#     / g.transform("std")
+# )
 
 # # visualise results
 # fig,ax=plt.subplots()
