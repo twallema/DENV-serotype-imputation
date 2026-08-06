@@ -13,11 +13,10 @@ import networkx as nx
 ##############
 
 # spatial aggregation
-region_filename = 'rgint'  
-region = 'CD_RGINT'         
+region_filename = 'rgi'  
+region = 'CD_RGI'         
 
 start_month_season = 9
-
 
 ##############################################################
 ## Compute median serotyping effort per region over seasons ##
@@ -198,8 +197,8 @@ dist_array = cdist(points, points, metric='euclidean')/1000
 ## convert to a readable DataFrame with matching IDs
 distance_matrix = pd.DataFrame(
     dist_array, 
-    index=geography_regions['CD_RGINT'], 
-    columns=geography_regions['CD_RGINT']
+    index=geography_regions[f'{region}'], 
+    columns=geography_regions[f'{region}']
 )
 
 # load the DTW distance
@@ -207,9 +206,11 @@ dtw_matrix = pd.read_csv(f'../../data/interim/DTW-MDS-embeddings/serotypes/{regi
 dtw_matrix.columns = dtw_matrix.columns.astype(int)
 
 # build a manual assignment dictionary
+## Region 5101: Largest sampling effort is located in Cuiaba, but its intermediate region is very large and contains f.i. Comodore, MG.
+## Acre (1201, 1202) and 1303 are closer to Comodore, MG than Manaus. This leads to a 50-50 chance of 1201,1202,1303 attaching to 5101 instead of 1301, which is not realistic given the sampling is performed in Cuiaba, which is much farther away.
 manual_assigment_dictionary = {
-    'CD_RGINT': {1302: 1301, 1304: 1301},
-    'CD_RGI': {130002: 130001, 130005: 130001, 130006: 130001, 130007: 130001, 130010: 130001, 130011: 130001}
+    'CD_RGINT': {1302: 1301, 1303: 1301, 1304: 1301, 1201: 1301, 1202: 1301},   
+    'CD_RGI': {130002: 130001, 130003: 130001, 130005: 130001, 130006: 130001, 130007: 130001, 130010: 130001, 130011: 130001, 150020: 150001}
     }
 
 # make into a function
@@ -317,10 +318,11 @@ geography_regions[f'cluster_id_dtw'] = build_nearest_largest_sampling_effort_clu
 glasbey_cmap = ListedColormap(create_palette(palette_size=len(good_regions_quality[good_regions_quality['has_quality'] == 1])))
 
 geography_states = geography.dissolve(by='CD_UF')
-geography_regions = geography_regions.merge(good_regions_quality, on="CD_RGINT")
+geography_regions = geography_regions.merge(good_regions_quality, on=f"{region}")
 
 geography_states = geography_states.to_crs('EPSG:4674')
 geography_regions = geography_regions.to_crs('EPSG:4674')
+quality_regions = geography_regions[geography_regions['has_quality'] == 1]
 
 columns = ["dist", "time", "dtw"]
 titles = ["Centroid distance", "Travel time (car)", "Serotype DTW distance"]
@@ -347,7 +349,7 @@ for i, col in enumerate(columns):
         legend_kwds={'fontsize': 4, 'ncol': 2, 'loc': 'lower right', 'markerscale': 0.4}
     )
 
-    quality_regions = geography_regions[geography_regions['has_quality'] == 1]
+
     quality_regions.plot(
         ax=ax[i],
         color="grey",
@@ -443,7 +445,7 @@ cases_wo_filtering = (
 cases_w_filtering = (
     cases
     # Filter out any regions present in the insufficient_regions list
-    .filter(~pl.col("CD_RGINT").is_in(insufficient_regions))
+    .filter(~pl.col(f"{region}").is_in(insufficient_regions))
     # aggregate to regions
     .with_columns(pl.col(f'{region}').replace_strict(region_cluster_map).alias('largest_sampling_effort_id'))
     .group_by(["date", 'largest_sampling_effort_id'])

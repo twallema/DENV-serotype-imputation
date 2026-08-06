@@ -16,7 +16,7 @@ from pygam import LinearGAM, s
 from glasbey import create_palette
 from matplotlib.colors import ListedColormap
 
-metric = 'temp_med'
+metric = 'humid_med'
 
 # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
 region_filename = 'rgi'
@@ -30,7 +30,10 @@ n_mds_components = 3
 # --- Step 1: Prepare and smooth incidence time series ---
 
 # get the temperature data
-temp = pd.read_csv(f'../../data/interim/climate/temperature_normals_{region_filename}.csv')
+temp = pd.read_csv(f'../../data/interim/climate/climate_normals_{region_filename}.csv')
+
+# add temperature variation
+temp['temp_var'] = temp['temp_max'] - temp['temp_min']
 
 # GAM smooth timeseries
 temp["month_num"] = temp["month"] - temp["month"].min()
@@ -138,7 +141,7 @@ fig,ax=plt.subplots()
 gdf_states.boundary.plot(ax=ax, linewidth=0.5, color="black")
 geography.boundary.plot(ax=ax, linewidth=0.1, alpha=0.3, color="black")
 geography.plot(
-    column=f"dtw_clusters_10",          # color regions by cluster label
+    column=f"dtw_clusters_7",          # color regions by cluster label
     categorical=True,
     linewidth=0,
     edgecolor=None,
