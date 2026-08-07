@@ -188,3 +188,14 @@ data/interim/geographic-dataset.parquet
 ## (too) large clustermaps
 data/interim/DTW-MDS-embeddings/indexP/DTW-mat-clustermap_mun.pdf
 data/interim/DTW-MDS-embeddings/DENV_100k/DTW-mat-clustermap_mun.pdf
+## Openstreetmaps files
+data/raw/travel_time_matrices
+.Rproj.user
+## All large .svg files
+*.svg
+## Folders full of PDFs
+data/interim/nearest-largest-sampling-effort
+data/interim/DTW-MDS-embeddings/serotypes/**/*.pdf
+data/interim/DTW-MDS-embeddings/serotypes/**/*.png
+### Flowchart
+scripts/clustering/flowchart_extended.svg

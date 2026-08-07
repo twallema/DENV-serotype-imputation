@@ -30,25 +30,34 @@ Downloaded using the instructions under '2 - Using FTPWeb' on https://sprint.mos
 
 + `environ_vars.csv`: Environmental characteristics of the municipalities (columns 'koppen' and 'biome').
 
-### IBGE population
+### Demographics
 
-+ `projecoes_2024_tab4_indicadores.xlsx`: Retrieved from: https://www.ibge.gov.br/estatisticas/sociais/populacao/9109-projecao-da-populacao.html (População por sexo e idade simples)
++ `births_2000-2024_clean.csv`: Live births per municipality from 2000-2024. Retrieved from: http://tabnet.datasus.gov.br/cgi/deftohtm.exe?sinasc/cnv/nvbr.def. Replaced seperator ";" with ",". Removed header and footer. Renamed column header "Municipio".
 
-+ `tabela200-2000-raw.csv`: Population by 5 year age groups and municipality from the 2000 or 2010 census (5566). Retrieved from: https://sidra.ibge.gov.br/tabela/200
++ `deaths_2000-2024_clean.csv`: Deaths per municipality from 2000-2024. Retrieved from: http://tabnet.datasus.gov.br/cgi/deftohtm.exe?sim/cnv/obt10br.def. Replaced seperator ";" with ",". Removed header and footer. Renamed column header "Municipio".
 
-+ `tabela200-2000-format.csv`: Formatted version of `tabela200-2000-raw.csv`. Removed total population column. Removed first 6 rows. Removed last 8 rows. Formatted age groups. Retrieved from: https://sidra.ibge.gov.br/tabela/200
+#### Population
 
-+ `tabela9514-2022-raw.csv`: Population by 5 year age groups and municipality from the 2022 census (5570). Retrieved from: https://sidra.ibge.gov.br/tabela/200
+Population by age, municipality and year were downloaded from: https://tabnet.datasus.gov.br/cgi/tabcgi.exe?ibge/cnv/popsvs2024br.def
 
 ### Datasus DENV linelist dataset
 
 These data are partly confidential and can be found on the Bento lab box.
+
+### Overland travel time matrices
+
++ `brazil-260729.osm.pbf`:  OpenStreetMaps database for Brazil. Downloaded from: https://download.geofabrik.de/south-america/brazil.html. This dataset is too large (2 GB) for GH.
+
 
 ## Interim
 
 + `geographic-dataset.parquet`: Compressed (brotli compression) geographical dataset. Dataset containing geometries of Brazilian municipalities, along with variables relevant for clustering. Made using `data/conversion/build_geographic-dataset.py` from the data in `data/raw/BR_Municipios_2023`.
 
 + `spatial_units_mapping.csv`: Area codes and names of the municipalities, immediate regions, intermediate regions, federative units and regions. Also available in `geographic-dataset.parquet` but saved seperately to lower IO burden.
+
+### Climate
+
++ `climate_normals_rgi.csv`: Average minimum, median and maximum temperature, rainfall and humidity per CD_RGI and month of year. Based on daily data from 2010 until 2026, obtained by Elvira D'Bastiani.
 
 ### Human footprint
 
@@ -80,15 +89,13 @@ These data are partly confidential and can be found on the Bento lab box.
 
 + `DENV-XXXX-month-mun-age_group.parquet`: Monthly (indexed month-end) dengue cases ('DENV_total') and serotyped cases ('DENV_x') per Brazilian municipality, year of age, diagnosis (dengue, dengue with alarm signals, severe dengue, inconclusive), diagnosis method (lab, clinical/epidemiological, unknown) and hospitalisation (False/True). Generated using `DENV_datasus_conversion.py`. 
 
-### IBGE population
+### Demographics
 
-+ `IBGE_births-deaths_uf.csv`: Contains the births, deaths and population of Brazil's federative units from 2000-2070. Extracted from `projecoes_2024_tab4_indicadores.xlsx` using MS Excel.
++ `births_mun_1999-2026.csv`: Made from `~/data/raw/demographics/births_2000-2024_clean.csv` using `build_births-deaths.py`.
 
-+ `IBGE_births-deaths_mun-estimated.csv`: Contains the births, deaths and population of Brazil's municipalities from 2001-2024, assuming the birth and death rate in municipalities is the same as the average of the federative unit. Created using `~/data/conversion/build_births-deaths.py` using `~/data/interim/IBGE_population/IBGE_births-deaths_uf.csv` and `~/data/raw/sprint_2025/datasus_population_2001_2024.csv`.
++ `deaths_mun_1999-2026.csv`: Made from `~/data/raw/demographics/deaths_2000-2024_clean.csv` using `build_births-deaths.py`.
 
-+ `municipality_population_1996-2024_estimated`: Extension of `IBGE_births-deaths_mun-estimated.csv`, adding the predicted population, birth, and death count for 1996-2000 for every municipality. Made by S. Bajaj using `~/data/conversion/build_municipality-population-backcast.Rmd`.
-
-+ `municipality-age_population_2000-2022.csv`: Population in 5 year age groups and per municipality from the year 2000 until 2022 (5570, post-2017 classification). Made from the 2000, 2010 and 2022 census data through linear intrapolation using `~/data/conversion/build_population-by-age.py`.
++ `population_mun-age_1999-2026.parquet`: Made from `~/data/raw/demographics/population/pop_age_XXXX_clean.csv` using `build_population-by-age_datasus.py`.
 
 ### DTW-MDS-embeddings
 
@@ -112,6 +119,14 @@ Contains all output of the max-p regionalization `~/scripts/clustering/find-clus
 
 Contains all output of the Bayesian serotype imputation model `~/scripts/bayesian-imputation-model/fit-imputation-model.py`. The latent serotype distribution per municipality from 1996-2025 and per month -- the output of this pipeline -- is named `DENV-serotypes-imputed_1996-2025_monthly.parquet`.
 
+### Travel time matrices
+
++ `travel-time_car_mean_rgint.csv`: Mean travel time between Brazilian intermediate regions in hours.
+
++ `travel-time_car_sd.csv`: Standard deviation of the travel time between Brazilian intermediate regions in hours.
+
++ `fraction_max-attempts-reached_rgint.csv`: Fraction of Monte Carlo runs that timed out unsuccesfully after reaching the maximum number of server queries. 
+
 ## Conversion scripts
 
 + `build_human-footprint.py`: Averages the raw human footprint data over the years 2013-2019 and spatially aggregates from the municipality to the immediate region and intermediate regions by computing the demographically weighted average over constitutent municipalities. One missing municipality's human footprint was set to 25.
@@ -124,6 +139,10 @@ Contains all output of the Bayesian serotype imputation model `~/scripts/bayesia
 
 + `build_indexP.py`: A script to aggregate the municipality level index P per month to the immediate and intermediate Brazilian regions.
 
-+ `build_municipality-population-backcast.Rmd`: Script used to estimate municipality populations, births, and deaths for 1996-2000 by fitting municipality-specific linear regressions, predicting backwards in time. 
++ `build_population-by-age_census.py`: Script used to format the 2000, 2010 and 2022 census population by 5-year age groups and by municipality, and linearily intrapolate them from 2000-2022 (`~/data/interim/population/municipality-age_population_2000-2022.csv`).
 
-+ `build_population-by-age.py`: Script used to format the 2000, 2010 and 2022 census population by 5-year age groups and by municipality, and linearily intrapolate them from 2000-2022 (`~/data/interim/IBGE_population/municipality-age_population_2000-2022.csv`).
++ `construct_travel-time-matrices.R`: Script used to construct travel time origin-destination matrices for the Brazilian intermediate and immediate regions. Uses a Monte Carlo approach to connect municipalities in the origin and destination regions by populated-weighted random sampling.
+
++ `build-nearest-largest-sampling-effort.py`: 
+
++ `build_closest-hypermetro-area.R`: 

@@ -8,11 +8,14 @@ import geopandas as gpd
 from datetime import datetime
 import matplotlib.pyplot as plt
 
+# included clusters
+included_clusters = [11, 12, 13, 16]
+
 # analysis startdate
 start_year = 2000
 start_month = 9
 end_year = 2016
-assert start_year >= 1996, "earliest start_year is 1996."
+assert start_year >= 1999, "earliest start_year is 1999."
 
 # helper function for argument parsing
 def str_to_bool(value):
@@ -71,14 +74,12 @@ region = clusters.columns.to_list()[0]
 mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
 mapping = mapping.merge(clusters[[region, 'cluster']], on=region, how='left')
 
-# Compute demography in start_year per cluster
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# Get demography in start_year per cluster
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-demo = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/IBGE_population/pop-births-deaths_mun_1996-2024.csv'))
-demo = demo.rename(columns={'geocode': 'CD_MUN'})
+demo = pl.scan_parquet(os.path.join(abs_dir,'../../data/interim/demographics/population_mun-age_1999-2026.parquet')).group_by([ "CD_MUN", "year"]).agg(pl.col("population").sum().alias("population")).sort([ "CD_MUN", "year"]).filter(pl.col("year") == start_year).select("CD_MUN","population").collect().to_pandas()
 demo = demo.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
-demo = demo.groupby(['cluster', 'year'], as_index=False)['population'].sum()
-demo = demo[demo['year'] == start_year]
+demo = demo.groupby('cluster', as_index=False)['population'].sum()
 
 # Fetch incidence data
 df = pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet").collect().to_pandas()
@@ -154,7 +155,7 @@ df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
 
 # only do first X clusters
-df = df[df['cluster'].isin([11, 12, 13, 16])]
+df = df[df['cluster'].isin(included_clusters)]
 
 # 9. Build PyMC arrays
 # --- For Multinomial model (subtypes, only when typed) ---
@@ -189,7 +190,7 @@ output_mun = output.merge(mapping[["cluster", "CD_MUN"]], on="cluster", how="lef
 output_mun = output_mun[["date", "CD_MUN", "p_1", "p_2", "p_3", "p_4"]]
 output_mun = output_mun.sort_values(by=["date", "CD_MUN"]).reset_index(drop=True)
 # refetch incidence data & merge it
-inc = pd.read_csv(os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/mun/DENV-serotypes_1996-2025_monthly_mun.csv'), parse_dates=['date'])
+inc = pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet").collect().to_pandas()
 output_mun = output_mun.merge(
     inc[['CD_MUN', 'date', 'DENV_total']],
     on=['CD_MUN', 'date'],
@@ -204,7 +205,8 @@ output_mun = output_mun.merge(
 )
 
 # save result
-output_mun.to_parquet(f'{output_folder}/DENV-serotypes-imputed_1996-2025_monthly.parquet', compression='brotli')
+output_mun.to_parquet(f'{output_folder}/DENV-serotypes-imputed_1996-2025_monthly.parquet', compression='zstd')
+
 
 ##############################################
 ## Compute within-sample validation metrics ##
