@@ -975,7 +975,7 @@ for repeat_id in design_matrix['repeat_id'].unique():
 
         # NUTS
         with model:
-            trace = pm.sample(n_draw, tune=n_tune, target_accept=0.8, chains=n_cores, cores=n_cores, init='adapt_diag', progressbar=True)
+            trace = pm.sample(n_draw, tune=n_tune, target_accept=0.8, chains=4, cores=4, init='adapt_diag', progressbar=True)
 
         # save traces
         variables2plot = ['sigma_beta', 'psi', 'd_region_hierarch', 'd_region']
