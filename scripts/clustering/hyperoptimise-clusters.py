@@ -70,7 +70,7 @@ if not os.path.exists(output_folder):
 
 grid_covariates = ["indexP_DTW", "temperature_DTW", "humidity_DTW", "human_footprint", "denv_100k_cumulative", "biome"]
 
-threshold_values = [27.5, 40, 55, 90] # CD_RGINT: 40, 55, 90, 110 results in 8, 10, 15 or 20 clusters
+threshold_values = [27.5, 40, 55, 90] # CD_RGINT: 27.5, 40, 55, 90 results in 10, 15, 20 or 25 clusters
 
 # Generate combinations of grid_covariates (True/False) AND thresholds
 covariate_combinations = list(
