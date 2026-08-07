@@ -110,8 +110,6 @@ print(f"Total number of runs: {len(design_matrix)}\n")
 print(f"Preparing data..\n")
 
 
-print(design_matrix)
-
 # helper function
 # >>>>>>>>>>>>>>>
 
@@ -164,7 +162,7 @@ gdf_states = geography.dissolve(by='CD_UF')
 denv = pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet").collect().to_pandas()
 
 # Load cases per 100K data
-denv_100k = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DENV_per_100K/DENV_per_100k_{spatial_aggregation}.csv'))
+denv_100k = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DENV_per_100k/DENV_per_100k_{spatial_aggregation}.csv'))
 denv_100k['date'] = pd.to_datetime(denv_100k['date'])
 
 # Load human footprint 
