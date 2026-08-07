@@ -1106,8 +1106,4 @@ for repeat_id in design_matrix['repeat_id'].unique():
         # Save result
         design_matrix.loc[index, 'log_likelihood'] = sum(logp)
         design_matrix.loc[index, 'n_clusters'] = n_clusters
-
-        print(design_matrix)
-
-# Save result
-design_matrix.to_csv(os.path.join(output_folder, 'hyperoptimisation_results.csv'), index=False)
+        design_matrix.to_csv(os.path.join(output_folder, 'hyperoptimisation_results.csv'), index=False)
