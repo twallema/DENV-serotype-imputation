@@ -27,7 +27,7 @@ unset PYTHONPATH
 # Run Python script
 python hyperoptimise-clusters.py \
     -n_cores "${threads}" \
-    -n_maxp 200 \
+    -n_maxp 250 \
     -n_repeats 1 \
     -max_iterations_sa 10 \
     -spatial_aggregation rgint \

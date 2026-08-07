@@ -1,8 +1,8 @@
 #!/bin/bash
 
-N=2
+N=20
 threads=16
-time="24:00:00"
+time="48:00:00"
 
 for i in $(seq 1 $N); do
 

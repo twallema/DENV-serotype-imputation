@@ -180,7 +180,7 @@ def main():
 
     parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
     parser.add_argument("-n_cores", type=int, help="Number of available CPU cores.", default=8)
-    parser.add_argument("-n_maxp", type=int, help="Number of max-p clustering runs to average.", default=200)
+    parser.add_argument("-n_maxp", type=int, help="Number of max-p clustering runs to average.", default=250)
     parser.add_argument("-n_repeats", type=int, help="Number of repeated within-sample validations.", default=10)
     parser.add_argument("-max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=10)
     parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
