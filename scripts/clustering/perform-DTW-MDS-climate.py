@@ -16,11 +16,11 @@ from pygam import LinearGAM, s
 from glasbey import create_palette
 from matplotlib.colors import ListedColormap
 
-metric = 'humid_med'
+metric = 'temp_var'
 
 # spatial aggregation: 'mun' (5570 municipalities), 'rgi' (508 immediate regions), 'rgint' (130 intermediate regions)
-region_filename = 'rgi'
-region = 'CD_RGI'
+region_filename = 'rgint'
+region = 'CD_RGINT'
 # dynamic time warping
 sakoe_chiba_radius = 3
 # number of dimensions to project the DTW matrix onto (bigger = better representation of DTW matrix BUT clustering becomes harder)
@@ -163,6 +163,6 @@ coords = mds.fit_transform(dtw_dist)
 # evaluate performance metric (0.025=excellent, 0.05=good, 0.10=fair, 0.20=poor)
 print(mds.stress_)
 # convert to dataframe
-embedding = pd.DataFrame(coords, index=ts.index, columns=[f"temp_med_mds{i+1}" for i in range(n_mds_components)]).reset_index()
+embedding = pd.DataFrame(coords, index=ts.index, columns=[f"{metric}_mds{i+1}" for i in range(n_mds_components)]).reset_index()
 # save dataframe
 embedding.to_csv(f'../../data/interim/DTW-MDS-embeddings/climate/{metric}/DTW-MDS-embedding_{region_filename}.csv', index=False)
