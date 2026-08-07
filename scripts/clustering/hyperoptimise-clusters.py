@@ -780,8 +780,8 @@ def main():
             # Save the consensus clusters (hierarchical)
             clusters = geography[[f'{region}', 'consensus_clusters_hierarchical']]
             clusters = clusters.rename(columns={'consensus_clusters_hierarchical': 'cluster'})
-            clusters = pd.merge(muncipality_region_map, clusters, on='CD_RGINT')
-            clusters = clusters.set_index('CD_MUN').drop(columns=['CD_RGINT']).reset_index()
+            clusters = pd.merge(muncipality_region_map, clusters, on=f'{region}')
+            clusters = clusters.set_index('CD_MUN').drop(columns=[f'{region}']).reset_index()
             clusters.to_csv(os.path.join(output_folder, f"repeat_{repeat_id}/index_{index}/clusters.csv"), index=False)
 
 
