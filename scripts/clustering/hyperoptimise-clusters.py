@@ -186,7 +186,7 @@ def main():
     parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
     parser.add_argument("-validation_bw", type=float, help="Bandwidth around Q1, Q2 and Q3 median serotype sampling effort to sample within-sample validation areas from.", default=0.05)
     parser.add_argument("-validation_n", type=int, help="Number of within-sample validation areas to sample around each Q1, Q2, Q3 +/- bandwith.", default=2)
-    parser.add_argument("-visualise_imputed_data", type=bool, help="Make a plot of the imputed data in the clusters (recommend disable on cluster because runtime is several minutes).", default=False)
+    parser.add_argument("-no_frills", type=bool, help="Cut out optional plots to speed things up.", default=True)
 
     # assign to desired variables
     args = parser.parse_args()
@@ -198,7 +198,7 @@ def main():
     spatial_aggregation = args.spatial_aggregation
     validation_bw = args.validation_bw
     validation_n = args.validation_n
-    visualise_imputed_data = args.visualise_imputed_data
+    no_frills = args.no_frills
 
     # pipeline output folder
     abs_dir = os.path.dirname(__file__) # make sure all referenced paths are relative to the location of this file and not the terminal's pwd
@@ -693,13 +693,6 @@ def main():
             weights = softmax(-np.asarray(best_obj_vals)/T)
 
 
-            # Save individual runs in geography dataframe
-            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-            for i in range(n_maxp):
-                geography[f'run_{i}'] = labels[i]
-
-
             # Average co-association matrices across runs
             # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -737,51 +730,52 @@ def main():
             plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/clustermap_probmatrix_{spatial_aggregation}.svg'))
             plt.close()
 
+            if no_frills==False:
+                    
+                # Recluster mean co-association matrix using spectral clustering
+                # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-            # Recluster mean co-association matrix using spectral clustering
-            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-            sc = SpectralClustering(n_clusters=n_clusters, affinity='precomputed', random_state=0)
-            geography['consensus_clusters_spectral'] = sc.fit_predict(prob_matrix)+1
+                sc = SpectralClustering(n_clusters=n_clusters, affinity='precomputed', random_state=0)
+                geography['consensus_clusters_spectral'] = sc.fit_predict(prob_matrix)+1
 
 
-            # Save and visualise the mean clustering results
-            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                # Save and visualise the mean clustering results
+                # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-            # visualise clusters on a map
-            fig, ax = plt.subplots(nrows=1, ncols=2)
-            # hierarchical (left)
-            gdf_states.boundary.plot(ax=ax[0], linewidth=0.5, color="black")   # state boundaries
-            geography.plot(
-                column="consensus_clusters_hierarchical",          # color regions by cluster label
-                categorical=True,
-                cmap=glasbey_cmap,             # categorical colormap
-                linewidth=0.2,
-                edgecolor="grey",
-                legend=True,
-                ax=ax[0],
-                legend_kwds={'fontsize': 4, 'ncol': 4, 'loc': 'lower right', 'markerscale': 0.4}
-            )
-            ax[0].set_title(f"Hierarchical clustering", fontsize=14)
-            ax[0].axis("off")
-            # spectral (right)
-            gdf_states.boundary.plot(ax=ax[1], linewidth=0.5, color="black")   # state boundaries
-            geography.plot(
-                column="consensus_clusters_spectral",          # color regions by cluster label
-                categorical=True,
-                cmap=glasbey_cmap,             # categorical colormap
-                linewidth=0.2,
-                edgecolor="grey",
-                legend=False,
-                ax=ax[1],
-                legend_kwds={'fontsize': 4, 'ncol': 4, 'loc': 'lower right', 'markerscale': 0.4}
-            )
-            ax[1].set_title(f"Spectral clustering", fontsize=14)
-            ax[1].axis("off")
-            fig.suptitle('Consensus clusters')
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/consensus_clusters_{spatial_aggregation}.svg'))
-            plt.close()
+                # visualise clusters on a map
+                fig, ax = plt.subplots(nrows=1, ncols=2)
+                # hierarchical (left)
+                gdf_states.boundary.plot(ax=ax[0], linewidth=0.5, color="black")   # state boundaries
+                geography.plot(
+                    column="consensus_clusters_hierarchical",          # color regions by cluster label
+                    categorical=True,
+                    cmap=glasbey_cmap,             # categorical colormap
+                    linewidth=0.2,
+                    edgecolor="grey",
+                    legend=True,
+                    ax=ax[0],
+                    legend_kwds={'fontsize': 4, 'ncol': 4, 'loc': 'lower right', 'markerscale': 0.4}
+                )
+                ax[0].set_title(f"Hierarchical clustering", fontsize=14)
+                ax[0].axis("off")
+                # spectral (right)
+                gdf_states.boundary.plot(ax=ax[1], linewidth=0.5, color="black")   # state boundaries
+                geography.plot(
+                    column="consensus_clusters_spectral",          # color regions by cluster label
+                    categorical=True,
+                    cmap=glasbey_cmap,             # categorical colormap
+                    linewidth=0.2,
+                    edgecolor="grey",
+                    legend=False,
+                    ax=ax[1],
+                    legend_kwds={'fontsize': 4, 'ncol': 4, 'loc': 'lower right', 'markerscale': 0.4}
+                )
+                ax[1].set_title(f"Spectral clustering", fontsize=14)
+                ax[1].axis("off")
+                fig.suptitle('Consensus clusters')
+                plt.tight_layout()
+                plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/consensus_clusters_{spatial_aggregation}.svg'))
+                plt.close()
 
             # Save the consensus clusters (hierarchical)
             clusters = geography[[f'{region}', 'consensus_clusters_hierarchical']]
@@ -794,22 +788,24 @@ def main():
             # Save a map of Brazil with every cluster highlighted
             # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-            # make output folder
-            if not os.path.exists(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/clusters')):
-                os.makedirs(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/clusters'))
+            if no_frills==False:
 
-            # visualise clusters on a map
-            for cluster_id in geography["consensus_clusters_hierarchical"].unique():
-                fig, ax = plt.subplots()
-                gdf_states.boundary.plot(ax=ax, linewidth=0.5, color="black")   # state boundaries
-                geography.boundary.plot(ax=ax, linewidth=0.1, color="black", alpha=0.2)          # clustered spatial unit boundaries
-                gdf = geography.loc[geography["consensus_clusters_hierarchical"] == cluster_id]
-                gdf.plot(ax=ax, color="#d35052",edgecolor="none") # cluster
-                cluster_centroid = gdf.union_all().centroid
-                #ax.text(cluster_centroid.x, cluster_centroid.y, str(cluster_id), ha="center", va="center", fontsize=12, fontweight="bold", color="black")
-                ax.set_axis_off()
-                plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/clusters/cluster_{cluster_id}.svg'))
-                plt.close()
+                # make output folder
+                if not os.path.exists(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/clusters')):
+                    os.makedirs(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/clusters'))
+
+                # visualise clusters on a map
+                for cluster_id in geography["consensus_clusters_hierarchical"].unique():
+                    fig, ax = plt.subplots()
+                    gdf_states.boundary.plot(ax=ax, linewidth=0.5, color="black")   # state boundaries
+                    geography.boundary.plot(ax=ax, linewidth=0.1, color="black", alpha=0.2)          # clustered spatial unit boundaries
+                    gdf = geography.loc[geography["consensus_clusters_hierarchical"] == cluster_id]
+                    gdf.plot(ax=ax, color="#d35052",edgecolor="none") # cluster
+                    cluster_centroid = gdf.union_all().centroid
+                    #ax.text(cluster_centroid.x, cluster_centroid.y, str(cluster_id), ha="center", va="center", fontsize=12, fontweight="bold", color="black")
+                    ax.set_axis_off()
+                    plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/clusters/cluster_{cluster_id}.svg'))
+                    plt.close()
 
 
             # Build the clusters' adjacency matrix needed for the Bayesian imputation model
@@ -996,7 +992,7 @@ def main():
 
             dates = cases['date'].unique()
 
-            if visualise_imputed_data==True:
+            if no_frills==False:
                     
                 # loop over clusters
                 for cluster_id in cases['cluster'].unique():
@@ -1116,4 +1112,7 @@ def main():
 ###########################
 
 if __name__ == "__main__":
+
+    mp.set_start_method("spawn", force=True)
+
     main()
