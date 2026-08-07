@@ -43,6 +43,7 @@ parser.add_argument("-max_iterations_sa", type=int, help="Number of simulated an
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
 parser.add_argument("-validation_bw", type=float, help="Bandwidth around Q1, Q2 and Q3 median serotype sampling effort to sample within-sample validation areas from.", default=0.05)
 parser.add_argument("-validation_n", type=int, help="Number of within-sample validation areas to sample around each Q1, Q2, Q3 +/- bandwith.", default=2)
+parser.add_argument("-visualise_imputed_data", type=bool, help="Make a plot of the imputed data in the clusters (recommend disable on cluster because runtime is several minutes).", default=False)
 
 # assign to desired variables
 args = parser.parse_args()
@@ -54,6 +55,7 @@ max_iterations_sa = args.max_iterations_sa
 spatial_aggregation = args.spatial_aggregation
 validation_bw = args.validation_bw
 validation_n = args.validation_n
+visualise_imputed_data = args.visualise_imputed_data
 
 # pipeline output folder
 abs_dir = os.path.dirname(__file__) # make sure all referenced paths are relative to the location of this file and not the terminal's pwd
@@ -66,9 +68,9 @@ if not os.path.exists(output_folder):
 # make an experimental design matrix
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-grid_covariates = ["indexP_DTW", "denv_100k_DTW", "koppen"] # "denv_100k_DTW", "biome", "denv_100k_cumulative", "human_footprint"]
+grid_covariates = ["indexP_DTW", "temperature_DTW", "humidity_DTW", "human_footprint", "denv_100k_cumulative", "biome"]
 
-threshold_values = [40, 55, 90] # CD_RGINT: 40, 55, 90, 110 results in 8, 10, 15 or 20 clusters
+threshold_values = [27.5, 40, 55, 90] # CD_RGINT: 40, 55, 90, 110 results in 8, 10, 15 or 20 clusters
 
 # Generate combinations of grid_covariates (True/False) AND thresholds
 covariate_combinations = list(
@@ -106,6 +108,9 @@ print(f"Number of repeated within-sample validations: {n_repeats}")
 print(f"Total number of runs: {len(design_matrix)}\n")
 
 print(f"Preparing data..\n")
+
+
+print(design_matrix)
 
 # helper function
 # >>>>>>>>>>>>>>>
@@ -171,6 +176,12 @@ DTW_covariates_denv_100k = pd.read_csv(os.path.join(abs_dir, f'../../data/interi
 # Load indexP DTW-MDS embedding
 DTW_covariates_indexP = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/indexP/DTW-MDS-embedding_{spatial_aggregation}.csv'))
 region = DTW_covariates_indexP.columns.to_list()[0]
+
+# Load temperature DTW-MDS embedding
+DTW_covariates_temp = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/climate/temp_med/DTW-MDS-embedding_{spatial_aggregation}.csv'))
+
+# Load humidity DTW-MDS embedding
+DTW_covariates_humid = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/climate/humid_med/DTW-MDS-embedding_{spatial_aggregation}.csv'))
 
 # Load serotypes DTW-MDS embedding
 DTW_covariates_serotypes = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/serotypes/{region}/DTW-MDS-embedding_{spatial_aggregation}.csv'))
@@ -401,6 +412,34 @@ DTW_covariates_indexP_names = [x for x in DTW_covariates_indexP.columns.to_list(
 geography[DTW_covariates_indexP_names] = sc.fit_transform(geography[DTW_covariates_indexP_names])
 
 
+# Make temp_med DTW-MDS covariate
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# Merge to the geography
+geography = geography.merge(
+    DTW_covariates_temp, 
+    on = f'{region}'
+)
+# Standardize DTW-MDS embedding
+sc = StandardScaler()
+DTW_covariates_temp_names = [x for x in DTW_covariates_temp.columns.to_list() if x != f'{region}']
+geography[DTW_covariates_temp_names] = sc.fit_transform(geography[DTW_covariates_temp_names])
+
+
+# Make humid_med DTW-MDS covariate
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+# Merge to the geography
+geography = geography.merge(
+    DTW_covariates_humid, 
+    on = f'{region}'
+)
+# Standardize DTW-MDS embedding
+sc = StandardScaler()
+DTW_covariates_humid_names = [x for x in DTW_covariates_humid.columns.to_list() if x != f'{region}']
+geography[DTW_covariates_humid_names] = sc.fit_transform(geography[DTW_covariates_humid_names])
+
+
 # Make copies before looping
 # >>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -408,8 +447,6 @@ yearly_sum_median_copy = yearly_sum_median.copy(deep=True)
 geography_copy = geography.copy(deep=True)
 
 for repeat_id in design_matrix['repeat_id'].unique():
-
-    print(f"Working on within-sample validation ID: {repeat_id}\n")
 
     geography = geography_copy
     yearly_sum_median = yearly_sum_median_copy
@@ -499,7 +536,8 @@ for repeat_id in design_matrix['repeat_id'].unique():
 
     for index, row in design_matrix[design_matrix['repeat_id'] == repeat_id][ [col for col in design_matrix.columns if col != 'log_likelihood'] ].iterrows():
 
-        print(f"\nWorking on index: {index}\n")
+        print("\n")
+        print(f"\nWorking on repeat {repeat_id}, index: {index}\n")
 
         os.makedirs(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}'), exist_ok=True)
         
@@ -529,6 +567,10 @@ for repeat_id in design_matrix['repeat_id'].unique():
                 covariate_names_raw.extend(DTW_covariates_denv_100k_names) 
             elif covname == 'indexP_DTW':
                 covariate_names_raw.extend(DTW_covariates_indexP_names) 
+            elif covname == 'temperature_DTW':
+                covariate_names_raw.extend(DTW_covariates_temp_names) 
+            elif covname == 'humidity_DTW':
+                covariate_names_raw.extend(DTW_covariates_humid_names)     
 
 
         # Run max-p regionalization model `n` times in parallel
@@ -953,64 +995,66 @@ for repeat_id in design_matrix['repeat_id'].unique():
         # Visualise the imputed case data
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-        # loop over clusters
-        dates = cases['date'].unique()
-        for cluster_id in cases['cluster'].unique():
-
-            fig = plt.figure(figsize=(8.3, 11.7/6*8))
-            fig.suptitle(f"Cluster: {cluster_id}")
-            gs = fig.add_gridspec(8, 2)
-
-            # map highlighting the region
-            ax = fig.add_subplot(gs[0, 1])
-            gdf_states.boundary.plot(ax=ax, linewidth=0.5, color="black")
-            geography.boundary.plot(ax=ax, linewidth=0.1, color="black", alpha=0.2)
-            geography.make_valid()
-            gdf = geography.loc[geography['consensus_clusters_hierarchical'] == cluster_id]
-            gdf.plot(ax=ax, color="#d35052", edgecolor="none")
-            ax.set_axis_off()
-
-            # set up rows below to span columns
-            ax = []
-            ax.append(fig.add_subplot(gs[1, :]))
-
-            for r in range(2, 8):
-                ax.append(fig.add_subplot(gs[r, :], sharex=ax[0]))
-
-            for a in ax[:-1]:
-                plt.setp(a.get_xticklabels(), visible=False)
-
-
-            ax[0].plot(dates, cases.loc[cases['cluster'] == cluster_id, 'DENV_total'], color='black')
-            ax[0].set_ylabel("DENV cases (-)")
-
-            ax[1].plot(dates, cases.loc[cases['cluster'] == cluster_id, 'DENV_serotyped_count'], color='black')
-            ax[1].set_ylabel("Serotyped cases (-)")
-
-            for s in range(1,5):
-                ax[s+1].set_ylabel(f"DENV {s} (%)")
-                # data
-                ax[s+1].plot(dates, cases.loc[cases['cluster'] == cluster_id, f'DENV_{s}'].values / cases.loc[cases['cluster'] == cluster_id, 'DENV_serotyped_count'].values * 100, marker='o', markersize=2, linewidth=1, color='black')
-                # model
-                ax[s+1].plot(dates, trace.posterior['p'].median(dim=['chain', 'draw']).sel({'serotype': s, "cluster": cluster_id}).values * 100, color='red')
-                ax[s+1].fill_between(dates,
-                                        trace.posterior['p'].quantile(dim=['chain', 'draw'], q=0.025).sel({'serotype': s, 'cluster': cluster_id}).values * 100,
-                                        trace.posterior['p'].quantile(dim=['chain', 'draw'], q=0.975).sel({'serotype': s, 'cluster': cluster_id}).values * 100,
-                                        color='red', alpha=0.1
-                                    )
-                ax[s+1].fill_between(dates,
-                                        trace.posterior['p'].quantile(dim=['chain', 'draw'], q=0.25).sel({'serotype': s, 'cluster': cluster_id}).values * 100,
-                                        trace.posterior['p'].quantile(dim=['chain', 'draw'], q=0.75).sel({'serotype': s, 'cluster': cluster_id}).values * 100,
-                                        color='red', alpha=0.2
-                                    )
+        if visualise_imputed_data==True:
                 
-            ax[-1].stackplot(dates, [trace.posterior['p'].mean(dim=['chain', 'draw']).sel({'serotype': serotype, "cluster": cluster_id}).values * 100 for serotype in range(1,5)], labels=['1', '2', '3', '4'], colors=['black', 'red', 'green', 'blue'], alpha=0.9)
-            ax[-1].set_ylabel(f"Serotype distribution (%)")
+            # loop over clusters
+            dates = cases['date'].unique()
+            for cluster_id in cases['cluster'].unique():
 
-            plt.tight_layout()
-            os.makedirs(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/imputation_model/posterior_predictive'), exist_ok=True)
-            plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/imputation_model/posterior_predictive/cluster_{cluster_id}.pdf'))
-            plt.close()
+                fig = plt.figure(figsize=(8.3, 11.7/6*8))
+                fig.suptitle(f"Cluster: {cluster_id}")
+                gs = fig.add_gridspec(8, 2)
+
+                # map highlighting the region
+                ax = fig.add_subplot(gs[0, 1])
+                gdf_states.boundary.plot(ax=ax, linewidth=0.5, color="black")
+                geography.boundary.plot(ax=ax, linewidth=0.1, color="black", alpha=0.2)
+                geography.make_valid()
+                gdf = geography.loc[geography['consensus_clusters_hierarchical'] == cluster_id]
+                gdf.plot(ax=ax, color="#d35052", edgecolor="none")
+                ax.set_axis_off()
+
+                # set up rows below to span columns
+                ax = []
+                ax.append(fig.add_subplot(gs[1, :]))
+
+                for r in range(2, 8):
+                    ax.append(fig.add_subplot(gs[r, :], sharex=ax[0]))
+
+                for a in ax[:-1]:
+                    plt.setp(a.get_xticklabels(), visible=False)
+
+
+                ax[0].plot(dates, cases.loc[cases['cluster'] == cluster_id, 'DENV_total'], color='black')
+                ax[0].set_ylabel("DENV cases (-)")
+
+                ax[1].plot(dates, cases.loc[cases['cluster'] == cluster_id, 'DENV_serotyped_count'], color='black')
+                ax[1].set_ylabel("Serotyped cases (-)")
+
+                for s in range(1,5):
+                    ax[s+1].set_ylabel(f"DENV {s} (%)")
+                    # data
+                    ax[s+1].plot(dates, cases.loc[cases['cluster'] == cluster_id, f'DENV_{s}'].values / cases.loc[cases['cluster'] == cluster_id, 'DENV_serotyped_count'].values * 100, marker='o', markersize=2, linewidth=1, color='black')
+                    # model
+                    ax[s+1].plot(dates, trace.posterior['p'].median(dim=['chain', 'draw']).sel({'serotype': s, "cluster": cluster_id}).values * 100, color='red')
+                    ax[s+1].fill_between(dates,
+                                            trace.posterior['p'].quantile(dim=['chain', 'draw'], q=0.025).sel({'serotype': s, 'cluster': cluster_id}).values * 100,
+                                            trace.posterior['p'].quantile(dim=['chain', 'draw'], q=0.975).sel({'serotype': s, 'cluster': cluster_id}).values * 100,
+                                            color='red', alpha=0.1
+                                        )
+                    ax[s+1].fill_between(dates,
+                                            trace.posterior['p'].quantile(dim=['chain', 'draw'], q=0.25).sel({'serotype': s, 'cluster': cluster_id}).values * 100,
+                                            trace.posterior['p'].quantile(dim=['chain', 'draw'], q=0.75).sel({'serotype': s, 'cluster': cluster_id}).values * 100,
+                                            color='red', alpha=0.2
+                                        )
+                    
+                ax[-1].stackplot(dates, [trace.posterior['p'].mean(dim=['chain', 'draw']).sel({'serotype': serotype, "cluster": cluster_id}).values * 100 for serotype in range(1,5)], labels=['1', '2', '3', '4'], colors=['black', 'red', 'green', 'blue'], alpha=0.9)
+                ax[-1].set_ylabel(f"Serotype distribution (%)")
+
+                plt.tight_layout()
+                os.makedirs(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/imputation_model/posterior_predictive'), exist_ok=True)
+                plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/imputation_model/posterior_predictive/cluster_{cluster_id}.pdf'))
+                plt.close()
 
 
         ##############################################
@@ -1065,7 +1109,7 @@ for repeat_id in design_matrix['repeat_id'].unique():
         design_matrix.loc[index, 'log_likelihood'] = sum(logp)
         design_matrix.loc[index, 'n_clusters'] = n_clusters
 
-
+        print(design_matrix)
 
 # Save result
 design_matrix.to_csv(os.path.join(output_folder, 'hyperoptimisation_results.csv'), index=False)
