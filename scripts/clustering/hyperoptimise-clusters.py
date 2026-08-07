@@ -636,7 +636,8 @@ for repeat_id in design_matrix['repeat_id'].unique():
         def run_parallel_maxp(n_cores, n, geography, region, covariate_names, threshold, max_iterations_sa):
 
             results = []
-            with ProcessPoolExecutor(max_workers=n_cores) as ex:
+
+            with ProcessPoolExecutor(max_workers=n_cores, mp_context=mp.get_context("fork")) as ex:
 
                 future_to_index = {
                     ex.submit(
@@ -667,13 +668,9 @@ for repeat_id in design_matrix['repeat_id'].unique():
 
             return all_labels, all_matrices, obj_vals
 
-        # run model in parallel
+        # run max P clustering in parallel
         if __name__ == '__main__':
-            try:
-                mp.set_start_method("fork") # default unix parallel process spawn method
-            except RuntimeError:
-                pass
-            # run func
+
             labels, matrices, best_obj_vals = run_parallel_maxp(
                 n_cores=n_cores,
                 n=n_maxp,
