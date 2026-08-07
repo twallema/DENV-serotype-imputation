@@ -385,9 +385,9 @@ quality_regions.plot(
     ax=ax,
     color="grey",
     edgecolor="black",
-    hatch="////",
+    hatch="/////",
     linewidth=0.5,
-    alpha=0.4  # Slight transparency softens the grey
+    alpha=0.6  # Slight transparency softens the grey
 )
 ax.axis("off")
 plt.savefig(f'../../data/interim/nearest-largest-sampling-effort/nearest-largest-sampling-effort_time_{region_filename}.svg')
