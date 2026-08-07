@@ -57,7 +57,7 @@ These data are partly confidential and can be found on the Bento lab box.
 
 ### Climate
 
-+ `temperature_normals.csv`: Average minimum, median and maximum temperature per CD_MUN and month of year. Based on daily minimum, median and maximum temperatures from 2010 until 2026. Raw file obtained from Elvira D'Bastiani.
++ `climate_normals_rgi.csv`: Average minimum, median and maximum temperature, rainfall and humidity per CD_RGI and month of year. Based on daily data from 2010 until 2026, obtained by Elvira D'Bastiani.
 
 ### Human footprint
 
