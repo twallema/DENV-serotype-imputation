@@ -2,9 +2,10 @@ name: DENV-SEROTYPE-IMPUTATION
 channels:
   - conda-forge
 dependencies:
-  - python=3.12
-  - pymc<6
-  - arviz<1.0
+  - python=3.13
+  - pymc>=6
+  - arviz>=1.0
+  - pytensor
   - numpy
   - jupyter
   - ipykernel

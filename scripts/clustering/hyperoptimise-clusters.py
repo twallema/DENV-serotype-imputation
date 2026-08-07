@@ -903,7 +903,6 @@ for repeat_id in design_matrix['repeat_id'].unique():
             .collect()
         ).to_pandas()
 
-
         # total number of serotyped cases
         N_typed = cases.pivot(index="date", columns="cluster", values="DENV_serotyped_count").fillna(0).to_numpy().astype(int) # (n_months, n_regions)
 
@@ -977,11 +976,12 @@ for repeat_id in design_matrix['repeat_id'].unique():
         with model:
             trace = pm.sample(n_draw, tune=n_tune, target_accept=0.8, chains=4, cores=4, init='adapt_diag', progressbar=True)
 
+
         # save traces
         variables2plot = ['sigma_beta', 'psi', 'd_region_hierarch', 'd_region']
         os.makedirs(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/imputation_model/trace'), exist_ok=True)
         for var in variables2plot:
-            arviz.plot_trace(trace, var_names=[var]) 
+            arviz.plot_trace_dist(trace, var_names=[var], compact=True, combined=True, kind='kde') 
             plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/imputation_model/trace/trace-{var}_typing-effort-model.pdf'))
             plt.close()
 
@@ -993,10 +993,11 @@ for repeat_id in design_matrix['repeat_id'].unique():
         # Visualise the imputed case data
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
+        dates = cases['date'].unique()
+
         if visualise_imputed_data==True:
                 
             # loop over clusters
-            dates = cases['date'].unique()
             for cluster_id in cases['cluster'].unique():
 
                 fig = plt.figure(figsize=(8.3, 11.7/6*8))
