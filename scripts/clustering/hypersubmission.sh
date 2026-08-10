@@ -7,8 +7,6 @@ N=3
 threads=2
 time="01:00:00"
 
-job_ids=()
-
 for i in $(seq 1 "$N"); do
 
     repeat_id="$i"
@@ -25,18 +23,4 @@ for i in $(seq 1 "$N"); do
         "$threads" \
         "$spatial_aggregation")
 
-    job_ids+=("$job_id")
-
 done
-
-dependency=$(IFS=:; echo "${job_ids[*]}")
-
-echo "Submitted repeat jobs: ${dependency}"
-echo "Submitting collection job after all repeats finish successfully"
-
-sbatch \
-    --dependency="afterok:${dependency}" \
-    --job-name="${run_id}_results_collection" \
-    collect_hyperoptimise_results.sh \
-    "$run_id" \
-    "$N"

@@ -1058,7 +1058,8 @@ def main():
         # Save result
         design_matrix.loc[index, 'log_likelihood'] = sum(logp)
         design_matrix.loc[index, 'n_clusters'] = n_clusters
-        design_matrix.to_csv(os.path.join(output_folder, 'results.csv'), index=False)
+        os.makedirs(os.path.join(output_folder, f'../results'), exist_ok=True)
+        design_matrix.to_csv(os.path.join(output_folder, f'../results/repeat_{repeat_id}.csv'), index=False)
 
 
 ###########################
