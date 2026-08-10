@@ -1044,6 +1044,10 @@ def main():
         cases = cases.fillna(0)
         df_p = df_p.loc[mask]
 
+        # Aggregate back up to the RGI / RGINT before evaluating
+        cases = cases.merge(muncipality_region_map, on='CD_MUN', how='left').groupby(['date', f'{region}'], as_index=False)[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'N_typed']].sum().reset_index(drop=True)
+        df_p = df_p.merge(muncipality_region_map, on='CD_MUN', how='left').groupby(['date', f'{region}'], as_index=False).nth(0).drop(columns='CD_MUN').reset_index(drop=True)
+        
         # Compute log likelihood
         from scipy.stats import dirichlet_multinomial
         x = cases[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].values
