@@ -5,13 +5,21 @@ library(ggplot2)
 library(patchwork)
 library(tidyr)
 library(ggnewscale)
+library(tidyverse)
 
 # Set working directory to location of this script
 if(!require(rstudioapi)) install.packages("rstudioapi")
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 
 # Load the data
-df = read.csv(file.path(getwd(), '../../data/interim/pipeline_output/CD_RGINT/results.csv'))
+path <- file.path(getwd(), '../../data/interim/clustering_pipeline/CD_RGINT/results')
+
+file_list <- list.files(
+  path = path, 
+  pattern = "*.csv", 
+  full.names = TRUE
+)
+df <- map_dfr(file_list, read_csv)
 
 # Add configurations
 df$configuration <- interaction(
@@ -415,7 +423,6 @@ final_plot <- config_plot + forest +
   )
 
 ggsave("result.pdf", plot=final_plot, width = 8.3, height = 11.7, units = "in")
-final_plot
 
 ######################################################
 ## Make "Best" configuration as a standalone object ##
