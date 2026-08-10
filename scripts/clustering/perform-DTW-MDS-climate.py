@@ -22,7 +22,7 @@ metric = 'temp_var'
 region_filename = 'rgint'
 region = 'CD_RGINT'
 # dynamic time warping
-sakoe_chiba_radius = 3
+sakoe_chiba_radius = 1
 # number of dimensions to project the DTW matrix onto (bigger = better representation of DTW matrix BUT clustering becomes harder)
 n_mds_components = 3
 
