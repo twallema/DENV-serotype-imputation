@@ -100,7 +100,7 @@ for region, name in zip(regions, names):
     ax.axis("off")
     ax.set_title("Human footprint")
     plt.tight_layout()
-    plt.savefig(f'../interim/clusters/visualisations_covariates/human-footprint-{name}.png', dpi=400)
+    plt.savefig(f'../interim/human-footprint/human-footprint-{name}.svg')
     plt.close()
 
     # Save result
