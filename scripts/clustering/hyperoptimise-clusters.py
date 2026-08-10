@@ -937,10 +937,6 @@ def main():
             plt.savefig(os.path.join(output_folder, f'index_{index}/imputation_model/trace/trace-{var}_typing-effort-model.pdf'))
             plt.close()
 
-        # make a posterior predictive
-        with model:
-            posterior_predictive = pm.sample_posterior_predictive(trace)
-
 
         # Visualise the imputed case data
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
