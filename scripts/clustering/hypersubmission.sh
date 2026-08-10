@@ -3,9 +3,9 @@
 run_id="hyperoptimisation_rgint"
 spatial_aggregation="rgint"
 
-N=3
-threads=2
-time="01:00:00"
+N=30
+threads=16
+time="72:00:00"
 
 for i in $(seq 1 "$N"); do
 
