@@ -176,7 +176,7 @@ data/raw/datasus_DENV-linelist/composite_dataset/composite_*
 data/interim/datasus_DENV-linelist/master
 data/interim/datasus_DENV-linelist/figs
 ## all simultion results
-data/interim/pipeline_output
+data/interim/clustering_pipeline
 ## all shapefiles
 data/raw/BR_Municipios_2023/BR_Municipios_2023.cpg
 data/raw/BR_Municipios_2023/BR_Municipios_2023.dbf
