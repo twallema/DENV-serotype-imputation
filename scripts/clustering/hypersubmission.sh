@@ -3,9 +3,9 @@
 run_id="hyperoptimisation_rgint"
 spatial_aggregation="rgint"
 
-N=20
-threads=16
-time="48:00:00"
+N=3
+threads=2
+time="01:00:00"
 
 job_ids=()
 
