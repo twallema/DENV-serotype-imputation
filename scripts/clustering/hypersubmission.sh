@@ -1,19 +1,42 @@
 #!/bin/bash
 
+run_id="hyperoptimisation_rgint"
+spatial_aggregation="rgint"
+
 N=20
 threads=16
 time="48:00:00"
 
-for i in $(seq 1 $N); do
+job_ids=()
 
-    ID="run_${i}"
+for i in $(seq 1 "$N"); do
 
-    echo "Submitting ${ID}"
+    repeat_id="$i"
 
-    sbatch \
-        -c $threads \
-        --time="${time}" \
-        --job-name="hyper_${ID}" \
-        submit_hyperoptimise-clusters_single.sh "${ID}" "${threads}"
+    echo "Submitting repeat ${repeat_id} of run ID '${run_id}'"
+
+    job_id=$(sbatch --parsable \
+        -c "$threads" \
+        --time="$time" \
+        --job-name="${run_id}_repeat_${repeat_id}" \
+        submit_hyperoptimise-clusters_single.sh \
+        "$run_id" \
+        "$repeat_id" \
+        "$threads" \
+        "$spatial_aggregation")
+
+    job_ids+=("$job_id")
 
 done
+
+dependency=$(IFS=:; echo "${job_ids[*]}")
+
+echo "Submitted repeat jobs: ${dependency}"
+echo "Submitting collection job after all repeats finish successfully"
+
+sbatch \
+    --dependency="afterok:${dependency}" \
+    --job-name="${run_id}_results_collection" \
+    collect_hyperoptimise_results.sh \
+    "$run_id" \
+    "$N"
