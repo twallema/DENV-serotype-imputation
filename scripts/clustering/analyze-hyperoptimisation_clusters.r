@@ -11,13 +11,16 @@ if(!require(rstudioapi)) install.packages("rstudioapi")
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 
 # Load the data
-df = read.csv(file.path(getwd(), '../../data/interim/pipeline_output/test_hyperoptimisation/clusters/hyperoptimisation/hyperoptimisation_results.csv'))
+df = read.csv(file.path(getwd(), '../../data/interim/pipeline_output/CD_RGINT/results.csv'))
 
 # Add configurations
 df$configuration <- interaction(
   df$indexP_DTW,
-  df$denv_100k_DTW,
-  df$koppen,
+  df$temperature_DTW,
+  df$humidity_DTW,
+  df$human_footprint,
+  df$denv_100k_cumulative,
+  df$biome,
   df$threshold,
   drop = TRUE
 )
@@ -26,8 +29,8 @@ df$configuration <- interaction(
 ## Paired bootstrap to test our confidence in the "winner" ##
 #############################################################
 
-n_boot <- 1000
-top_n <- 15
+n_boot <- 3000
+top_n <- 50
 
 # Identify observed best configuration
 best_config <- df %>%
@@ -135,8 +138,11 @@ config_info <- df %>%
   distinct(
     configuration,
     indexP_DTW,
-    denv_100k_DTW,
-    koppen,
+    temperature_DTW,
+    humidity_DTW,
+    human_footprint,
+    denv_100k_cumulative,
+    biome,
     threshold
   )
 
@@ -158,22 +164,32 @@ config_plot_df <- plot_df %>%
 config_long <- config_plot_df %>%
   mutate(
     indexP_DTW = as.character(indexP_DTW),
-    denv_100k_DTW = as.character(denv_100k_DTW),
-    koppen = as.character(koppen),
+    temperature_DTW = as.character(temperature_DTW),
+    humidity_DTW = as.character(humidity_DTW),
+    human_footprint = as.character(human_footprint),
+    denv_100k_cumulative = as.character(denv_100k_cumulative),
+    biome = as.character(biome),
     threshold = as.character(threshold)
+
   ) %>%
   select(
     configuration,
     indexP_DTW,
-    denv_100k_DTW,
-    koppen,
+    temperature_DTW,
+    humidity_DTW,
+    human_footprint,
+    denv_100k_cumulative,
+    biome,
     threshold
   ) %>%
   tidyr::pivot_longer(
     cols = c(
       indexP_DTW,
-      denv_100k_DTW,
-      koppen,
+      temperature_DTW,
+      humidity_DTW,
+      human_footprint,
+      denv_100k_cumulative,
+      biome,
       threshold
     ),
     names_to = "variable",
@@ -184,14 +200,20 @@ config_long <- config_plot_df %>%
       variable,
       levels = c(
         "indexP_DTW",
-        "denv_100k_DTW",
-        "koppen",
+        "temperature_DTW",
+        "humidity_DTW",
+        "human_footprint",
+        "denv_100k_cumulative",
+        "biome",
         "threshold"
       ),
       labels = c(
-        "index P",
+        "Index P",
+        "Temp.",
+        "Humidity",
+        "H. Footpr.",
         "DENV/100k",
-        "Köppen",
+        "Biome",
         "Threshold"
       )
     ),
@@ -264,13 +286,6 @@ geom_tile(
   colour = "white"
 ) +
   
-  scale_fill_gradient(
-    low = "grey65",
-    high = "grey15",
-    name = "Threshold",
-    guide = "none"
-  ) +
-  
 geom_text(
   data = filter(
     config_long,
@@ -281,6 +296,8 @@ geom_text(
   fontface = "bold",
   size = 3.5
 ) +
+
+scale_fill_continuous(guide = "none") +  
   
 scale_x_discrete(
   position = "bottom"
@@ -301,7 +318,7 @@ scale_x_discrete(
   theme(
     axis.text.x = element_text(
       face = "bold",
-      size = 8
+      size = 7
     ),
     axis.ticks = element_blank(),
     axis.line = element_blank(),
@@ -394,11 +411,11 @@ forest <- ggplot(
 # 6. Combine both
 final_plot <- config_plot + forest +
   plot_layout(
-    widths = c(3.0, 5.3)  # change ratios
+    widths = c(4.5,3.8)  # change ratios
   )
 
-ggsave("result.pdf", plot=final_plot, width = 8.3, height = 11.7/2, units = "in")
-
+ggsave("result.pdf", plot=final_plot, width = 8.3, height = 11.7, units = "in")
+final_plot
 
 ######################################################
 ## Make "Best" configuration as a standalone object ##
@@ -563,12 +580,15 @@ ggsave("best_config.pdf", plot=best_config_plot, width = 3.0, height = 11.7/22, 
 
 # factor covariates
 df$indexP_DTW <- factor(df$indexP_DTW, levels = c("False", "True"))
-df$denv_100k_DTW <- factor(df$denv_100k_DTW, levels = c("False", "True"))
-df$koppen <- factor(df$koppen, levels = c("False", "True"))
+df$temperature_DTW <- factor(df$temperature_DTW, levels = c("False", "True"))
+df$humidity_DTW <- factor(df$humidity_DTW, levels = c("False", "True"))
+df$human_footprint <- factor(df$human_footprint, levels = c("False", "True"))
+df$denv_100k_cumulative <- factor(df$denv_100k_cumulative, levels = c("False", "True"))
+df$biome <- factor(df$biome, levels = c("False", "True"))
 
 # fit linear mixed effects model
 model <- lmer(
-  log_likelihood ~ indexP_DTW + denv_100k_DTW + koppen + threshold + (1 | repeat_id),
+  log_likelihood ~ indexP_DTW + temperature_DTW + humidity_DTW + human_footprint + denv_100k_cumulative + biome + threshold + (1 | repeat_id),
   data = df
 )
 
