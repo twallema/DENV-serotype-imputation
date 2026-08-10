@@ -39,7 +39,7 @@ for name,region in zip(names,regions):
     geography['fraction_urban'] = geography['urban_area'] / geography['area']
 
     # save result
-    geography[[f'{region}', 'fraction_urban']].to_csv(f'../interim/land_cover/fraction_urban_land_{region}.csv', index=False)
+    geography[[f'{region}', 'fraction_urban']].to_csv(f'../interim/land_cover/fraction_urban_land_{name}.csv', index=False)
 
     # visualise on a map
     fig, ax = plt.subplots()
@@ -54,5 +54,5 @@ for name,region in zip(names,regions):
     ax.axis("off")
     ax.set_title("Fraction urban land (log10)")
     plt.tight_layout()
-    plt.savefig(f'../interim/land_cover/fraction_urban_land_{region}.svg')
+    plt.savefig(f'../interim/land_cover/fraction_urban_land_{name}.svg')
     plt.close()
