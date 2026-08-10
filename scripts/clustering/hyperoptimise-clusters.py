@@ -211,7 +211,7 @@ def main():
     # make an experimental design matrix
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-    grid_covariates = ["indexP_DTW", "temperature_DTW", "humidity_DTW", "precip_DTW", "human_footprint", "denv_100k_cumulative", "biome"]
+    grid_covariates = ["indexP_DTW", "temperature_DTW", "humidity_DTW", "precipitation_DTW", "human_footprint", "denv_100k_cumulative", "biome"]
 
     threshold_values = [27.5, 40, 55, 90] # CD_RGINT: 27.5, 40, 55, 90 results in 10, 15, 20 or 25 clusters
 
@@ -275,13 +275,13 @@ def main():
     region = DTW_covariates_indexP.columns.to_list()[0]
 
     # Load temperature DTW-MDS embedding
-    DTW_covariates_temp = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/climate/temp_med/DTW-MDS-embedding_{spatial_aggregation}.csv'))
+    DTW_covariates_temp = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/climate/temp_min/DTW-MDS-embedding_{spatial_aggregation}.csv'))
 
     # Load humidity DTW-MDS embedding
     DTW_covariates_humid = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/climate/humid_med/DTW-MDS-embedding_{spatial_aggregation}.csv'))
 
-    # Load serotypes DTW-MDS embedding
-    DTW_covariates_serotypes = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/serotypes/{region}/DTW-MDS-embedding_{spatial_aggregation}.csv'))
+    # Load humidity DTW-MDS embedding
+    DTW_covariates_precip = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/climate/precip_max/DTW-MDS-embedding_{spatial_aggregation}.csv'))
 
     # Load nearest hypermetro area
     nearest_hypermetro = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/nearest-hypermetro/nearest-hypermetro_{spatial_aggregation}.csv'))
@@ -509,7 +509,7 @@ def main():
     geography[DTW_covariates_indexP_names] = sc.fit_transform(geography[DTW_covariates_indexP_names])
 
 
-    # Make temp_med DTW-MDS covariate
+    # Make temp DTW-MDS covariate
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
     # Merge to the geography
@@ -523,7 +523,7 @@ def main():
     geography[DTW_covariates_temp_names] = sc.fit_transform(geography[DTW_covariates_temp_names])
 
 
-    # Make humid_med DTW-MDS covariate
+    # Make humid DTW-MDS covariate
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
     # Merge to the geography
@@ -536,6 +536,18 @@ def main():
     DTW_covariates_humid_names = [x for x in DTW_covariates_humid.columns.to_list() if x != f'{region}']
     geography[DTW_covariates_humid_names] = sc.fit_transform(geography[DTW_covariates_humid_names])
 
+    # Make precip DTW-MDS covariate
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    # Merge to the geography
+    geography = geography.merge(
+        DTW_covariates_precip, 
+        on = f'{region}'
+    )
+    # Standardize DTW-MDS embedding
+    sc = StandardScaler()
+    DTW_covariates_precip_names = [x for x in DTW_covariates_precip.columns.to_list() if x != f'{region}']
+    geography[DTW_covariates_precip_names] = sc.fit_transform(geography[DTW_covariates_precip_names])
 
     # Perform the training-validation split
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -655,6 +667,8 @@ def main():
                 covariate_names_raw.extend(DTW_covariates_temp_names) 
             elif covname == 'humidity_DTW':
                 covariate_names_raw.extend(DTW_covariates_humid_names)     
+            elif covname == 'precipitation_DTW':
+                covariate_names_raw.extend(DTW_covariates_precip_names)     
 
         # run max P clustering in parallel
         labels, matrices, best_obj_vals = run_parallel_maxp(
