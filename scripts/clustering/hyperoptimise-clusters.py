@@ -728,7 +728,7 @@ def main():
         ax.axis("off")
         fig.suptitle('Consensus clusters')
         plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, f'index_{index}/consensus_clusters_{spatial_aggregation}.png', dpi=600))
+        plt.savefig(os.path.join(output_folder, f'index_{index}/consensus_clusters_{spatial_aggregation}.png'), dpi=600)
         plt.close()
 
         # Save the consensus clusters (hierarchical)
