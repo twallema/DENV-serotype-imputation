@@ -712,52 +712,24 @@ def main():
         plt.savefig(os.path.join(output_folder, f'index_{index}/clustermap_probmatrix_{spatial_aggregation}.svg'))
         plt.close()
 
-        if no_frills==False:
-                
-            # Recluster mean co-association matrix using spectral clustering
-            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-            sc = SpectralClustering(n_clusters=n_clusters, affinity='precomputed', random_state=0)
-            geography['consensus_clusters_spectral'] = sc.fit_predict(prob_matrix)+1
-
-
-            # Save and visualise the mean clustering results
-            # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-            # visualise clusters on a map
-            fig, ax = plt.subplots(nrows=1, ncols=2)
-            # hierarchical (left)
-            gdf_states.boundary.plot(ax=ax[0], linewidth=0.5, color="black")   # state boundaries
-            geography.plot(
-                column="consensus_clusters_hierarchical",          # color regions by cluster label
-                categorical=True,
-                cmap=glasbey_cmap,             # categorical colormap
-                linewidth=0.2,
-                edgecolor="grey",
-                legend=True,
-                ax=ax[0],
-                legend_kwds={'fontsize': 4, 'ncol': 4, 'loc': 'lower right', 'markerscale': 0.4}
-            )
-            ax[0].set_title(f"Hierarchical clustering", fontsize=14)
-            ax[0].axis("off")
-            # spectral (right)
-            gdf_states.boundary.plot(ax=ax[1], linewidth=0.5, color="black")   # state boundaries
-            geography.plot(
-                column="consensus_clusters_spectral",          # color regions by cluster label
-                categorical=True,
-                cmap=glasbey_cmap,             # categorical colormap
-                linewidth=0.2,
-                edgecolor="grey",
-                legend=False,
-                ax=ax[1],
-                legend_kwds={'fontsize': 4, 'ncol': 4, 'loc': 'lower right', 'markerscale': 0.4}
-            )
-            ax[1].set_title(f"Spectral clustering", fontsize=14)
-            ax[1].axis("off")
-            fig.suptitle('Consensus clusters')
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_folder, f'index_{index}/consensus_clusters_{spatial_aggregation}.svg'))
-            plt.close()
+        # visualise clusters on a map
+        fig, ax = plt.subplots()
+        gdf_states.boundary.plot(ax=ax, linewidth=0.5, color="black")   # state boundaries
+        geography.plot(
+            column="consensus_clusters_hierarchical",          # color regions by cluster label
+            categorical=True,
+            cmap=glasbey_cmap,             # categorical colormap
+            linewidth=0.2,
+            edgecolor="grey",
+            legend=True,
+            ax=ax,
+            legend_kwds={'fontsize': 4, 'ncol': 4, 'loc': 'lower right', 'markerscale': 0.4}
+        )
+        ax.axis("off")
+        fig.suptitle('Consensus clusters')
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_folder, f'index_{index}/consensus_clusters_{spatial_aggregation}.png', dpi=600))
+        plt.close()
 
         # Save the consensus clusters (hierarchical)
         clusters = geography[[f'{region}', 'consensus_clusters_hierarchical']]
@@ -949,7 +921,8 @@ def main():
             alpha = phi[:, :, None] * p # Broadcast phi over serotypes
 
             # observed subtyped incidences ---
-            Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial, dims=("date", "cluster", "serotype"))
+            #pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial, dims=("date", "cluster", "serotype"))
+            pm.Multinomial("Y_obs", p=p, n=N_typed, observed=Y_multinomial, dims=("date", "cluster", "serotype"))
 
         # NUTS
         with model:
