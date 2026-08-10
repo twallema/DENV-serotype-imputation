@@ -8,6 +8,10 @@ Here we list a description of all datasets, raw datasets are unaltered original 
 
 + `subdivision-names.csv`: Abbreviations of Brazilian state names (ISO 3166-2:BR). Retrieved from the International Standardization Organization (ISO): https://www.iso.org/obp/ui/#iso:pub:PUB500001:en 
 
+### Land cover
+
++ `Municipality_cover_and_land_use_with_GEOCODE_24fev2026.xlsx`: Land cover classification by BR municipality from 1985-2024. Retrieved from Elvira D'Bastiani. 
+
 ### Genetic sequence databases
 
 + `genbank_sequences.csv`: Metadata from the Brazilian Dengue sequences in Genbank. Downloaded from https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Nucleotide&VirusLineage_ss=Dengue%20virus,%20taxid:12637&Country_s=Brazil
@@ -55,6 +59,12 @@ These data are partly confidential and can be found on the Bento lab box.
 
 + `spatial_units_mapping.csv`: Area codes and names of the municipalities, immediate regions, intermediate regions, federative units and regions. Also available in `geographic-dataset.parquet` but saved seperately to lower IO burden.
 
+### Land cover
+
++ `fraction_urban_land_CD_RGI/RGINT.csv`: Fraction urban land per RGI/RGINT (averaged 1998-2024). Made using `~/data/conversion/build_fraction-urban-land.py` from `~/data/raw/land_cover/Municipality_cover_and_land_use_with_GEOCODE_24fev2026.xlsx`.
+
++ `fraction_urban_land_CD_RGI/RGINT.svg`: Visualisation of urban land fraction.
+
 ### Climate
 
 + `climate_normals_rgi.csv`: Average minimum, median and maximum temperature, rainfall and humidity per CD_RGI and month of year. Based on daily data from 2010 until 2026, obtained by Elvira D'Bastiani.
@@ -74,10 +84,6 @@ These data are partly confidential and can be found on the Bento lab box.
 ### DENV_per_100k
 
 + `DENV_per_100k_mun.csv`: Total dengue incidence per 100K inhabitants at the municipality level. Made using the formatted linelist data in `data/interim/datasus_DENV-linelist` and `data/conversion/build_dengue-incidence-100k.py`.
-
-### Nearest hypermetro
-
-+ `nearest-hypermetro_mun.csv`: Brazilian municipalities clustered to their nearest hypermetropolitan area. Made using `data/conversion/build_closest-hypermetro-area.R` using data downloaded using the geobr package.
 
 ### Datasus DENV linelist dataset
 
@@ -143,6 +149,6 @@ Contains all output of the Bayesian serotype imputation model `~/scripts/bayesia
 
 + `construct_travel-time-matrices.R`: Script used to construct travel time origin-destination matrices for the Brazilian intermediate and immediate regions. Uses a Monte Carlo approach to connect municipalities in the origin and destination regions by populated-weighted random sampling.
 
-+ `build-nearest-largest-sampling-effort.py`: 
++ `build_nearest-largest-sampling-effort.py`: Builds a map showing the closest area with good quality serotype sampling based on car travel time.
 
-+ `build_closest-hypermetro-area.R`: 
++ `build_fraction-urban-land.py`: Builds the fraction of Brazilian RGI/RGINT taken up by urban land.
