@@ -915,7 +915,7 @@ def main():
 
             # overdispersion model
             ## time-independent hierarchical overdispersion (per region)
-            d_region_hierarch = pm.HalfNormal("d_region_hierarch", sigma=1/100)    # --> phi ~ 1000 --> low overdispersion
+            d_region_hierarch = pm.HalfNormal("d_region_hierarch", sigma=1/10)    # --> phi ~ 1000 --> low overdispersion
             d_region = pm.HalfNormal("d_region", sigma=d_region_hierarch, dims="cluster")
             phi = pm.Deterministic("phi", pt.repeat((1.0 / pm.math.maximum(d_region, 1e-12))[None, :], n_months, axis=0), dims=("date", "cluster"))
             alpha = phi[:, :, None] * p # Broadcast phi over serotypes
