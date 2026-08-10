@@ -18,102 +18,17 @@ from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform
 import argparse
 
-season_start_month = 9
-
 # bayesian imputation model
 import arviz
 import pymc as pm
 import pytensor.tensor as pt
 from patsy import dmatrix
 
-n_draw = 25
-n_tune = 25
+# Scripts follows canonical "spawn" multiprocessing structure
 
-# parse arguments
-# >>>>>>>>>>>>>>>
-
-# parse arguments
-parser = argparse.ArgumentParser()
-
-parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
-parser.add_argument("-n_cores", type=int, help="Number of available CPU cores.", default=8)
-parser.add_argument("-n_maxp", type=int, help="Number of max-p clustering runs to average.", default=200)
-parser.add_argument("-n_repeats", type=int, help="Number of repeated within-sample validations.", default=10)
-parser.add_argument("-max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=10)
-parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
-parser.add_argument("-validation_bw", type=float, help="Bandwidth around Q1, Q2 and Q3 median serotype sampling effort to sample within-sample validation areas from.", default=0.05)
-parser.add_argument("-validation_n", type=int, help="Number of within-sample validation areas to sample around each Q1, Q2, Q3 +/- bandwith.", default=2)
-parser.add_argument("-visualise_imputed_data", type=bool, help="Make a plot of the imputed data in the clusters (recommend disable on cluster because runtime is several minutes).", default=False)
-
-# assign to desired variables
-args = parser.parse_args()
-ID = args.ID
-n_cores = args.n_cores
-n_maxp = args.n_maxp
-n_repeats = args.n_repeats
-max_iterations_sa = args.max_iterations_sa
-spatial_aggregation = args.spatial_aggregation
-validation_bw = args.validation_bw
-validation_n = args.validation_n
-visualise_imputed_data = args.visualise_imputed_data
-
-# pipeline output folder
-abs_dir = os.path.dirname(__file__) # make sure all referenced paths are relative to the location of this file and not the terminal's pwd
-output_folder = os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/hyperoptimisation/')
-# check if output dir exists, if not, make it
-if not os.path.exists(output_folder):
-    os.makedirs(output_folder)
-
-
-# make an experimental design matrix
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-grid_covariates = ["indexP_DTW", "temperature_DTW", "humidity_DTW", "human_footprint", "denv_100k_cumulative", "biome"]
-
-threshold_values = [27.5, 40, 55, 90] # CD_RGINT: 27.5, 40, 55, 90 results in 10, 15, 20 or 25 clusters
-
-# Generate combinations of grid_covariates (True/False) AND thresholds
-covariate_combinations = list(
-    itertools.product([True, False], repeat=len(grid_covariates))
-)
-all_combinations = list(
-    itertools.product(covariate_combinations, threshold_values)
-)
-
-rows = []
-for cov_combo, thresh in all_combinations:
-    row = dict(zip(grid_covariates, cov_combo))
-    row["threshold"] = thresh
-    rows.append(row)
-design_matrix = pd.DataFrame(rows)
-
-# Add variables that are always True
-design_matrix["compactness"] = True
-design_matrix["nearest_largest_sampling_effort"] = True
-
-# Handle repeats and initialize results column
-design_matrix = (
-    design_matrix.loc[design_matrix.index.repeat(n_repeats)]
-    .assign(repeat_id=np.tile(range(1, n_repeats + 1), len(design_matrix)))
-    .reset_index(drop=True)
-)
-
-# Pre-initialise the likelihood and number of clusters
-design_matrix["log_likelihood"] = np.nan
-design_matrix["n_clusters"] = np.nan
-
-print(f"\nNumber of covariate combinations: {len(covariate_combinations)}")
-print(f"Number of thresholds: {len(threshold_values)}")
-print(f"Number of repeated within-sample validations: {n_repeats}")
-print(f"Total number of runs: {len(design_matrix)}\n")
-
-print(f"Preparing data..\n")
-
-
-print(design_matrix)
-
-# helper function
-# >>>>>>>>>>>>>>>
+######################
+## helper functions ##
+######################
 
 def build_co_association_matrix(regions, clusters):
     """
@@ -150,308 +65,477 @@ def build_co_association_matrix(regions, clusters):
     return association_matrix
 
 
-# Load raw data
-# >>>>>>>>>>>>>
+# Run max-p regionalization model `n` times in parallel
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-# Load geodata
-geography = gpd.read_parquet(os.path.join(abs_dir, "../../data/interim/geographic-dataset.parquet"))
-geography = geography.to_crs('EPSG:5880')
+from contextlib import redirect_stdout
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing as mp
+from tqdm import tqdm
 
-# load state boundaries
-gdf_states = geography.dissolve(by='CD_UF')
+from libpysal.weights import Rook
+from spopt.region import MaxPHeuristic
 
-# Load case data
-denv = pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet").collect().to_pandas()
+def run_single_maxp(
+    run_index, geography_df, region_col, covariate_names, threshold,
+    max_iterations_sa
+):
+    """
+    Worker function: rebuilds its own MaxP model & captures stdout inside process.
+    Returns (run_index, labels, co_assoc_matrix, best_obj_value)
+    """
 
-# Load cases per 100K data
-denv_100k = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DENV_per_100K/DENV_per_100k_{spatial_aggregation}.csv'))
-denv_100k['date'] = pd.to_datetime(denv_100k['date'])
+    # Build contiguity weights
+    w = Rook.from_dataframe(geography_df, use_index=False)
 
-# Load human footprint 
-human_footprint = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/human-footprint/human-footprint_{spatial_aggregation}.csv'))
-
-# Load DENV per 100K DTW-MDS embedding
-DTW_covariates_denv_100k = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-MDS-embedding_{spatial_aggregation}.csv'))
-
-# Load indexP DTW-MDS embedding
-DTW_covariates_indexP = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/indexP/DTW-MDS-embedding_{spatial_aggregation}.csv'))
-region = DTW_covariates_indexP.columns.to_list()[0]
-
-# Load temperature DTW-MDS embedding
-DTW_covariates_temp = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/climate/temp_med/DTW-MDS-embedding_{spatial_aggregation}.csv'))
-
-# Load humidity DTW-MDS embedding
-DTW_covariates_humid = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/climate/humid_med/DTW-MDS-embedding_{spatial_aggregation}.csv'))
-
-# Load serotypes DTW-MDS embedding
-DTW_covariates_serotypes = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/serotypes/{region}/DTW-MDS-embedding_{spatial_aggregation}.csv'))
-
-# Load nearest hypermetro area
-nearest_hypermetro = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/nearest-hypermetro/nearest-hypermetro_{spatial_aggregation}.csv'))
-
-# Load nearest largest sampling effort
-nearest_largest_sampling_effort = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/nearest-largest-sampling-effort/nearest-largest-sampling-effort_{spatial_aggregation}.csv'))
-
-
-# Aggregate incidence and geographical dataset to the intermediate/immediate regions
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-if region:
-
-    assert ((region != 'CD_RGI') | (region != 'CD_RGINT')), "'region' must be either 'CD_RGI' or 'CD_RGINT''"
-
-    # Geography
-    # >>>>>>>>>
-
-    muncipality_region_map = geography[['CD_MUN', f'{region}']]
-
-    # --- 1. Majority vote of biome per immediate region ---
-    # Count how many municipalities per biome in each immediate region
-    biome_majority = (
-        geography.groupby([f'{region}', 'biome'])
-        .size()
-        .reset_index(name='count')
-    )
-    # For each immediate region, keep the biome with max count
-    biome_majority = (
-        biome_majority
-        .sort_values([f'{region}', 'count'], ascending=[True, False])
-        .drop_duplicates(f'{region}')
-        .set_index(f'{region}')['biome']
-    )
-    # --- 2. Majority vote of Koppen climate per immediate region ---
-    # Count how many municipalities per koppen in each immediate region
-    koppen_majority = (
-        geography.groupby([f'{region}', 'koppen'])
-        .size()
-        .reset_index(name='count')
-    )
-    # For each immediate region, keep the koppen with max count
-    koppen_majority = (
-        koppen_majority
-        .sort_values([f'{region}', 'count'], ascending=[True, False])
-        .drop_duplicates(f'{region}')
-        .set_index(f'{region}')['koppen']
-    )
-    # --- 3. Dissolve geometries by immediate region ---
-    gdf_regions = geography.dissolve(by=f'{region}', aggfunc={'POP': 'sum'})
-    # --- 4. Attach the majority biome and koppen back ---
-    gdf_regions['biome'] = gdf_regions.index.map(biome_majority)
-    gdf_regions['koppen'] = gdf_regions.index.map(koppen_majority)
-    # --- 5. Retain only relevant columns ---
-    gdf_regions = gdf_regions.reset_index()
-    geography = gdf_regions[[f'{region}', 'biome', 'koppen', 'POP', 'geometry']]
-
-    # Incidence
-    # >>>>>>>>>
-
-    # Merge incidence with mapping
-    denv = denv.merge(muncipality_region_map, on="CD_MUN", how="left")
-    # Define custom aggregation function to treat the Nans
-    def nan_to_zero_sum(series):
-        if series.isna().all():
-            return float("nan")
-        else:
-            return series.fillna(0).sum()
-    # List of columns to aggregate
-    denv_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
-    # Group and aggregate
-    denv = (
-        denv.groupby([f"{region}", "date"])[denv_cols]
-        .agg(nan_to_zero_sum)
-        .reset_index()
+    # Build model
+    model = MaxPHeuristic(
+        geography_df,
+        w,
+        attrs_name=covariate_names,
+        threshold_name="N_typed_yearly_median",
+        threshold=threshold,
+        top_n=2,
+        policy="multiple",
+        max_iterations_construction=100,
+        max_iterations_sa=max_iterations_sa,
+        verbose=True
     )
 
+    # Capture stdout
+    f = io.StringIO()
+    with redirect_stdout(f):
+        model.solve()
 
-# Compute threshold & leave out within-sample validation
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    stdout_data = f.getvalue().splitlines()
+    best_vals = []
 
-# Compute the mimimum sum of serotyped cases across all years (will have to be changed)
-denv = denv[denv['date'] < datetime(2020,1,1)]
-# append a season label
-before_start_month = denv['date'].dt.month < season_start_month
-season_year = denv['date'].dt.year
-season_year = season_year.where(~before_start_month, season_year - 1)
-denv['season'] = season_year.astype(str) + '-' + (season_year + 1).astype(str)
-# compute total cases per month
-denv["N_typed"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
-# sum cases by year
-yearly_sum = denv.groupby([f'{region}',"season"])['N_typed'].sum().reset_index()
-# take median across years
-yearly_sum_median = yearly_sum.groupby(f'{region}')["N_typed"].median() # array for clustering
-yearly_sum_median.rename("N_typed_yearly_median", inplace=True)
+    # Parse stdout for objective value
+    for i, line in enumerate(stdout_data):
+        if "best objective value:" in line.lower():
+            try:
+                best_vals.append(float(stdout_data[i+1].strip()))
+            except:
+                pass
+    best_obj_value = best_vals[-1] if best_vals else np.nan
 
-# Make biome covariate
-# >>>>>>>>>>>>>>>>>>>>
+    # Build outputs
+    labels = model.labels_.copy()
+    coassoc = build_co_association_matrix(geography_df[region_col], labels)
 
-# Make dummies for the biome
-biome_dummies = pd.get_dummies(geography["biome"], prefix="biome")
-geography = geography.merge(
-    biome_dummies, 
-    left_index=True, 
-    right_index=True, 
-    how="left"
-)
-# ensure biome dummies are int (0/1)
-for col in biome_dummies.columns:
-    geography[col] = geography[col].astype(float)
+    return run_index, labels, coassoc, best_obj_value
 
 
-# Make Koppen climate covariate
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+def run_parallel_maxp(n_cores, n, geography, region, covariate_names, threshold, max_iterations_sa):
 
-# Make dummies for the koppen climate
-koppen_dummies = pd.get_dummies(geography["koppen"], prefix="koppen")
-geography = geography.merge(
-    koppen_dummies, 
-    left_index=True, 
-    right_index=True, 
-    how="left"
-)
-# Ensure biome dummies are int (0/1)
-for col in koppen_dummies.columns:
-    geography[col] = geography[col].astype(float)
+    results = []
 
+    with ProcessPoolExecutor(max_workers=n_cores, mp_context=mp.get_context("spawn")) as ex:
 
-# Make nearest hypermetro area covariate
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        future_to_index = {
+            ex.submit(
+                run_single_maxp,
+                run_index=i,
+                geography_df=geography,
+                region_col=region,
+                covariate_names=covariate_names,
+                threshold=threshold,
+                max_iterations_sa=max_iterations_sa,
+            ): i
+            for i in range(n)
+        }
 
-# Make dummies for the nearest hypermetro covariate
-nearest_hypermetro_dummies = pd.get_dummies(nearest_hypermetro['hypermetro_id'], prefix="nearest_hypermetro")
-# Merge to the geography dataframe
-geography = geography.merge(
-    nearest_hypermetro_dummies, 
-    left_index=True, 
-    right_index=True, 
-    how="left"
-)
-# Ensure nearest_hypermetro dummies are int (0/1)
-for col in nearest_hypermetro_dummies.columns:
-    geography[col] = geography[col].astype(float)
+        # Iterate over completed futures with a progress bar
+        with tqdm(total=n, desc="Running Max-P optimization") as pbar:
+            for fut in as_completed(future_to_index):
+                results.append(fut.result())
+                pbar.update(1)  # Advance progress bar by 1 as each job finishes
 
+    # Sort by run index so output ordering is guaranteed
+    results.sort(key=lambda x: x[0])
 
-# Make nearest largest sampling area covariate
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    # Extract outputs
+    all_labels   = [r[1] for r in results]
+    all_matrices = [r[2] for r in results]
+    obj_vals     = [r[3] for r in results]
 
-# Make dummies for the nearest hypermetro covariate
-nearest_largest_sampling_effort_dummies = pd.get_dummies(nearest_largest_sampling_effort['largest_sampling_effort_id'], prefix="nearest_largest_sampling_effort")
-# Merge to the geography dataframe
-geography = geography.merge(
-    nearest_largest_sampling_effort_dummies, 
-    left_index=True, 
-    right_index=True, 
-    how="left"
-)
-# Ensure nearest_hypermetro dummies are int (0/1)
-for col in nearest_largest_sampling_effort_dummies.columns:
-    geography[col] = geography[col].astype(float)
+    return all_labels, all_matrices, obj_vals
 
+#####################################
+## main script wrapped in function ##
+#####################################
 
-# Make human footprint covariate
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+def main():
 
-# standardize
-sc = StandardScaler()
-geography['human_footprint'] = sc.fit_transform(human_footprint[["human_footprint"]])
+    season_start_month = 9
 
+    n_draw = 25
+    n_tune = 25
 
-# Make cumulative DENV per 100K covariate
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    # parse arguments
+    # >>>>>>>>>>>>>>>
 
-# compute cumulative totals
-denv_100k = denv_100k.groupby(by=f'{region}')['DENV_per_100k'].sum()
-# standardize
-sc = StandardScaler()
-geography['denv_100k_cumulative'] = sc.fit_transform(denv_100k.values.reshape(-1,1))
+    # parse arguments
+    parser = argparse.ArgumentParser()
 
+    parser.add_argument("--run_id", type=str, help="Identifier of the experiment.")
+    parser.add_argument("--repeat_id", type=str, help="Identifier of the repeat.")
+    parser.add_argument("--n_cores", type=int, help="Number of available CPU cores.", default=8)
+    parser.add_argument("--n_maxp", type=int, help="Number of max-p clustering runs to average.", default=250)
+    parser.add_argument("--max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=10)
+    parser.add_argument("--spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
+    parser.add_argument("--validation_bw", type=float, help="Bandwidth around Q1, Q2 and Q3 median serotype sampling effort to sample within-sample validation areas from.", default=0.05)
+    parser.add_argument("--validation_n", type=int, help="Number of within-sample validation areas to sample around each Q1, Q2, Q3 +/- bandwith.", default=2)
+    parser.add_argument("--no_frills", type=bool, help="Cut out optional plots to speed things up.", default=True)
 
-# Make compactness covariate
-# >>>>>>>>>>>>>>>>>>>>>>>>>>
+    # assign to desired variables
+    args = parser.parse_args()
+    run_id = args.run_id
+    n_cores = args.n_cores
+    n_maxp = args.n_maxp
+    repeat_id = args.repeat_id
+    max_iterations_sa = args.max_iterations_sa
+    spatial_aggregation = args.spatial_aggregation
+    validation_bw = args.validation_bw
+    validation_n = args.validation_n
+    no_frills = args.no_frills
 
-# 1) Project to Brazil Polyconic (EPSG:5880)
-geography = geography.to_crs("EPSG:5880")
-
-# 2) Compute centroids (in metres)
-# .centroid is fine after projecting; for very complex multipolygons consider representative_point()
-geography["cx"] = geography.geometry.centroid.x
-geography["cy"] = geography.geometry.centroid.y
-
-# 3) Standardize and add compactness components
-sc = StandardScaler()
-geography[["cx","cy"]] = sc.fit_transform(geography[["cx","cy"]])
-
-# 4) Normalize the area codes (similarity in codes reflects proximity in space)
-geography[region+'_NORM'] = sc.fit_transform(geography[[region]])
+    # pipeline output folder
+    abs_dir = os.path.dirname(__file__) # make sure all referenced paths are relative to the location of this file and not the terminal's pwd
+    output_folder = os.path.join(abs_dir, f'../../data/interim/clustering_pipeline/{run_id}/repeat_{repeat_id}')
+    # check if output dir exists, if not, make it
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
 
 
-# Make DENV per 100k DTW-MDS covariate
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    # make an experimental design matrix
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-# Merge to the geography
-geography = geography.merge(
-    DTW_covariates_denv_100k, 
-    on = f'{region}'
-)
-# Standardize DTW-MDS embedding
-sc = StandardScaler()
-DTW_covariates_denv_100k_names = [x for x in DTW_covariates_denv_100k.columns.to_list() if x != f'{region}']
-geography[DTW_covariates_denv_100k_names] = sc.fit_transform(geography[DTW_covariates_denv_100k_names])
+    grid_covariates = ["indexP_DTW",] # "temperature_DTW", "humidity_DTW", "human_footprint", "denv_100k_cumulative", "biome"] # precip_DTW
+
+    threshold_values = [27.5,] # 40, 55, 90] # CD_RGINT: 27.5, 40, 55, 90 results in 10, 15, 20 or 25 clusters
+
+    # Generate combinations of grid_covariates (True/False) AND thresholds
+    covariate_combinations = list(
+        itertools.product([True, False], repeat=len(grid_covariates))
+    )
+    all_combinations = list(
+        itertools.product(covariate_combinations, threshold_values)
+    )
+
+    rows = []
+    for cov_combo, thresh in all_combinations:
+        row = dict(zip(grid_covariates, cov_combo))
+        row["threshold"] = thresh
+        rows.append(row)
+    design_matrix = pd.DataFrame(rows)
+
+    # Add clustering covariates that are always True
+    design_matrix["compactness"] = True
+    design_matrix["nearest_largest_sampling_effort"] = True
+
+    # Add the repeat ID
+    design_matrix["repeat_id"] = repeat_id
+
+    # Pre-initialise the likelihood and number of clusters
+    design_matrix["log_likelihood"] = np.nan
+    design_matrix["n_clusters"] = np.nan
+
+    print(f"\nNumber of covariate combinations: {len(covariate_combinations)}")
+    print(f"Number of thresholds: {len(threshold_values)}")
+    print(f"Total number of runs: {len(design_matrix)}\n")
+
+    print(f"Preparing data..\n")
+
+    # Load raw data
+    # >>>>>>>>>>>>>
+
+    # Load geodata
+    geography = gpd.read_parquet(os.path.join(abs_dir, "../../data/interim/geographic-dataset.parquet"))
+    geography = geography.to_crs('EPSG:5880')
+
+    # load state boundaries
+    gdf_states = geography.dissolve(by='CD_UF')
+
+    # Load case data
+    denv = pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet").collect().to_pandas()
+
+    # Load cases per 100K data
+    denv_100k = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DENV_per_100k/DENV_per_100k_{spatial_aggregation}.csv'))
+    denv_100k['date'] = pd.to_datetime(denv_100k['date'])
+
+    # Load human footprint 
+    human_footprint = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/human-footprint/human-footprint_{spatial_aggregation}.csv'))
+
+    # Load DENV per 100K DTW-MDS embedding
+    DTW_covariates_denv_100k = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/denv_100k/DTW-MDS-embedding_{spatial_aggregation}.csv'))
+
+    # Load indexP DTW-MDS embedding
+    DTW_covariates_indexP = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/indexP/DTW-MDS-embedding_{spatial_aggregation}.csv'))
+    region = DTW_covariates_indexP.columns.to_list()[0]
+
+    # Load temperature DTW-MDS embedding
+    DTW_covariates_temp = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/climate/temp_med/DTW-MDS-embedding_{spatial_aggregation}.csv'))
+
+    # Load humidity DTW-MDS embedding
+    DTW_covariates_humid = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/climate/humid_med/DTW-MDS-embedding_{spatial_aggregation}.csv'))
+
+    # Load serotypes DTW-MDS embedding
+    DTW_covariates_serotypes = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/serotypes/{region}/DTW-MDS-embedding_{spatial_aggregation}.csv'))
+
+    # Load nearest hypermetro area
+    nearest_hypermetro = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/nearest-hypermetro/nearest-hypermetro_{spatial_aggregation}.csv'))
+
+    # Load nearest largest sampling effort
+    nearest_largest_sampling_effort = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/nearest-largest-sampling-effort/nearest-largest-sampling-effort_{spatial_aggregation}.csv'))
 
 
-# Make indexP DTW-MDS covariate
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    # Aggregate incidence and geographical dataset to the intermediate/immediate regions
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-# Merge to the geography
-geography = geography.merge(
-    DTW_covariates_indexP, 
-    on = f'{region}'
-)
-# Standardize DTW-MDS embedding
-sc = StandardScaler()
-DTW_covariates_indexP_names = [x for x in DTW_covariates_indexP.columns.to_list() if x != f'{region}']
-geography[DTW_covariates_indexP_names] = sc.fit_transform(geography[DTW_covariates_indexP_names])
+    if region:
+
+        assert ((region != 'CD_RGI') | (region != 'CD_RGINT')), "'region' must be either 'CD_RGI' or 'CD_RGINT''"
+
+        # Geography
+        # >>>>>>>>>
+
+        muncipality_region_map = geography[['CD_MUN', f'{region}']]
+
+        # --- 1. Majority vote of biome per immediate region ---
+        # Count how many municipalities per biome in each immediate region
+        biome_majority = (
+            geography.groupby([f'{region}', 'biome'])
+            .size()
+            .reset_index(name='count')
+        )
+        # For each immediate region, keep the biome with max count
+        biome_majority = (
+            biome_majority
+            .sort_values([f'{region}', 'count'], ascending=[True, False])
+            .drop_duplicates(f'{region}')
+            .set_index(f'{region}')['biome']
+        )
+        # --- 2. Majority vote of Koppen climate per immediate region ---
+        # Count how many municipalities per koppen in each immediate region
+        koppen_majority = (
+            geography.groupby([f'{region}', 'koppen'])
+            .size()
+            .reset_index(name='count')
+        )
+        # For each immediate region, keep the koppen with max count
+        koppen_majority = (
+            koppen_majority
+            .sort_values([f'{region}', 'count'], ascending=[True, False])
+            .drop_duplicates(f'{region}')
+            .set_index(f'{region}')['koppen']
+        )
+        # --- 3. Dissolve geometries by immediate region ---
+        gdf_regions = geography.dissolve(by=f'{region}', aggfunc={'POP': 'sum'})
+        # --- 4. Attach the majority biome and koppen back ---
+        gdf_regions['biome'] = gdf_regions.index.map(biome_majority)
+        gdf_regions['koppen'] = gdf_regions.index.map(koppen_majority)
+        # --- 5. Retain only relevant columns ---
+        gdf_regions = gdf_regions.reset_index()
+        geography = gdf_regions[[f'{region}', 'biome', 'koppen', 'POP', 'geometry']]
+
+        # Incidence
+        # >>>>>>>>>
+
+        # Merge incidence with mapping
+        denv = denv.merge(muncipality_region_map, on="CD_MUN", how="left")
+        # Define custom aggregation function to treat the Nans
+        def nan_to_zero_sum(series):
+            if series.isna().all():
+                return float("nan")
+            else:
+                return series.fillna(0).sum()
+        # List of columns to aggregate
+        denv_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
+        # Group and aggregate
+        denv = (
+            denv.groupby([f"{region}", "date"])[denv_cols]
+            .agg(nan_to_zero_sum)
+            .reset_index()
+        )
 
 
-# Make temp_med DTW-MDS covariate
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    # Compute threshold & leave out within-sample validation
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-# Merge to the geography
-geography = geography.merge(
-    DTW_covariates_temp, 
-    on = f'{region}'
-)
-# Standardize DTW-MDS embedding
-sc = StandardScaler()
-DTW_covariates_temp_names = [x for x in DTW_covariates_temp.columns.to_list() if x != f'{region}']
-geography[DTW_covariates_temp_names] = sc.fit_transform(geography[DTW_covariates_temp_names])
+    # Compute the mimimum sum of serotyped cases across all years (will have to be changed)
+    denv = denv[denv['date'] < datetime(2020,1,1)]
+    # append a season label
+    before_start_month = denv['date'].dt.month < season_start_month
+    season_year = denv['date'].dt.year
+    season_year = season_year.where(~before_start_month, season_year - 1)
+    denv['season'] = season_year.astype(str) + '-' + (season_year + 1).astype(str)
+    # compute total cases per month
+    denv["N_typed"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
+    # sum cases by year
+    yearly_sum = denv.groupby([f'{region}',"season"])['N_typed'].sum().reset_index()
+    # take median across years
+    yearly_sum_median = yearly_sum.groupby(f'{region}')["N_typed"].median() # array for clustering
+    yearly_sum_median.rename("N_typed_yearly_median", inplace=True)
+
+    # Make biome covariate
+    # >>>>>>>>>>>>>>>>>>>>
+
+    # Make dummies for the biome
+    biome_dummies = pd.get_dummies(geography["biome"], prefix="biome")
+    geography = geography.merge(
+        biome_dummies, 
+        left_index=True, 
+        right_index=True, 
+        how="left"
+    )
+    # ensure biome dummies are int (0/1)
+    for col in biome_dummies.columns:
+        geography[col] = geography[col].astype(float)
 
 
-# Make humid_med DTW-MDS covariate
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    # Make Koppen climate covariate
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-# Merge to the geography
-geography = geography.merge(
-    DTW_covariates_humid, 
-    on = f'{region}'
-)
-# Standardize DTW-MDS embedding
-sc = StandardScaler()
-DTW_covariates_humid_names = [x for x in DTW_covariates_humid.columns.to_list() if x != f'{region}']
-geography[DTW_covariates_humid_names] = sc.fit_transform(geography[DTW_covariates_humid_names])
+    # Make dummies for the koppen climate
+    koppen_dummies = pd.get_dummies(geography["koppen"], prefix="koppen")
+    geography = geography.merge(
+        koppen_dummies, 
+        left_index=True, 
+        right_index=True, 
+        how="left"
+    )
+    # Ensure biome dummies are int (0/1)
+    for col in koppen_dummies.columns:
+        geography[col] = geography[col].astype(float)
 
 
-# Make copies before looping
-# >>>>>>>>>>>>>>>>>>>>>>>>>>
+    # Make nearest hypermetro area covariate
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-yearly_sum_median_copy = yearly_sum_median.copy(deep=True)
-geography_copy = geography.copy(deep=True)
+    # Make dummies for the nearest hypermetro covariate
+    nearest_hypermetro_dummies = pd.get_dummies(nearest_hypermetro['hypermetro_id'], prefix="nearest_hypermetro")
+    # Merge to the geography dataframe
+    geography = geography.merge(
+        nearest_hypermetro_dummies, 
+        left_index=True, 
+        right_index=True, 
+        how="left"
+    )
+    # Ensure nearest_hypermetro dummies are int (0/1)
+    for col in nearest_hypermetro_dummies.columns:
+        geography[col] = geography[col].astype(float)
 
-for repeat_id in design_matrix['repeat_id'].unique():
 
-    geography = geography_copy
-    yearly_sum_median = yearly_sum_median_copy
+    # Make nearest largest sampling area covariate
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-    os.makedirs(os.path.join(output_folder, f'repeat_{repeat_id}'), exist_ok=True)
+    # Make dummies for the nearest hypermetro covariate
+    nearest_largest_sampling_effort_dummies = pd.get_dummies(nearest_largest_sampling_effort['largest_sampling_effort_id'], prefix="nearest_largest_sampling_effort")
+    # Merge to the geography dataframe
+    geography = geography.merge(
+        nearest_largest_sampling_effort_dummies, 
+        left_index=True, 
+        right_index=True, 
+        how="left"
+    )
+    # Ensure nearest_hypermetro dummies are int (0/1)
+    for col in nearest_largest_sampling_effort_dummies.columns:
+        geography[col] = geography[col].astype(float)
+
+
+    # Make human footprint covariate
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    # standardize
+    sc = StandardScaler()
+    geography['human_footprint'] = sc.fit_transform(human_footprint[["human_footprint"]])
+
+
+    # Make cumulative DENV per 100K covariate
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    # compute cumulative totals
+    denv_100k = denv_100k.groupby(by=f'{region}')['DENV_per_100k'].sum()
+    # standardize
+    sc = StandardScaler()
+    geography['denv_100k_cumulative'] = sc.fit_transform(denv_100k.values.reshape(-1,1))
+
+
+    # Make compactness covariate
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    # 1) Project to Brazil Polyconic (EPSG:5880)
+    geography = geography.to_crs("EPSG:5880")
+
+    # 2) Compute centroids (in metres)
+    # .centroid is fine after projecting; for very complex multipolygons consider representative_point()
+    geography["cx"] = geography.geometry.centroid.x
+    geography["cy"] = geography.geometry.centroid.y
+
+    # 3) Standardize and add compactness components
+    sc = StandardScaler()
+    geography[["cx","cy"]] = sc.fit_transform(geography[["cx","cy"]])
+
+    # 4) Normalize the area codes (similarity in codes reflects proximity in space)
+    geography[region+'_NORM'] = sc.fit_transform(geography[[region]])
+
+
+    # Make DENV per 100k DTW-MDS covariate
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    # Merge to the geography
+    geography = geography.merge(
+        DTW_covariates_denv_100k, 
+        on = f'{region}'
+    )
+    # Standardize DTW-MDS embedding
+    sc = StandardScaler()
+    DTW_covariates_denv_100k_names = [x for x in DTW_covariates_denv_100k.columns.to_list() if x != f'{region}']
+    geography[DTW_covariates_denv_100k_names] = sc.fit_transform(geography[DTW_covariates_denv_100k_names])
+
+
+    # Make indexP DTW-MDS covariate
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    # Merge to the geography
+    geography = geography.merge(
+        DTW_covariates_indexP, 
+        on = f'{region}'
+    )
+    # Standardize DTW-MDS embedding
+    sc = StandardScaler()
+    DTW_covariates_indexP_names = [x for x in DTW_covariates_indexP.columns.to_list() if x != f'{region}']
+    geography[DTW_covariates_indexP_names] = sc.fit_transform(geography[DTW_covariates_indexP_names])
+
+
+    # Make temp_med DTW-MDS covariate
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    # Merge to the geography
+    geography = geography.merge(
+        DTW_covariates_temp, 
+        on = f'{region}'
+    )
+    # Standardize DTW-MDS embedding
+    sc = StandardScaler()
+    DTW_covariates_temp_names = [x for x in DTW_covariates_temp.columns.to_list() if x != f'{region}']
+    geography[DTW_covariates_temp_names] = sc.fit_transform(geography[DTW_covariates_temp_names])
+
+
+    # Make humid_med DTW-MDS covariate
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    # Merge to the geography
+    geography = geography.merge(
+        DTW_covariates_humid, 
+        on = f'{region}'
+    )
+    # Standardize DTW-MDS embedding
+    sc = StandardScaler()
+    DTW_covariates_humid_names = [x for x in DTW_covariates_humid.columns.to_list() if x != f'{region}']
+    geography[DTW_covariates_humid_names] = sc.fit_transform(geography[DTW_covariates_humid_names])
+
 
     # Perform the training-validation split
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -501,7 +585,7 @@ for repeat_id in design_matrix['repeat_id'].unique():
 
     # convert validation labels to municipality level (because the incidence data used in the bayesian model is too)
     validation_labels_muni = muncipality_region_map[muncipality_region_map[f'{region}'].isin(validation_labels)]['CD_MUN']
-    validation_labels_muni.to_csv(os.path.join(output_folder, f'repeat_{repeat_id}/validation_labels.csv'), index=False)
+    validation_labels_muni.to_csv(os.path.join(output_folder, f'validation_labels.csv'), index=False)
 
     # visualise where the left out areas are
     geography['validation_labels'] = geography[f'{region}'].isin(validation_labels)
@@ -520,7 +604,7 @@ for repeat_id in design_matrix['repeat_id'].unique():
     )
     ax.set_title('Areas left out during within-sample validation', fontsize=10)
     ax.axis("off")
-    plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/validation_labels.svg'))
+    plt.savefig(os.path.join(output_folder, f'validation_labels.svg'))
     plt.close()
 
     # merge them to the geography dataframe
@@ -539,7 +623,7 @@ for repeat_id in design_matrix['repeat_id'].unique():
         print("\n")
         print(f"\nWorking on repeat {repeat_id}, index: {index}\n")
 
-        os.makedirs(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}'), exist_ok=True)
+        os.makedirs(os.path.join(output_folder, f'index_{index}'), exist_ok=True)
         
         covariate_names = [col for col, val in row.to_dict().items() if val is True] # Filter covariate columns that evaluate to True
 
@@ -572,111 +656,8 @@ for repeat_id in design_matrix['repeat_id'].unique():
             elif covname == 'humidity_DTW':
                 covariate_names_raw.extend(DTW_covariates_humid_names)     
 
-
-        # Run max-p regionalization model `n` times in parallel
-        # TODO: when packaging this code these 2 functions will go in the source code
-        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-        from contextlib import redirect_stdout
-        from concurrent.futures import ProcessPoolExecutor, as_completed
-        import multiprocessing as mp
-        from tqdm import tqdm
-
-        def run_single_maxp(
-            run_index, geography_df, region_col, covariate_names, threshold,
-            max_iterations_sa
-        ):
-            """
-            Worker function: rebuilds its own MaxP model & captures stdout inside process.
-            Returns (run_index, labels, co_assoc_matrix, best_obj_value)
-            """
-            # Local import to avoid multiprocessing overhead
-            from libpysal.weights import Rook
-            from spopt.region import MaxPHeuristic
-
-            # Build contiguity weights
-            w = Rook.from_dataframe(geography_df, use_index=False)
-
-            # Build model
-            model = MaxPHeuristic(
-                geography_df,
-                w,
-                attrs_name=covariate_names,
-                threshold_name="N_typed_yearly_median",
-                threshold=threshold,
-                top_n=2,
-                policy="multiple",
-                max_iterations_construction=100,
-                max_iterations_sa=max_iterations_sa,
-                verbose=True
-            )
-
-            # Capture stdout
-            f = io.StringIO()
-            with redirect_stdout(f):
-                model.solve()
-
-            stdout_data = f.getvalue().splitlines()
-            best_vals = []
-
-            # Parse stdout for objective value
-            for i, line in enumerate(stdout_data):
-                if "best objective value:" in line.lower():
-                    try:
-                        best_vals.append(float(stdout_data[i+1].strip()))
-                    except:
-                        pass
-            best_obj_value = best_vals[-1] if best_vals else np.nan
-
-            # Build outputs
-            labels = model.labels_.copy()
-            coassoc = build_co_association_matrix(geography_df[region_col], labels)
-
-            return run_index, labels, coassoc, best_obj_value
-
-
-        def run_parallel_maxp(n_cores, n, geography, region, covariate_names, threshold, max_iterations_sa):
-
-            results = []
-            with ProcessPoolExecutor(max_workers=n_cores) as ex:
-
-                future_to_index = {
-                    ex.submit(
-                        run_single_maxp,
-                        run_index=i,
-                        geography_df=geography,
-                        region_col=region,
-                        covariate_names=covariate_names,
-                        threshold=threshold,
-                        max_iterations_sa=max_iterations_sa,
-                    ): i
-                    for i in range(n)
-                }
-
-                # Iterate over completed futures with a progress bar
-                with tqdm(total=n, desc="Running Max-P optimization") as pbar:
-                    for fut in as_completed(future_to_index):
-                        results.append(fut.result())
-                        pbar.update(1)  # Advance progress bar by 1 as each job finishes
-
-            # Sort by run index so output ordering is guaranteed
-            results.sort(key=lambda x: x[0])
-
-            # Extract outputs
-            all_labels   = [r[1] for r in results]
-            all_matrices = [r[2] for r in results]
-            obj_vals     = [r[3] for r in results]
-
-            return all_labels, all_matrices, obj_vals
-
-        # run model in parallel
-        if __name__ == '__main__':
-            try:
-                mp.set_start_method("fork") # default unix parallel process spawn method
-            except RuntimeError:
-                pass
-            # run func
-            labels, matrices, best_obj_vals = run_parallel_maxp(
+        # run max P clustering in parallel
+        labels, matrices, best_obj_vals = run_parallel_maxp(
                 n_cores=n_cores,
                 n=n_maxp,
                 max_iterations_sa=max_iterations_sa,
@@ -694,13 +675,6 @@ for repeat_id in design_matrix['repeat_id'].unique():
         weights = softmax(-np.asarray(best_obj_vals)/T)
 
 
-        # Save individual runs in geography dataframe
-        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-        for i in range(n_maxp):
-            geography[f'run_{i}'] = labels[i]
-
-
         # Average co-association matrices across runs
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -710,7 +684,7 @@ for repeat_id in design_matrix['repeat_id'].unique():
             prob_matrix += weight * association_matrix
 
         # save mean co-association matrix
-        prob_matrix.to_csv(os.path.join(output_folder, f"repeat_{repeat_id}/index_{index}/prob_matrix_{spatial_aggregation}.csv"))
+        prob_matrix.to_csv(os.path.join(output_folder, f"index_{index}/prob_matrix_{spatial_aggregation}.csv"))
 
         # compute median number of clusters
         n_clusters = math.ceil(np.mean([len(np.unique(l)) for l in labels]))
@@ -735,24 +709,12 @@ for repeat_id in design_matrix['repeat_id'].unique():
         # Save clustermap
         import seaborn as sns
         sns.clustermap(1-distance, cmap='viridis')
-        plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/clustermap_probmatrix_{spatial_aggregation}.svg'))
+        plt.savefig(os.path.join(output_folder, f'index_{index}/clustermap_probmatrix_{spatial_aggregation}.svg'))
         plt.close()
 
-
-        # Recluster mean co-association matrix using spectral clustering
-        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-        sc = SpectralClustering(n_clusters=n_clusters, affinity='precomputed', random_state=0)
-        geography['consensus_clusters_spectral'] = sc.fit_predict(prob_matrix)+1
-
-
-        # Save and visualise the mean clustering results
-        # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
         # visualise clusters on a map
-        fig, ax = plt.subplots(nrows=1, ncols=2)
-        # hierarchical (left)
-        gdf_states.boundary.plot(ax=ax[0], linewidth=0.5, color="black")   # state boundaries
+        fig, ax = plt.subplots()
+        gdf_states.boundary.plot(ax=ax, linewidth=0.5, color="black")   # state boundaries
         geography.plot(
             column="consensus_clusters_hierarchical",          # color regions by cluster label
             categorical=True,
@@ -760,57 +722,44 @@ for repeat_id in design_matrix['repeat_id'].unique():
             linewidth=0.2,
             edgecolor="grey",
             legend=True,
-            ax=ax[0],
+            ax=ax,
             legend_kwds={'fontsize': 4, 'ncol': 4, 'loc': 'lower right', 'markerscale': 0.4}
         )
-        ax[0].set_title(f"Hierarchical clustering", fontsize=14)
-        ax[0].axis("off")
-        # spectral (right)
-        gdf_states.boundary.plot(ax=ax[1], linewidth=0.5, color="black")   # state boundaries
-        geography.plot(
-            column="consensus_clusters_spectral",          # color regions by cluster label
-            categorical=True,
-            cmap=glasbey_cmap,             # categorical colormap
-            linewidth=0.2,
-            edgecolor="grey",
-            legend=False,
-            ax=ax[1],
-            legend_kwds={'fontsize': 4, 'ncol': 4, 'loc': 'lower right', 'markerscale': 0.4}
-        )
-        ax[1].set_title(f"Spectral clustering", fontsize=14)
-        ax[1].axis("off")
+        ax.axis("off")
         fig.suptitle('Consensus clusters')
         plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/consensus_clusters_{spatial_aggregation}.svg'))
+        plt.savefig(os.path.join(output_folder, f'index_{index}/consensus_clusters_{spatial_aggregation}.png'), dpi=600)
         plt.close()
 
         # Save the consensus clusters (hierarchical)
         clusters = geography[[f'{region}', 'consensus_clusters_hierarchical']]
         clusters = clusters.rename(columns={'consensus_clusters_hierarchical': 'cluster'})
-        clusters = pd.merge(muncipality_region_map, clusters, on='CD_RGINT')
-        clusters = clusters.set_index('CD_MUN').drop(columns=['CD_RGINT']).reset_index()
-        clusters.to_csv(os.path.join(output_folder, f"repeat_{repeat_id}/index_{index}/clusters.csv"), index=False)
+        clusters = pd.merge(muncipality_region_map, clusters, on=f'{region}')
+        clusters = clusters.set_index('CD_MUN').drop(columns=[f'{region}']).reset_index()
+        clusters.to_csv(os.path.join(output_folder, f"index_{index}/clusters.csv"), index=False)
 
 
         # Save a map of Brazil with every cluster highlighted
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-        # make output folder
-        if not os.path.exists(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/clusters')):
-            os.makedirs(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/clusters'))
+        if no_frills==False:
 
-        # visualise clusters on a map
-        for cluster_id in geography["consensus_clusters_hierarchical"].unique():
-            fig, ax = plt.subplots()
-            gdf_states.boundary.plot(ax=ax, linewidth=0.5, color="black")   # state boundaries
-            geography.boundary.plot(ax=ax, linewidth=0.1, color="black", alpha=0.2)          # clustered spatial unit boundaries
-            gdf = geography.loc[geography["consensus_clusters_hierarchical"] == cluster_id]
-            gdf.plot(ax=ax, color="#d35052",edgecolor="none") # cluster
-            cluster_centroid = gdf.union_all().centroid
-            #ax.text(cluster_centroid.x, cluster_centroid.y, str(cluster_id), ha="center", va="center", fontsize=12, fontweight="bold", color="black")
-            ax.set_axis_off()
-            plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/clusters/cluster_{cluster_id}.svg'))
-            plt.close()
+            # make output folder
+            if not os.path.exists(os.path.join(output_folder, f'index_{index}/clusters')):
+                os.makedirs(os.path.join(output_folder, f'index_{index}/clusters'))
+
+            # visualise clusters on a map
+            for cluster_id in geography["consensus_clusters_hierarchical"].unique():
+                fig, ax = plt.subplots()
+                gdf_states.boundary.plot(ax=ax, linewidth=0.5, color="black")   # state boundaries
+                geography.boundary.plot(ax=ax, linewidth=0.1, color="black", alpha=0.2)          # clustered spatial unit boundaries
+                gdf = geography.loc[geography["consensus_clusters_hierarchical"] == cluster_id]
+                gdf.plot(ax=ax, color="#d35052",edgecolor="none") # cluster
+                cluster_centroid = gdf.union_all().centroid
+                #ax.text(cluster_centroid.x, cluster_centroid.y, str(cluster_id), ha="center", va="center", fontsize=12, fontweight="bold", color="black")
+                ax.set_axis_off()
+                plt.savefig(os.path.join(output_folder, f'index_{index}/clusters/cluster_{cluster_id}.svg'))
+                plt.close()
 
 
         # Build the clusters' adjacency matrix needed for the Bayesian imputation model
@@ -852,7 +801,7 @@ for repeat_id in design_matrix['repeat_id'].unique():
                 adj_matrix.loc[uf, neighbor] = 1
 
         # Save in a .csv
-        adj_matrix.to_csv(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/adjacency_matrix_{spatial_aggregation}.csv'))
+        adj_matrix.to_csv(os.path.join(output_folder, f'index_{index}/adjacency_matrix_{spatial_aggregation}.csv'))
 
 
         # Impute the case data
@@ -905,7 +854,6 @@ for repeat_id in design_matrix['repeat_id'].unique():
             .collect()
         ).to_pandas()
 
-
         # total number of serotyped cases
         N_typed = cases.pivot(index="date", columns="cluster", values="DENV_serotyped_count").fillna(0).to_numpy().astype(int) # (n_months, n_regions)
 
@@ -914,7 +862,7 @@ for repeat_id in design_matrix['repeat_id'].unique():
         for col in ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']:
             Y_mat = cases.pivot(index="date", columns="cluster", values=col).to_numpy()
             Y_list.append(Y_mat)
-        Y_multinomial = np.stack(Y_list, axis=2).astype(int)    # (n_months, n_regions, n_serotypes)
+        Y_multinomial = np.nan_to_num(np.stack(Y_list, axis=2), nan=0).astype(int) # (n_months, n_regions, n_serotypes)
 
         # lengths
         n_months = Y_multinomial.shape[0]
@@ -967,38 +915,36 @@ for repeat_id in design_matrix['repeat_id'].unique():
 
             # overdispersion model
             ## time-independent hierarchical overdispersion (per region)
-            d_region_hierarch = pm.HalfNormal("d_region_hierarch", sigma=1/3)    # --> phi ~ 1000 --> low overdispersion
+            d_region_hierarch = pm.HalfNormal("d_region_hierarch", sigma=1/10)    # --> phi ~ 1000 --> low overdispersion
             d_region = pm.HalfNormal("d_region", sigma=d_region_hierarch, dims="cluster")
             phi = pm.Deterministic("phi", pt.repeat((1.0 / pm.math.maximum(d_region, 1e-12))[None, :], n_months, axis=0), dims=("date", "cluster"))
             alpha = phi[:, :, None] * p # Broadcast phi over serotypes
 
             # observed subtyped incidences ---
-            Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial, dims=("date", "cluster", "serotype"))
+            pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial, dims=("date", "cluster", "serotype"))
 
         # NUTS
         with model:
-            trace = pm.sample(n_draw, tune=n_tune, target_accept=0.8, chains=n_cores, cores=n_cores, init='adapt_diag', progressbar=True)
+            trace = pm.sample(n_draw, tune=n_tune, target_accept=0.8, chains=4, cores=4, init='adapt_diag', progressbar=True, mp_ctx=mp.get_context("spawn"), blas_cores=1)
+
 
         # save traces
         variables2plot = ['sigma_beta', 'psi', 'd_region_hierarch', 'd_region']
-        os.makedirs(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/imputation_model/trace'), exist_ok=True)
+        os.makedirs(os.path.join(output_folder, f'index_{index}/imputation_model/trace'), exist_ok=True)
         for var in variables2plot:
-            arviz.plot_trace(trace, var_names=[var]) 
-            plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/imputation_model/trace/trace-{var}_typing-effort-model.pdf'))
+            arviz.plot_trace_dist(trace, var_names=[var], compact=True, combined=True, kind='kde') 
+            plt.savefig(os.path.join(output_folder, f'index_{index}/imputation_model/trace/trace-{var}_typing-effort-model.pdf'))
             plt.close()
-
-        # make a posterior predictive
-        with model:
-            posterior_predictive = pm.sample_posterior_predictive(trace)
 
 
         # Visualise the imputed case data
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-        if visualise_imputed_data==True:
+        dates = cases['date'].unique()
+
+        if no_frills==False:
                 
             # loop over clusters
-            dates = cases['date'].unique()
             for cluster_id in cases['cluster'].unique():
 
                 fig = plt.figure(figsize=(8.3, 11.7/6*8))
@@ -1052,8 +998,8 @@ for repeat_id in design_matrix['repeat_id'].unique():
                 ax[-1].set_ylabel(f"Serotype distribution (%)")
 
                 plt.tight_layout()
-                os.makedirs(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/imputation_model/posterior_predictive'), exist_ok=True)
-                plt.savefig(os.path.join(output_folder, f'repeat_{repeat_id}/index_{index}/imputation_model/posterior_predictive/cluster_{cluster_id}.pdf'))
+                os.makedirs(os.path.join(output_folder, f'index_{index}/imputation_model/posterior_predictive'), exist_ok=True)
+                plt.savefig(os.path.join(output_folder, f'index_{index}/imputation_model/posterior_predictive/cluster_{cluster_id}.pdf'))
                 plt.close()
 
 
@@ -1098,6 +1044,10 @@ for repeat_id in design_matrix['repeat_id'].unique():
         cases = cases.fillna(0)
         df_p = df_p.loc[mask]
 
+        # Aggregate back up to the RGI / RGINT before evaluating
+        cases = cases.merge(muncipality_region_map, on='CD_MUN', how='left').groupby(['date', f'{region}'], as_index=False)[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'N_typed']].sum().reset_index(drop=True)
+        df_p = df_p.merge(muncipality_region_map, on='CD_MUN', how='left').groupby(['date', f'{region}'], as_index=False).nth(0).drop(columns='CD_MUN').reset_index(drop=True)
+        
         # Compute log likelihood
         from scipy.stats import dirichlet_multinomial
         x = cases[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].values
@@ -1108,8 +1058,16 @@ for repeat_id in design_matrix['repeat_id'].unique():
         # Save result
         design_matrix.loc[index, 'log_likelihood'] = sum(logp)
         design_matrix.loc[index, 'n_clusters'] = n_clusters
+        os.makedirs(os.path.join(output_folder, f'../results'), exist_ok=True)
+        design_matrix.to_csv(os.path.join(output_folder, f'../results/repeat_{repeat_id}.csv'), index=False)
 
-        print(design_matrix)
 
-# Save result
-design_matrix.to_csv(os.path.join(output_folder, 'hyperoptimisation_results.csv'), index=False)
+###########################
+## execute script safely ##
+###########################
+
+if __name__ == "__main__":
+
+    mp.set_start_method("spawn", force=True)
+
+    main()

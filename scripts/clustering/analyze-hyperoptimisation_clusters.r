@@ -5,20 +5,35 @@ library(ggplot2)
 library(patchwork)
 library(tidyr)
 library(ggnewscale)
+library(tidyverse)
 
 # Set working directory to location of this script
 if(!require(rstudioapi)) install.packages("rstudioapi")
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 
 # Load the data
-df = read.csv(file.path(getwd(), '../../data/interim/pipeline_output/test_hyperoptimisation/clusters/hyperoptimisation/hyperoptimisation_results.csv'))
+path <- file.path(getwd(), '../../data/interim/clustering_pipeline/CD_RGINT/results')
+
+file_list <- list.files(
+  path = path, 
+  pattern = "*.csv", 
+  full.names = TRUE
+)
+df <- map_dfr(file_list, read_csv)
+
+# Redact 11 --> 10 and 16 --> 15 clusters
+df$n_clusters <- ifelse(df$n_clusters == 11, 10, df$n_clusters)
+df$n_clusters <- ifelse(df$n_clusters == 16, 15, df$n_clusters)
 
 # Add configurations
 df$configuration <- interaction(
   df$indexP_DTW,
-  df$denv_100k_DTW,
-  df$koppen,
-  df$threshold,
+  df$temperature_DTW,
+  df$humidity_DTW,
+  df$human_footprint,
+  df$denv_100k_cumulative,
+  df$biome,
+  df$n_clusters,
   drop = TRUE
 )
 
@@ -26,8 +41,8 @@ df$configuration <- interaction(
 ## Paired bootstrap to test our confidence in the "winner" ##
 #############################################################
 
-n_boot <- 1000
-top_n <- 15
+n_boot <- 3000
+top_n <- 50
 
 # Identify observed best configuration
 best_config <- df %>%
@@ -135,9 +150,12 @@ config_info <- df %>%
   distinct(
     configuration,
     indexP_DTW,
-    denv_100k_DTW,
-    koppen,
-    threshold
+    temperature_DTW,
+    humidity_DTW,
+    human_footprint,
+    denv_100k_cumulative,
+    biome,
+    n_clusters
   )
 
 config_plot_df <- plot_df %>%
@@ -158,23 +176,32 @@ config_plot_df <- plot_df %>%
 config_long <- config_plot_df %>%
   mutate(
     indexP_DTW = as.character(indexP_DTW),
-    denv_100k_DTW = as.character(denv_100k_DTW),
-    koppen = as.character(koppen),
-    threshold = as.character(threshold)
+    temperature_DTW = as.character(temperature_DTW),
+    humidity_DTW = as.character(humidity_DTW),
+    human_footprint = as.character(human_footprint),
+    denv_100k_cumulative = as.character(denv_100k_cumulative),
+    biome = as.character(biome),
+    n_clusters = as.character(n_clusters)
   ) %>%
   select(
     configuration,
     indexP_DTW,
-    denv_100k_DTW,
-    koppen,
-    threshold
+    temperature_DTW,
+    humidity_DTW,
+    human_footprint,
+    denv_100k_cumulative,
+    biome,
+    n_clusters
   ) %>%
   tidyr::pivot_longer(
     cols = c(
       indexP_DTW,
-      denv_100k_DTW,
-      koppen,
-      threshold
+      temperature_DTW,
+      humidity_DTW,
+      human_footprint,
+      denv_100k_cumulative,
+      biome,
+      n_clusters
     ),
     names_to = "variable",
     values_to = "value"
@@ -184,21 +211,27 @@ config_long <- config_plot_df %>%
       variable,
       levels = c(
         "indexP_DTW",
-        "denv_100k_DTW",
-        "koppen",
-        "threshold"
+        "temperature_DTW",
+        "humidity_DTW",
+        "human_footprint",
+        "denv_100k_cumulative",
+        "biome",
+        "n_clusters"
       ),
       labels = c(
-        "index P",
+        "Index P",
+        "Temp.",
+        "Humidity",
+        "H. Footpr.",
         "DENV/100k",
-        "Köppen",
-        "Threshold"
+        "Biome",
+        "Clusters"
       )
     ),
     included = case_when(
-      variable == "Threshold" ~ NA_character_,
-      value == "True" ~ "TRUE",
-      value == "False" ~ "FALSE"
+      variable == "Clusters" ~ NA_character_,
+      value == "TRUE" ~ "TRUE",
+      value == "FALSE" ~ "FALSE"
     ),
     symbol = case_when(
       value == "True" ~ "✓",
@@ -219,7 +252,7 @@ config_plot <- ggplot(
 geom_tile(
   data = filter(
     config_long,
-    variable != "Threshold"
+    variable != "Clusters"
   ),
   aes(fill = included),
   width = 0.9,
@@ -239,7 +272,7 @@ geom_tile(
   geom_text(
     data = filter(
       config_long,
-      variable != "Threshold"
+      variable != "Clusters"
     ),
     aes(
       label = ifelse(included == "TRUE", "+", "-")
@@ -256,7 +289,7 @@ geom_tile(
 geom_tile(
   data = filter(
     config_long,
-    variable == "Threshold"
+    variable == "Clusters"
   ),
   aes(fill = as.numeric(value)),
   width = 0.9,
@@ -264,23 +297,18 @@ geom_tile(
   colour = "white"
 ) +
   
-  scale_fill_gradient(
-    low = "grey65",
-    high = "grey15",
-    name = "Threshold",
-    guide = "none"
-  ) +
-  
 geom_text(
   data = filter(
     config_long,
-    variable == "Threshold"
+    variable == "Clusters"
   ),
   aes(label = value),
   color = "white",
   fontface = "bold",
   size = 3.5
 ) +
+
+scale_fill_gradient(low="grey65", high="grey15", guide = "none") +  
   
 scale_x_discrete(
   position = "bottom"
@@ -301,7 +329,7 @@ scale_x_discrete(
   theme(
     axis.text.x = element_text(
       face = "bold",
-      size = 8
+      size = 7
     ),
     axis.ticks = element_blank(),
     axis.line = element_blank(),
@@ -394,11 +422,10 @@ forest <- ggplot(
 # 6. Combine both
 final_plot <- config_plot + forest +
   plot_layout(
-    widths = c(3.0, 5.3)  # change ratios
+    widths = c(4.5,3.8)  # change ratios
   )
 
-ggsave("result.pdf", plot=final_plot, width = 8.3, height = 11.7/2, units = "in")
-
+ggsave("result.pdf", plot=final_plot, width = 8.3, height = 11.7, units = "in")
 
 ######################################################
 ## Make "Best" configuration as a standalone object ##
@@ -410,22 +437,31 @@ best_design <- df %>%
   distinct(
     configuration,
     indexP_DTW,
-    denv_100k_DTW,
-    koppen,
-    threshold
+    temperature_DTW,
+    humidity_DTW,
+    human_footprint,
+    denv_100k_cumulative,
+    biome,
+    n_clusters
   ) %>%
   mutate(
     indexP_DTW = as.character(indexP_DTW),
-    denv_100k_DTW = as.character(denv_100k_DTW),
-    koppen = as.character(koppen),
-    threshold = as.character(threshold)
+    temperature_DTW = as.character(temperature_DTW),
+    humidity_DTW = as.character(humidity_DTW),
+    human_footprint = as.character(human_footprint),
+    denv_100k_cumulative = as.character(denv_100k_cumulative),
+    biome = as.character(biome),
+    n_clusters = as.character(n_clusters)
   ) %>%
   tidyr::pivot_longer(
     cols = c(
       indexP_DTW,
-      denv_100k_DTW,
-      koppen,
-      threshold
+      temperature_DTW,
+      humidity_DTW,
+      human_footprint,
+      denv_100k_cumulative,
+      biome,
+      n_clusters
     ),
     names_to = "variable",
     values_to = "value"
@@ -435,21 +471,27 @@ best_design <- df %>%
       variable,
       levels = c(
         "indexP_DTW",
-        "denv_100k_DTW",
-        "koppen",
-        "threshold"
+        "temperature_DTW",
+        "humidity_DTW",
+        "human_footprint",
+        "denv_100k_cumulative",
+        "biome",
+        "n_clusters"
       ),
       labels = c(
-        "indexP",
+        "Index P",
+        "Temp.",
+        "Humidity",
+        "H. Footpr.",
         "DENV/100k",
-        "Köppen",
-        "Threshold"
+        "Biome",
+        "Clusters"
       )
     ),
     included = case_when(
-      variable == "Threshold" ~ NA_character_,
-      value == "True" ~ "TRUE",
-      value == "False" ~ "FALSE"
+      variable == "Clusters" ~ NA_character_,
+      value == "TRUE" ~ "TRUE",
+      value == "FALSE" ~ "FALSE"
     )
   )
 
@@ -466,7 +508,7 @@ best_config_plot <- ggplot(
   geom_tile(
     data = filter(
       best_design,
-      variable != "Threshold"
+      variable != "Clusters"
     ),
     aes(fill = included),
     width = 0.9,
@@ -486,7 +528,7 @@ best_config_plot <- ggplot(
   geom_text(
     data = filter(
       best_design,
-      variable != "Threshold"
+      variable != "Clusters"
     ),
     aes(
       label = ifelse(
@@ -506,7 +548,7 @@ best_config_plot <- ggplot(
   geom_tile(
     data = filter(
       best_design,
-      variable == "Threshold"
+      variable == "Clusters"
     ),
     aes(fill = as.numeric(value)),
     width = 0.9,
@@ -524,7 +566,7 @@ best_config_plot <- ggplot(
   geom_text(
     data = filter(
       best_design,
-      variable == "Threshold"
+      variable == "Clusters"
     ),
     aes(label = value),
     colour = "white",
@@ -555,20 +597,90 @@ best_config_plot <- ggplot(
     )
   )
 
-ggsave("best_config.pdf", plot=best_config_plot, width = 3.0, height = 11.7/22, units = "in")
+ggsave("best_config.pdf", plot=best_config_plot, width = 4.5, height = 11.7/22, units = "in")
+
+#########################################################
+## Assess linearity of threshold across configurations ##
+#########################################################
+
+# Omit n_clusters from configuration
+df$configuration <- interaction(
+  df$indexP_DTW,
+  df$temperature_DTW,
+  df$humidity_DTW,
+  df$human_footprint,
+  df$denv_100k_cumulative,
+  df$biome,
+  drop = TRUE
+)
+
+df_mean <- df %>%
+  group_by(configuration, n_clusters) %>%
+  summarise(
+    mean_log_likelihood = mean(log_likelihood, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+best_configuration <- df_mean %>%
+  slice_max(mean_log_likelihood, n = 1)
+
+winner <- best_configuration$configuration
+
+winner_mean <- df_mean %>%
+  filter(configuration == winner)
+
+plot_best_config <- ggplot(
+  df_mean,
+  aes(
+    x = n_clusters,
+    y = mean_log_likelihood,
+    group = n_clusters
+  )
+) +
+  stat_boxplot(geom = "errorbar", width=3) +
+  geom_boxplot(
+    width = 3,
+    fill = "grey80",
+    color = "grey50",
+    alpha = 1
+  ) +
+  geom_line(
+    data = winner_mean,
+    aes(
+      x = n_clusters,
+      y = mean_log_likelihood,
+      group = 1
+    ),
+    color = "red",
+    linewidth = 1.2
+  ) +
+  theme_classic() +
+  labs(
+    x = "Number of clusters",
+    y = "Mean log likelihood across repeats"
+  )
+
+ggsave("relationship_n_clusters.pdf", plot=plot_best_config, width = 8.3/2, height = 11.7/4, units = "in")
+
 
 #################################################################
 ## Try to disentangle each covariates effect with an lme model ##
 #################################################################
 
+# slice for the best number of clusters
+df <- df[df$n_clusters == best_configuration$n_clusters , ]
+
 # factor covariates
-df$indexP_DTW <- factor(df$indexP_DTW, levels = c("False", "True"))
-df$denv_100k_DTW <- factor(df$denv_100k_DTW, levels = c("False", "True"))
-df$koppen <- factor(df$koppen, levels = c("False", "True"))
+df$indexP_DTW <- factor(df$indexP_DTW)
+df$temperature_DTW <- factor(df$temperature_DTW)
+df$humidity_DTW <- factor(df$humidity_DTW)
+df$human_footprint <- factor(df$human_footprint)
+df$denv_100k_cumulative <- factor(df$denv_100k_cumulative)
+df$biome <- factor(df$biome)
 
 # fit linear mixed effects model
 model <- lmer(
-  log_likelihood ~ indexP_DTW + denv_100k_DTW + koppen + threshold + (1 | repeat_id),
+  log_likelihood ~ indexP_DTW + temperature_DTW + humidity_DTW + human_footprint + denv_100k_cumulative + biome + (1 | repeat_id),
   data = df
 )
 
