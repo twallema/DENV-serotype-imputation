@@ -2,10 +2,11 @@
 import pandas as pd
 import polars as pl
 import geopandas as gpd
+import matplotlib.pyplot as plt
 
 # Spatial aggregation levels
-names = ['mun', 'rgi', 'rgint']
-regions = ['CD_MUN', 'CD_RGI', 'CD_RGINT']
+names = ['rgi', 'rgint']
+regions = ['CD_RGI', 'CD_RGINT']
 
 
 # Aggregate to the intermediate/immediate regions
@@ -68,6 +69,29 @@ for region, name in zip(regions, names):
 
         # compute cases per 100K
         denv["DENV_per_100k"] = denv["DENV_total"] / denv["population"] * 1e5
+
+        # for plot
+        denv_plot = denv.groupby(by=f"{region}")["DENV_per_100k"].sum().reset_index()
+
+        # Visualise
+        # >>>>>>>>>
+
+        geography = geography.dissolve(by=f'{region}').reset_index()
+        geography = geography.merge(denv_plot[[f'{region}', 'DENV_per_100k']], how='left')
+
+        fig, ax = plt.subplots()
+        geography.plot(
+            column="DENV_per_100k",          # color regions by cluster label
+            linewidth=0.2,
+            edgecolor="grey",
+            legend=True,
+            ax=ax,
+        )
+        ax.axis("off")
+        ax.set_title("Cumulative dengue incidence")
+        plt.tight_layout()
+        plt.savefig(f'../interim/DENV_per_100k/DENV_per_100k_{name}.svg')
+        plt.close()
 
         # Save result
         # >>>>>>>>>>>

@@ -211,9 +211,9 @@ def main():
     # make an experimental design matrix
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-    grid_covariates = ["indexP_DTW",] # "temperature_DTW", "humidity_DTW", "human_footprint", "denv_100k_cumulative", "biome"] # precip_DTW
+    grid_covariates = ["indexP_DTW", "temperature_DTW", "humidity_DTW", "precipitation_DTW", "fraction_urban_land", "denv_100k_cumulative", "biome"]
 
-    threshold_values = [27.5,] # 40, 55, 90] # CD_RGINT: 27.5, 40, 55, 90 results in 10, 15, 20 or 25 clusters
+    threshold_values = [27.5, 40, 55, 90] # CD_RGINT: 27.5, 40, 55, 90 results in 10, 15, 20 or 25 clusters
 
     # Generate combinations of grid_covariates (True/False) AND thresholds
     covariate_combinations = list(
@@ -275,20 +275,19 @@ def main():
     region = DTW_covariates_indexP.columns.to_list()[0]
 
     # Load temperature DTW-MDS embedding
-    DTW_covariates_temp = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/climate/temp_med/DTW-MDS-embedding_{spatial_aggregation}.csv'))
+    DTW_covariates_temp = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/climate/temp_min/DTW-MDS-embedding_{spatial_aggregation}.csv'))
 
     # Load humidity DTW-MDS embedding
     DTW_covariates_humid = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/climate/humid_med/DTW-MDS-embedding_{spatial_aggregation}.csv'))
 
-    # Load serotypes DTW-MDS embedding
-    DTW_covariates_serotypes = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/serotypes/{region}/DTW-MDS-embedding_{spatial_aggregation}.csv'))
-
-    # Load nearest hypermetro area
-    nearest_hypermetro = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/nearest-hypermetro/nearest-hypermetro_{spatial_aggregation}.csv'))
+    # Load humidity DTW-MDS embedding
+    DTW_covariates_precip = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/DTW-MDS-embeddings/climate/precip_max/DTW-MDS-embedding_{spatial_aggregation}.csv'))
 
     # Load nearest largest sampling effort
     nearest_largest_sampling_effort = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/nearest-largest-sampling-effort/nearest-largest-sampling-effort_{spatial_aggregation}.csv'))
 
+    # Load fraction urban land
+    fraction_urban_land = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/land_cover/fraction_urban_land_{spatial_aggregation}.csv'))
 
     # Aggregate incidence and geographical dataset to the intermediate/immediate regions
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -410,23 +409,6 @@ def main():
         geography[col] = geography[col].astype(float)
 
 
-    # Make nearest hypermetro area covariate
-    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-    # Make dummies for the nearest hypermetro covariate
-    nearest_hypermetro_dummies = pd.get_dummies(nearest_hypermetro['hypermetro_id'], prefix="nearest_hypermetro")
-    # Merge to the geography dataframe
-    geography = geography.merge(
-        nearest_hypermetro_dummies, 
-        left_index=True, 
-        right_index=True, 
-        how="left"
-    )
-    # Ensure nearest_hypermetro dummies are int (0/1)
-    for col in nearest_hypermetro_dummies.columns:
-        geography[col] = geography[col].astype(float)
-
-
     # Make nearest largest sampling area covariate
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -509,7 +491,7 @@ def main():
     geography[DTW_covariates_indexP_names] = sc.fit_transform(geography[DTW_covariates_indexP_names])
 
 
-    # Make temp_med DTW-MDS covariate
+    # Make temp DTW-MDS covariate
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
     # Merge to the geography
@@ -523,7 +505,7 @@ def main():
     geography[DTW_covariates_temp_names] = sc.fit_transform(geography[DTW_covariates_temp_names])
 
 
-    # Make humid_med DTW-MDS covariate
+    # Make humid DTW-MDS covariate
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
     # Merge to the geography
@@ -535,6 +517,27 @@ def main():
     sc = StandardScaler()
     DTW_covariates_humid_names = [x for x in DTW_covariates_humid.columns.to_list() if x != f'{region}']
     geography[DTW_covariates_humid_names] = sc.fit_transform(geography[DTW_covariates_humid_names])
+
+    # Make precip DTW-MDS covariate
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    # Merge to the geography
+    geography = geography.merge(
+        DTW_covariates_precip, 
+        on = f'{region}'
+    )
+    # Standardize DTW-MDS embedding
+    sc = StandardScaler()
+    DTW_covariates_precip_names = [x for x in DTW_covariates_precip.columns.to_list() if x != f'{region}']
+    geography[DTW_covariates_precip_names] = sc.fit_transform(geography[DTW_covariates_precip_names])
+
+
+    # Make fraction urban land covariate
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    # standardize
+    sc = StandardScaler()
+    geography['fraction_urban'] = sc.fit_transform(fraction_urban_land[["fraction_urban"]])
 
 
     # Perform the training-validation split
@@ -637,8 +640,6 @@ def main():
                 covariate_names_raw.extend(biome_dummies.columns.to_list())
             elif covname == 'koppen':
                 covariate_names_raw.extend(koppen_dummies.columns.to_list())
-            elif covname == 'nearest_hypermetro':
-                covariate_names_raw.extend(nearest_hypermetro_dummies.columns.to_list())
             elif covname == 'nearest_largest_sampling_effort':
                 covariate_names_raw.extend(nearest_largest_sampling_effort_dummies.columns.to_list())
             elif covname == 'human_footprint':
@@ -655,6 +656,10 @@ def main():
                 covariate_names_raw.extend(DTW_covariates_temp_names) 
             elif covname == 'humidity_DTW':
                 covariate_names_raw.extend(DTW_covariates_humid_names)     
+            elif covname == 'precipitation_DTW':
+                covariate_names_raw.extend(DTW_covariates_precip_names)
+            elif covname == 'fraction_urban_land': 
+                covariate_names_raw.extend(['fraction_urban'])
 
         # run max P clustering in parallel
         labels, matrices, best_obj_vals = run_parallel_maxp(
