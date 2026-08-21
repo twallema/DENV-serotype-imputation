@@ -17,6 +17,7 @@ from sklearn.cluster import SpectralClustering
 from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform
 import argparse
+from scipy.stats import percentileofscore
 
 # bayesian imputation model
 import arviz
@@ -184,8 +185,8 @@ def main():
     parser.add_argument("--n_maxp", type=int, help="Number of max-p clustering runs to average.", default=250)
     parser.add_argument("--max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=10)
     parser.add_argument("--spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
-    parser.add_argument("--validation_bw", type=float, help="Bandwidth around Q1, Q2 and Q3 median serotype sampling effort to sample within-sample validation areas from.", default=0.05)
-    parser.add_argument("--validation_n", type=int, help="Number of within-sample validation areas to sample around each Q1, Q2, Q3 +/- bandwith.", default=2)
+    parser.add_argument("--validation_bw", type=float, help="Bandwidth around Q1, Q2 and Q3 median serotype sampling effort to sample within-sample validation areas from.", default=0.025)
+    parser.add_argument("--validation_n", type=int, help="Number of within-sample validation areas to sample around each Q1, Q2, Q3 +/- bandwith.", default=70)
     parser.add_argument("--no_frills", type=bool, help="Cut out optional plots to speed things up.", default=True)
 
     # assign to desired variables
@@ -213,7 +214,7 @@ def main():
 
     grid_covariates = ["indexP_DTW", "temperature_DTW", "humidity_DTW", "precipitation_DTW", "fraction_urban_land", "denv_100k_cumulative", "biome"]
 
-    threshold_values = [27.5, 40, 55, 90] # CD_RGINT: 27.5, 40, 55, 90 results in 10, 15, 20 or 25 clusters
+    threshold_values = [60,] # CD_RGINT: 27.5, 40, 55, 90 results in 25, 20, 15, 10 clusters --> Peak log likelihood at 15 clusters --> Makes sense because there are only 14 regions of high quality sampling -->  Set clusters to 14 (= 60)
 
     # Generate combinations of grid_covariates (True/False) AND thresholds
     covariate_combinations = list(
@@ -289,6 +290,7 @@ def main():
     # Load fraction urban land
     fraction_urban_land = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/land_cover/fraction_urban_land_{spatial_aggregation}.csv'))
 
+
     # Aggregate incidence and geographical dataset to the intermediate/immediate regions
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -330,6 +332,7 @@ def main():
             .set_index(f'{region}')['koppen']
         )
         # --- 3. Dissolve geometries by immediate region ---
+        gdf_mun = geography.copy()
         gdf_regions = geography.dissolve(by=f'{region}', aggfunc={'POP': 'sum'})
         # --- 4. Attach the majority biome and koppen back ---
         gdf_regions['biome'] = gdf_regions.index.map(biome_majority)
@@ -338,44 +341,6 @@ def main():
         gdf_regions = gdf_regions.reset_index()
         geography = gdf_regions[[f'{region}', 'biome', 'koppen', 'POP', 'geometry']]
 
-        # Incidence
-        # >>>>>>>>>
-
-        # Merge incidence with mapping
-        denv = denv.merge(muncipality_region_map, on="CD_MUN", how="left")
-        # Define custom aggregation function to treat the Nans
-        def nan_to_zero_sum(series):
-            if series.isna().all():
-                return float("nan")
-            else:
-                return series.fillna(0).sum()
-        # List of columns to aggregate
-        denv_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
-        # Group and aggregate
-        denv = (
-            denv.groupby([f"{region}", "date"])[denv_cols]
-            .agg(nan_to_zero_sum)
-            .reset_index()
-        )
-
-
-    # Compute threshold & leave out within-sample validation
-    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-    # Compute the mimimum sum of serotyped cases across all years (will have to be changed)
-    denv = denv[denv['date'] < datetime(2020,1,1)]
-    # append a season label
-    before_start_month = denv['date'].dt.month < season_start_month
-    season_year = denv['date'].dt.year
-    season_year = season_year.where(~before_start_month, season_year - 1)
-    denv['season'] = season_year.astype(str) + '-' + (season_year + 1).astype(str)
-    # compute total cases per month
-    denv["N_typed"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
-    # sum cases by year
-    yearly_sum = denv.groupby([f'{region}',"season"])['N_typed'].sum().reset_index()
-    # take median across years
-    yearly_sum_median = yearly_sum.groupby(f'{region}')["N_typed"].median() # array for clustering
-    yearly_sum_median.rename("N_typed_yearly_median", inplace=True)
 
     # Make biome covariate
     # >>>>>>>>>>>>>>>>>>>>
@@ -391,6 +356,7 @@ def main():
     # ensure biome dummies are int (0/1)
     for col in biome_dummies.columns:
         geography[col] = geography[col].astype(float)
+
 
 
     # Make Koppen climate covariate
@@ -540,63 +506,70 @@ def main():
     geography['fraction_urban'] = sc.fit_transform(fraction_urban_land[["fraction_urban"]])
 
 
-    # Perform the training-validation split
-    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    # Identify the left out municipalities
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-    # Randomly select `validation_n` areas from a band of Q1, Q2, Q3 +/- BW
-    quartiles = [0.25, 0.50, 0.75]
+    # compute sum of all typed cases
+    N_typed_sum = denv[denv['date'] < datetime(2020,1,1)]
+    N_typed_sum['N_typed'] = N_typed_sum[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].sum(axis=1)
+    N_typed_sum = N_typed_sum.groupby("CD_MUN")["N_typed"].sum()
+
+    # construct linspace of sampling quantiles
+    quantiles = np.linspace(percentileofscore(N_typed_sum, 1, kind="rank")/100+validation_bw, 0.975-validation_bw, 4)
+
+    # sample municipalities
     rng = np.random.default_rng()
 
-    yearly_sum_median = yearly_sum_median.sort_values()
+    N_typed_sum = N_typed_sum.sort_values()
     validation_labels = []
-    used_states_globally = set()
+    
+    for q in quantiles:
 
-    for q in quartiles:
-        quartile_selections = []
+        used_states_globally = set()
+
+        quantile_selections = []
 
         lower_q = max(0.0, q - validation_bw)
         upper_q = min(1.0, q + validation_bw)
         
-        lower_bound = np.quantile(yearly_sum_median, lower_q)
-        upper_bound = np.quantile(yearly_sum_median, upper_q)
+        lower_bound = np.quantile(N_typed_sum, lower_q)
+        upper_bound = np.quantile(N_typed_sum, upper_q)
         
-        candidates = yearly_sum_median.loc[
-            (yearly_sum_median >= lower_bound) & (yearly_sum_median <= upper_bound)
+        candidates = N_typed_sum.loc[
+            (N_typed_sum >= lower_bound) & (N_typed_sum <= upper_bound)
         ].index.tolist()
 
         rng.shuffle(candidates)
 
         for c in candidates:
-            if len(quartile_selections) >= validation_n:
+            if len(quantile_selections) >= validation_n:
                 break
 
             state_code = str(c)[:2]
             
-            if state_code not in used_states_globally and c not in validation_labels:
-                quartile_selections.append(c)
-                used_states_globally.add(state_code) # Lock this state globally
+            #if state_code not in used_states_globally and c not in validation_labels:
+            quantile_selections.append(c)
+            used_states_globally.add(state_code) # Lock this state globally
 
-        # 6. Check if we failed to meet the requested N due to data constraints
-        if len(quartile_selections) < validation_n:
-            print(f"Warning: Only found {len(quartile_selections)} valid regions for Q={q:.2f} "
-                f"due to strict global state constraints (Requested: {validation_n}).")
+        if len(quantile_selections) < validation_n:
+            print(f"Warning: Only found {len(quantile_selections)} valid regions for Q={q:.2f} "
+                f"due to state constraints (Requested: {validation_n}).")
 
-        # 7. Save the selections for this quartile band
-        validation_labels.extend(quartile_selections)
+        validation_labels.extend(quantile_selections)
 
-    yearly_sum_median.loc[validation_labels] = 0
+    N_typed_sum.loc[validation_labels] = 0
 
-    # convert validation labels to municipality level (because the incidence data used in the bayesian model is too)
-    validation_labels_muni = muncipality_region_map[muncipality_region_map[f'{region}'].isin(validation_labels)]['CD_MUN']
+    # save validation labels
+    validation_labels_muni = pd.Series(data=validation_labels, name='CD_MUN')
     validation_labels_muni.to_csv(os.path.join(output_folder, f'validation_labels.csv'), index=False)
 
-    # visualise where the left out areas are
-    geography['validation_labels'] = geography[f'{region}'].isin(validation_labels)
+    # visualise where the left out municipalities are
+    gdf_mun['validation_labels'] = gdf_mun['CD_MUN'].isin(validation_labels)
 
     fig,ax=plt.subplots()
     gdf_states.boundary.plot(ax=ax, linewidth=0.5, color="black")
     geography.boundary.plot(ax=ax, linewidth=0.1, alpha=0.3, color="black")
-    geography.loc[geography['validation_labels'] == True].plot(
+    gdf_mun.loc[gdf_mun['validation_labels'] == True].plot(
         linewidth=0.2,
         hatch='/////',
         color='red',
@@ -610,6 +583,52 @@ def main():
     plt.savefig(os.path.join(output_folder, f'validation_labels.svg'))
     plt.close()
 
+
+    # Take the left-out municipalities out of the case dataframe
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    denv = denv.loc[~denv['CD_MUN'].isin(validation_labels_muni)]
+
+
+    # Aggregate case dataframe to the regions
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    # Merge incidence with mapping
+    denv = denv.merge(muncipality_region_map, on="CD_MUN", how="left")
+    # Define custom aggregation function to treat the Nans
+    def nan_to_zero_sum(series):
+        if series.isna().all():
+            return float("nan")
+        else:
+            return series.fillna(0).sum()
+    # List of columns to aggregate
+    denv_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
+    # Group and aggregate
+    denv = (
+        denv.groupby([f"{region}", "date"])[denv_cols]
+        .agg(nan_to_zero_sum)
+        .reset_index()
+    )
+
+
+    # Compute threshold for the max P clustering
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    # Compute the mimimum sum of serotyped cases (before they all turn out to be great from 2020 on)
+    denv = denv[denv['date'] < datetime(2020,1,1)]
+    # append a season label
+    before_start_month = denv['date'].dt.month < season_start_month
+    season_year = denv['date'].dt.year
+    season_year = season_year.where(~before_start_month, season_year - 1)
+    denv['season'] = season_year.astype(str) + '-' + (season_year + 1).astype(str)
+    # compute total cases per month
+    denv["N_typed"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
+    # sum cases by year
+    yearly_sum = denv.groupby([f"{region}","season"])['N_typed'].sum().reset_index()
+    # take median across years
+    yearly_sum_median = yearly_sum.groupby(f"{region}")["N_typed"].median() # array for clustering
+    yearly_sum_median.rename("N_typed_yearly_median", inplace=True)
+    yearly_sum_median = yearly_sum_median.sort_values()
     # merge them to the geography dataframe
     geography = geography.merge(
         yearly_sum_median, 
@@ -824,7 +843,7 @@ def main():
         # make a map from CD_MUN to clusters
         muncipality_cluster_map = clusters.set_index('CD_MUN').to_dict()['cluster']
 
-        # get case data, omit the validation dataset and do a groupby-sum to the clusters
+        # get case data, omit the validation municipalities and do a groupby-sum to the max-P clusters
         cases = (
             pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet")
             # set to null if CD_MUN is in the validation dataset
@@ -888,7 +907,7 @@ def main():
             )
         )
         n_basis = X.shape[1]
-        X_pt = pt.constant(X)
+        X = pt.constant(X)
 
         # construct model coordinates
         coords = {
@@ -1029,7 +1048,7 @@ def main():
         # dataframe with the data per left out municipality
         cases = (
             pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet")
-            # set to null if CD_MUN is in the validation dataset
+            # get the left out data
             .filter(pl.col("CD_MUN").is_in(validation_labels_muni))
             # count serotyping effort
             .with_columns(
@@ -1049,10 +1068,6 @@ def main():
         cases = cases.fillna(0)
         df_p = df_p.loc[mask]
 
-        # Aggregate back up to the RGI / RGINT before evaluating
-        cases = cases.merge(muncipality_region_map, on='CD_MUN', how='left').groupby(['date', f'{region}'], as_index=False)[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'N_typed']].sum().reset_index(drop=True)
-        df_p = df_p.merge(muncipality_region_map, on='CD_MUN', how='left').groupby(['date', f'{region}'], as_index=False).nth(0).drop(columns='CD_MUN').reset_index(drop=True)
-        
         # Compute log likelihood
         from scipy.stats import dirichlet_multinomial
         x = cases[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].values
