@@ -1,4 +1,5 @@
 
+import numpy as np
 import pandas as pd
 import polars as pl
 import geopandas as gpd
@@ -72,6 +73,7 @@ for region, name in zip(regions, names):
 
         # for plot
         denv_plot = denv.groupby(by=f"{region}")["DENV_per_100k"].sum().reset_index()
+        denv_plot["DENV_per_100k"] = np.log10(denv_plot["DENV_per_100k"])
 
         # Visualise
         # >>>>>>>>>
@@ -88,9 +90,9 @@ for region, name in zip(regions, names):
             ax=ax,
         )
         ax.axis("off")
-        ax.set_title("Cumulative dengue incidence")
+        ax.set_title("Cumulative dengue incidence (log10)")
         plt.tight_layout()
-        plt.savefig(f'../interim/DENV_per_100k/DENV_per_100k_{name}.svg')
+        plt.savefig(f'../interim/DENV_per_100k/log10_cumulative_DENV_per_100k_{name}.svg')
         plt.close()
 
         # Save result

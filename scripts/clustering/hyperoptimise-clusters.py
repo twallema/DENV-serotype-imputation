@@ -289,7 +289,7 @@ def main():
     nearest_largest_sampling_effort = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/nearest-largest-sampling-effort/nearest-largest-sampling-effort_{spatial_aggregation}.csv'))
 
     # Load fraction urban land
-    fraction_urban_land = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/land_cover/fraction_urban_land_{spatial_aggregation}.csv'))
+    fraction_urban_land = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/land_cover/log10_fraction_urban_land_{spatial_aggregation}.csv'))
 
     # Load human development index
     hdi_2010 = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/human_development_index/hdi_2010_{spatial_aggregation}.csv'))
@@ -408,7 +408,7 @@ def main():
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
     # compute cumulative totals
-    denv_100k = denv_100k.groupby(by=f'{region}')['DENV_per_100k'].sum()
+    denv_100k = np.log10(denv_100k.groupby(by=f'{region}')['DENV_per_100k'].sum())
     # standardize
     sc = StandardScaler()
     geography['denv_100k_cumulative'] = sc.fit_transform(denv_100k.values.reshape(-1,1))

@@ -46,7 +46,7 @@ for name,region in zip(names,regions):
     geography['fraction_urban'] = np.log10(geography['urban_area'] / geography['area'])
 
     # save result
-    geography[[f'{region}', 'fraction_urban']].to_csv(os.path.join(output_folder, f'fraction_urban_land_{name}.csv'), index=False)
+    geography[[f'{region}', 'fraction_urban']].to_csv(os.path.join(output_folder, f'log10_fraction_urban_land_{name}.csv'), index=False)
 
     # visualise on a map
     fig, ax = plt.subplots()
@@ -60,5 +60,5 @@ for name,region in zip(names,regions):
     ax.axis("off")
     ax.set_title("Fraction urban land (log10)")
     plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, f'fraction_urban_land_{name}.svg'))
+    plt.savefig(os.path.join(output_folder, f'log10_fraction_urban_land_{name}.svg'))
     plt.close()
