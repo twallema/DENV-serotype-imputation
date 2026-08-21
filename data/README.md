@@ -40,6 +40,10 @@ Downloaded using the instructions under '2 - Using FTPWeb' on https://sprint.mos
 
 + `deaths_2000-2024_clean.csv`: Deaths per municipality from 2000-2024. Retrieved from: http://tabnet.datasus.gov.br/cgi/deftohtm.exe?sim/cnv/obt10br.def. Replaced seperator ";" with ",". Removed header and footer. Renamed column header "Municipio".
 
++ `pop_totals_density.csv`: Density-weighted population density, obtained from Laura Alexander.
+
++ `human_development_index.csv`: Municipal level human development index for 2010. Downloaded from: https://www.undp.org/pt/brazil/idhm-municipios-2010
+
 #### Population
 
 Population by age, municipality and year were downloaded from: https://tabnet.datasus.gov.br/cgi/tabcgi.exe?ibge/cnv/popsvs2024br.def

@@ -27,8 +27,8 @@ python hyperoptimise-clusters.py \
     --n_maxp 250 \
     --max_iterations_sa 10 \
     --spatial_aggregation "${spatial_aggregation}" \
-    --validation_bw 0.05 \
-    --validation_n 2 \
+    --validation_bw 0.025 \
+    --validation_n 70 \
     --run_id "${run_id}" \
     --repeat_id "${repeat_id}"
 
