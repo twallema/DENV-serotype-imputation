@@ -1,4 +1,5 @@
 
+import os
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -7,6 +8,12 @@ import matplotlib.pyplot as plt
 # Spatial aggregation levels
 names = ['rgi', 'rgint']
 regions = ['CD_RGI', 'CD_RGINT']
+
+# make output folder
+abs_dir = os.path.dirname(__file__)
+output_folder = os.path.join(abs_dir, f'../interim/land_cover')
+if not os.path.exists(output_folder):
+    os.makedirs(output_folder)
 
 for name,region in zip(names,regions):
 
@@ -36,16 +43,15 @@ for name,region in zip(names,regions):
     geography = geography.merge(land_cover[[f'{region}', 'urban_area']], how='left')
 
     # normalise urban area
-    geography['fraction_urban'] = geography['urban_area'] / geography['area']
+    geography['fraction_urban'] = np.log10(geography['urban_area'] / geography['area'])
 
     # save result
-    geography[[f'{region}', 'fraction_urban']].to_csv(f'../interim/land_cover/fraction_urban_land_{name}.csv', index=False)
+    geography[[f'{region}', 'fraction_urban']].to_csv(os.path.join(output_folder, f'raction_urban_land_{name}.csv'), index=False)
 
     # visualise on a map
     fig, ax = plt.subplots()
-    geography['plot_fraction_urban'] = np.log10(geography['fraction_urban'])
     geography.plot(
-        column="plot_fraction_urban",          # color regions by cluster label
+        column="fraction_urban",          # color regions by cluster label
         linewidth=0.2,
         edgecolor="grey",
         legend=True,
@@ -54,5 +60,5 @@ for name,region in zip(names,regions):
     ax.axis("off")
     ax.set_title("Fraction urban land (log10)")
     plt.tight_layout()
-    plt.savefig(f'../interim/land_cover/fraction_urban_land_{name}.svg')
+    plt.savefig(os.path.join(output_folder, f'fraction_urban_land_{name}.svg'))
     plt.close()

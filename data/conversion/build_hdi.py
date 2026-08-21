@@ -1,6 +1,6 @@
 
 """
-This scripts converts the municipality-level humand development index to the regions by computing a population-weighted average
+This scripts converts the municipality-level human development index to the regions by computing a population-weighted average
 """
 
 import os
@@ -76,28 +76,28 @@ for name,region in zip(names,regions):
     ).reset_index(name="weighted_IDHM_2010")
 
     # change the name
-    hdi = hdi.rename(columns={'weighted_IDHM_2010': 'IDHM_2010'})
+    hdi = hdi.rename(columns={'weighted_IDHM_2010': 'hdi_2010'})
 
     # visualise result
     ## dissolve geography and compute area
     geography = geography.to_crs("EPSG:5880")
     geography = geography.dissolve(by=f'{region}').reset_index()
-    geography = geography.merge(hdi[[f'{region}', 'IDHM_2010']], how='left')
+    geography = geography.merge(hdi[[f'{region}', 'hdi_2010']], how='left')
 
     # save result
-    geography[[f'{region}', 'IDHM_2010']].to_csv(os.path.join(output_folder, f'HDI_2010_{name}.csv'), index=False)
+    geography[[f'{region}', 'hdi_2010']].to_csv(os.path.join(output_folder, f'hdi_2010_{name}.csv'), index=False)
 
     # visualise on a map
     fig, ax = plt.subplots()
     geography.plot(
-        column="IDHM_2010",
+        column="hdi_2010",
         linewidth=0.2,
         edgecolor="grey",
         legend=True,
         ax=ax,
     )
     ax.axis("off")
-    ax.set_title("Human development index")
+    ax.set_title("Human development index (2010)")
     plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, f'HDI_2010_{name}.svg'))
+    plt.savefig(os.path.join(output_folder, f'hdi_2010_{name}.svg'))
     plt.close()

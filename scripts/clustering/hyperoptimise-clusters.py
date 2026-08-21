@@ -212,7 +212,7 @@ def main():
     # make an experimental design matrix
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-    grid_covariates = ["indexP_DTW", "temperature_DTW", "humidity_DTW", "precipitation_DTW", "fraction_urban_land", "denv_100k_cumulative", "biome"]
+    grid_covariates = ["indexP_DTW", "temperature_DTW", "humidity_DTW", "precipitation_DTW", "fraction_urban_land", "denv_100k_cumulative", "human_development_index"]
 
     threshold_values = [60,] # CD_RGINT: 27.5, 40, 55, 90 results in 25, 20, 15, 10 clusters --> Peak log likelihood at 15 clusters --> Makes sense because there are only 14 regions of high quality sampling -->  Set clusters to 14 (= 60)
 
@@ -247,6 +247,7 @@ def main():
     print(f"Total number of runs: {len(design_matrix)}\n")
 
     print(f"Preparing data..\n")
+
 
     # Load raw data
     # >>>>>>>>>>>>>
@@ -289,6 +290,9 @@ def main():
 
     # Load fraction urban land
     fraction_urban_land = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/land_cover/fraction_urban_land_{spatial_aggregation}.csv'))
+
+    # Load human development index
+    hdi_2010 = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/human_development_index/hdi_2010_{spatial_aggregation}.csv'))
 
 
     # Aggregate incidence and geographical dataset to the intermediate/immediate regions
@@ -506,6 +510,14 @@ def main():
     geography['fraction_urban'] = sc.fit_transform(fraction_urban_land[["fraction_urban"]])
 
 
+    # Make human development index covariate
+    # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+    # standardize
+    sc = StandardScaler()
+    geography['hdi_2010'] = sc.fit_transform(hdi_2010[["hdi_2010"]])
+
+
     # Identify the left out municipalities
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -679,6 +691,8 @@ def main():
                 covariate_names_raw.extend(DTW_covariates_precip_names)
             elif covname == 'fraction_urban_land': 
                 covariate_names_raw.extend(['fraction_urban'])
+            elif covname == 'human_development_index':
+                covariate_names_raw.extend(['hdi_2010'])
 
         # run max P clustering in parallel
         labels, matrices, best_obj_vals = run_parallel_maxp(
