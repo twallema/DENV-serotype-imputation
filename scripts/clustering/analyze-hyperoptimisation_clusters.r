@@ -425,7 +425,7 @@ forest <- ggplot(
 # 6. Combine both
 final_plot <- config_plot + forest +
   plot_layout(
-    widths = c(4.8,3.5)  # change ratios
+    widths = c(5.0,3.3)  # change ratios
   )
 
 ggsave("result.pdf", plot=final_plot, width = 8.3, height = 11.7, units = "in")
@@ -605,7 +605,7 @@ best_config_plot <- ggplot(
     )
   )
 
-ggsave("best_config.pdf", plot=best_config_plot, width = 4.8, height = 11.7/22, units = "in")
+ggsave("best_config.pdf", plot=best_config_plot, width = 5.0, height = 11.7/22, units = "in")
 
 #########################################################
 ## Assess linearity of threshold across configurations ##
