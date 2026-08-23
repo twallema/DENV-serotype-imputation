@@ -12,7 +12,7 @@ if(!require(rstudioapi)) install.packages("rstudioapi")
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 
 # Load the data
-path <- file.path(getwd(), '../../data/interim/clustering_pipeline/CD_RGINT/results')
+path <- file.path(getwd(), '../../data/interim/clustering_pipeline/CD_RGINT_v2/results')
 
 file_list <- list.files(
   path = path, 
@@ -21,18 +21,15 @@ file_list <- list.files(
 )
 df <- map_dfr(file_list, read_csv)
 
-# Redact 11 --> 10 and 16 --> 15 clusters
-df$n_clusters <- ifelse(df$n_clusters == 11, 10, df$n_clusters)
-df$n_clusters <- ifelse(df$n_clusters == 16, 15, df$n_clusters)
-
 # Add configurations
 df$configuration <- interaction(
   df$indexP_DTW,
   df$temperature_DTW,
   df$humidity_DTW,
-  df$human_footprint,
+  df$precipitation_DTW,
+  df$fraction_urban_land,
   df$denv_100k_cumulative,
-  df$biome,
+  df$human_development_index,
   df$n_clusters,
   drop = TRUE
 )
@@ -41,7 +38,7 @@ df$configuration <- interaction(
 ## Paired bootstrap to test our confidence in the "winner" ##
 #############################################################
 
-n_boot <- 3000
+n_boot <- 5000
 top_n <- 50
 
 # Identify observed best configuration
@@ -152,9 +149,10 @@ config_info <- df %>%
     indexP_DTW,
     temperature_DTW,
     humidity_DTW,
-    human_footprint,
+    precipitation_DTW,
+    fraction_urban_land,
     denv_100k_cumulative,
-    biome,
+    human_development_index,
     n_clusters
   )
 
@@ -178,9 +176,10 @@ config_long <- config_plot_df %>%
     indexP_DTW = as.character(indexP_DTW),
     temperature_DTW = as.character(temperature_DTW),
     humidity_DTW = as.character(humidity_DTW),
-    human_footprint = as.character(human_footprint),
+    precipitation_DTW = as.character(precipitation_DTW),
+    fraction_urban_land = as.character(fraction_urban_land),
     denv_100k_cumulative = as.character(denv_100k_cumulative),
-    biome = as.character(biome),
+    human_development_index = as.character(human_development_index),
     n_clusters = as.character(n_clusters)
   ) %>%
   select(
@@ -188,9 +187,10 @@ config_long <- config_plot_df %>%
     indexP_DTW,
     temperature_DTW,
     humidity_DTW,
-    human_footprint,
+    precipitation_DTW,
+    fraction_urban_land,
     denv_100k_cumulative,
-    biome,
+    human_development_index,
     n_clusters
   ) %>%
   tidyr::pivot_longer(
@@ -198,9 +198,10 @@ config_long <- config_plot_df %>%
       indexP_DTW,
       temperature_DTW,
       humidity_DTW,
-      human_footprint,
+      precipitation_DTW,
+      fraction_urban_land,
       denv_100k_cumulative,
-      biome,
+      human_development_index,
       n_clusters
     ),
     names_to = "variable",
@@ -213,18 +214,20 @@ config_long <- config_plot_df %>%
         "indexP_DTW",
         "temperature_DTW",
         "humidity_DTW",
-        "human_footprint",
+        "precipitation_DTW",
+        "fraction_urban_land",
         "denv_100k_cumulative",
-        "biome",
+        "human_development_index",
         "n_clusters"
       ),
       labels = c(
         "Index P",
         "Temp.",
         "Humidity",
-        "H. Footpr.",
+        "Precip.",
+        "Urb. land",
         "DENV/100k",
-        "Biome",
+        "HDI",
         "Clusters"
       )
     ),
@@ -422,7 +425,7 @@ forest <- ggplot(
 # 6. Combine both
 final_plot <- config_plot + forest +
   plot_layout(
-    widths = c(4.5,3.8)  # change ratios
+    widths = c(4.8,3.5)  # change ratios
   )
 
 ggsave("result.pdf", plot=final_plot, width = 8.3, height = 11.7, units = "in")
@@ -439,18 +442,20 @@ best_design <- df %>%
     indexP_DTW,
     temperature_DTW,
     humidity_DTW,
-    human_footprint,
+    precipitation_DTW,
+    fraction_urban_land,
     denv_100k_cumulative,
-    biome,
-    n_clusters
+    human_development_index,
+    n_clusters    
   ) %>%
   mutate(
     indexP_DTW = as.character(indexP_DTW),
     temperature_DTW = as.character(temperature_DTW),
     humidity_DTW = as.character(humidity_DTW),
-    human_footprint = as.character(human_footprint),
+    precipitation_DTW = as.character(precipitation_DTW),
+    fraction_urban_land = as.character(fraction_urban_land),
     denv_100k_cumulative = as.character(denv_100k_cumulative),
-    biome = as.character(biome),
+    human_development_index = as.character(human_development_index),
     n_clusters = as.character(n_clusters)
   ) %>%
   tidyr::pivot_longer(
@@ -458,10 +463,11 @@ best_design <- df %>%
       indexP_DTW,
       temperature_DTW,
       humidity_DTW,
-      human_footprint,
+      precipitation_DTW,
+      fraction_urban_land,
       denv_100k_cumulative,
-      biome,
-      n_clusters
+      human_development_index,
+      n_clusters   
     ),
     names_to = "variable",
     values_to = "value"
@@ -473,18 +479,20 @@ best_design <- df %>%
         "indexP_DTW",
         "temperature_DTW",
         "humidity_DTW",
-        "human_footprint",
+        "precipitation_DTW",
+        "fraction_urban_land",
         "denv_100k_cumulative",
-        "biome",
+        "human_development_index",
         "n_clusters"
       ),
       labels = c(
         "Index P",
         "Temp.",
         "Humidity",
-        "H. Footpr.",
+        "Precip.",
+        "Urb. land",
         "DENV/100k",
-        "Biome",
+        "HDI",
         "Clusters"
       )
     ),
@@ -597,7 +605,7 @@ best_config_plot <- ggplot(
     )
   )
 
-ggsave("best_config.pdf", plot=best_config_plot, width = 4.5, height = 11.7/22, units = "in")
+ggsave("best_config.pdf", plot=best_config_plot, width = 4.8, height = 11.7/22, units = "in")
 
 #########################################################
 ## Assess linearity of threshold across configurations ##
@@ -608,9 +616,10 @@ df$configuration <- interaction(
   df$indexP_DTW,
   df$temperature_DTW,
   df$humidity_DTW,
-  df$human_footprint,
+  df$precipitation_DTW,
+  df$fraction_urban_land,
   df$denv_100k_cumulative,
-  df$biome,
+  df$human_development_index,
   drop = TRUE
 )
 
@@ -674,13 +683,14 @@ df <- df[df$n_clusters == best_configuration$n_clusters , ]
 df$indexP_DTW <- factor(df$indexP_DTW)
 df$temperature_DTW <- factor(df$temperature_DTW)
 df$humidity_DTW <- factor(df$humidity_DTW)
-df$human_footprint <- factor(df$human_footprint)
+df$precipitation_DTW <- factor(df$precipitation_DTW)
+df$fraction_urban_land <- factor(df$fraction_urban_land)
 df$denv_100k_cumulative <- factor(df$denv_100k_cumulative)
-df$biome <- factor(df$biome)
+df$human_development_index <- factor(df$human_development_index)
 
 # fit linear mixed effects model
 model <- lmer(
-  log_likelihood ~ indexP_DTW + temperature_DTW + humidity_DTW + human_footprint + denv_100k_cumulative + biome + (1 | repeat_id),
+  log_likelihood ~ indexP_DTW + temperature_DTW + humidity_DTW + precipitation_DTW + fraction_urban_land + denv_100k_cumulative + human_development_index + (1 | repeat_id),
   data = df
 )
 
