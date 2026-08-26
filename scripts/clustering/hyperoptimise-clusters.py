@@ -218,7 +218,7 @@ def main():
     threshold_values = [60,] # CD_RGINT: 27.5, 40, 55, 90 results in 25, 20, 15, 10 clusters --> Peak log likelihood at 15 clusters --> Makes sense because there are only 14 regions of high quality sampling -->  Set clusters to 14 (= 60)
 
     # if using mean
-    threshold_values = [160,] # CD_RGINT: 27.5, 40, 55, 90 results in 25, 20, 15, 10 clusters --> Peak log likelihood at 15 clusters --> Makes sense because there are only 14 regions of high quality sampling -->  Set clusters to 14 (= 60)
+    threshold_values = [180,] # CD_RGINT: 180 = 14 clusters
 
     # Generate combinations of grid_covariates (True/False) AND thresholds
     covariate_combinations = list(
