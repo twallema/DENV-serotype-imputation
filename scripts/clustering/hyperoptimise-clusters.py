@@ -185,8 +185,8 @@ def main():
     parser.add_argument("--n_maxp", type=int, help="Number of max-p clustering runs to average.", default=250)
     parser.add_argument("--max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=10)
     parser.add_argument("--spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
-    parser.add_argument("--validation_bw", type=float, help="Bandwidth around Q1, Q2 and Q3 median serotype sampling effort to sample within-sample validation areas from.", default=0.025)
-    parser.add_argument("--validation_n", type=int, help="Number of within-sample validation areas to sample around each Q1, Q2, Q3 +/- bandwith.", default=70)
+    parser.add_argument("--validation_bw", type=float, help="Bandwidth around Q1, Q2 and Q3 median serotype sampling effort to sample within-sample validation areas from.", default=0.05)
+    parser.add_argument("--validation_n", type=int, help="Number of within-sample validation areas to sample around each Q1, Q2, Q3 +/- bandwith.", default=93)
     parser.add_argument("--no_frills", type=bool, help="Cut out optional plots to speed things up.", default=True)
 
     # assign to desired variables
@@ -218,7 +218,7 @@ def main():
     threshold_values = [60,] # CD_RGINT: 27.5, 40, 55, 90 results in 25, 20, 15, 10 clusters --> Peak log likelihood at 15 clusters --> Makes sense because there are only 14 regions of high quality sampling -->  Set clusters to 14 (= 60)
 
     # if using mean
-    threshold_values = [180,] # CD_RGINT: 180 = 14 clusters
+    threshold_values = [175,] # CD_RGINT: 175 = 14 clusters
 
     # Generate combinations of grid_covariates (True/False) AND thresholds
     covariate_combinations = list(
@@ -250,7 +250,7 @@ def main():
     print(f"Number of thresholds: {len(threshold_values)}")
     print(f"Total number of runs: {len(design_matrix)}\n")
 
-    print(f"Preparing data..\n")
+    print(f"Preparing covariates..\n")
 
 
     # Load raw data
@@ -522,16 +522,30 @@ def main():
     geography['hdi_2010'] = sc.fit_transform(hdi_2010[["hdi_2010"]])
 
 
+    print(f"Performing training-validation split..\n")
+
+
     # Identify the left out municipalities
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
     # compute sum of all typed cases
     N_typed_sum = denv[denv['date'] < datetime(2020,1,1)]
+    # append season label
+    before_start_month = denv['date'].dt.month < season_start_month
+    season_year = denv['date'].dt.year
+    season_year = season_year.where(~before_start_month, season_year - 1)
+    N_typed_sum['season'] = season_year.astype(str) + '-' + (season_year + 1).astype(str)
+    # get total serotyped cases per month
     N_typed_sum['N_typed'] = N_typed_sum[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].sum(axis=1)
-    N_typed_sum = N_typed_sum.groupby("CD_MUN")["N_typed"].sum()
+    # get total serotyped cases per season
+    yearly_sum = N_typed_sum.groupby(["CD_MUN","season"])['N_typed'].sum().reset_index()
+    # take mean across seasons
+    yearly_sum_mean = yearly_sum.groupby("CD_MUN")["N_typed"].mean() # array for clustering
+    yearly_sum_mean.rename("N_typed_yearly_mean", inplace=True)
+    N_typed_sum = yearly_sum_mean.sort_values()
 
     # construct linspace of sampling quantiles
-    quantiles = np.linspace(percentileofscore(N_typed_sum, 1, kind="rank")/100+validation_bw, 0.975-validation_bw, 4)
+    quantiles = np.array([0.25, 0.50, 0.75])
 
     # sample municipalities
     rng = np.random.default_rng()
@@ -603,7 +617,20 @@ def main():
     # Take the left-out municipalities out of the case dataframe
     # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
+    # compute number of cases
+    N_typed_sum = denv[denv['date'] < datetime(2020,1,1)]
+    N_typed_sum['N_typed'] = N_typed_sum[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].sum(axis=1)
+    l_old = N_typed_sum['N_typed'].sum()
+
+    # leave validation areas out
     denv = denv.loc[~denv['CD_MUN'].isin(validation_labels_muni)]
+
+    # compute number of cases
+    N_typed_sum = denv[denv['date'] < datetime(2020,1,1)]
+    N_typed_sum['N_typed'] = N_typed_sum[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].sum(axis=1)
+    l_new = N_typed_sum['N_typed'].sum()
+
+    print(f"{(l_old-l_new)/l_old * 100:.2f} % of cases are in the validation dataset.\n")
 
 
     # Aggregate case dataframe to the regions
@@ -639,9 +666,9 @@ def main():
     denv['season'] = season_year.astype(str) + '-' + (season_year + 1).astype(str)
     # compute total cases per month
     denv["N_typed"] = denv[["DENV_1","DENV_2","DENV_3","DENV_4"]].sum(axis=1)
-    # sum cases by year
+    # sum cases by season
     yearly_sum = denv.groupby([f"{region}","season"])['N_typed'].sum().reset_index()
-    # take median across years
+    # take mean across seasons
     yearly_sum_mean = yearly_sum.groupby(f"{region}")["N_typed"].mean() # array for clustering
     yearly_sum_mean.rename("N_typed_yearly_mean", inplace=True)
     yearly_sum_mean = yearly_sum_mean.sort_values()
