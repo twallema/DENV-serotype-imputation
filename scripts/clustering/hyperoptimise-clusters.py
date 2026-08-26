@@ -186,7 +186,7 @@ def main():
     parser.add_argument("--max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=10)
     parser.add_argument("--spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
     parser.add_argument("--validation_bw", type=float, help="Bandwidth around Q1, Q2 and Q3 median serotype sampling effort to sample within-sample validation areas from.", default=0.05)
-    parser.add_argument("--validation_n", type=int, help="Number of within-sample validation areas to sample around each Q1, Q2, Q3 +/- bandwith.", default=93)
+    parser.add_argument("--validation_n", type=int, help="Number of within-sample validation areas to sample around each Q1, Q2, Q3 +/- bandwith.", default=56)
     parser.add_argument("--no_frills", type=bool, help="Cut out optional plots to speed things up.", default=True)
 
     # assign to desired variables
@@ -218,7 +218,7 @@ def main():
     threshold_values = [60,] # CD_RGINT: 27.5, 40, 55, 90 results in 25, 20, 15, 10 clusters --> Peak log likelihood at 15 clusters --> Makes sense because there are only 14 regions of high quality sampling -->  Set clusters to 14 (= 60)
 
     # if using mean
-    threshold_values = [175,] # CD_RGINT: 175 = 14 clusters
+    threshold_values = [180,] # CD_RGINT: 180 = 14 clusters
 
     # Generate combinations of grid_covariates (True/False) AND thresholds
     covariate_combinations = list(
@@ -297,6 +297,9 @@ def main():
 
     # Load human development index
     hdi_2010 = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/human_development_index/hdi_2010_{spatial_aggregation}.csv'))
+
+    # Load quality sampling areas
+    good_regions_quality = pd.read_csv(f"../../data/interim/DTW-MDS-embeddings/serotypes/{region}/serotype_trajectory_quality_{spatial_aggregation}.csv")
 
 
     # Aggregate incidence and geographical dataset to the intermediate/immediate regions
@@ -545,7 +548,7 @@ def main():
     N_typed_sum = yearly_sum_mean.sort_values()
 
     # construct linspace of sampling quantiles
-    quantiles = np.array([0.25, 0.50, 0.75])
+    quantiles = np.array([0.10, 0.25, 0.50, 0.75, 0.90])
 
     # sample municipalities
     rng = np.random.default_rng()
@@ -590,15 +593,27 @@ def main():
     N_typed_sum.loc[validation_labels] = 0
 
     # save validation labels
-    validation_labels_muni = pd.Series(data=validation_labels, name='CD_MUN')
+    validation_labels_muni = pd.Series(data=list(set(validation_labels)), name='CD_MUN')    # omit duplicates -> 10% quantile and 25% quantile can have overlap
     validation_labels_muni.to_csv(os.path.join(output_folder, f'validation_labels.csv'), index=False)
 
     # visualise where the left out municipalities are
     gdf_mun['validation_labels'] = gdf_mun['CD_MUN'].isin(validation_labels)
 
+    # append high quality sampling areas
+    geography = geography.merge(good_regions_quality, on=f"{region}", how="left")
+    quality_regions = geography[geography['has_quality'] == 1]
+
     fig,ax=plt.subplots()
     gdf_states.boundary.plot(ax=ax, linewidth=0.5, color="black")
     geography.boundary.plot(ax=ax, linewidth=0.1, alpha=0.3, color="black")
+    quality_regions.plot(
+        ax=ax,
+        color="grey",
+        edgecolor="black",
+        hatch="////",
+        linewidth=0.5,
+        alpha=0.4  # Slight transparency softens the grey
+    )
     gdf_mun.loc[gdf_mun['validation_labels'] == True].plot(
         linewidth=0.2,
         hatch='/////',
