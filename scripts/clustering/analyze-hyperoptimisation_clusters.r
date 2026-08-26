@@ -12,7 +12,7 @@ if(!require(rstudioapi)) install.packages("rstudioapi")
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 
 # Load the data
-path <- file.path(getwd(), '../../data/interim/clustering_pipeline/CD_RGINT_v2/results')
+path <- file.path(getwd(), '../../data/interim/clustering_pipeline/CD_RGINT_v2/merge_12/results')
 
 file_list <- list.files(
   path = path, 
@@ -20,6 +20,9 @@ file_list <- list.files(
   full.names = TRUE
 )
 df <- map_dfr(file_list, read_csv)
+
+# Redact number of clusters not equal to 14
+df$n_clusters[df$n_clusters != 14] <- 14
 
 # Add configurations
 df$configuration <- interaction(
