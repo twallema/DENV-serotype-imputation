@@ -185,8 +185,7 @@ def main():
     parser.add_argument("--n_maxp", type=int, help="Number of max-p clustering runs to average.", default=250)
     parser.add_argument("--max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=10)
     parser.add_argument("--spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
-    parser.add_argument("--validation_bw", type=float, help="Bandwidth around Q1, Q2 and Q3 median serotype sampling effort to sample within-sample validation areas from.", default=0.025)
-    parser.add_argument("--validation_n", type=int, help="Number of within-sample validation areas to sample around each Q1, Q2, Q3 +/- bandwith.", default=56)
+    parser.add_argument("--validation_n", type=int, help="Number of within-sample validation municipalities to take out.", default=279)
     parser.add_argument("--no_frills", type=bool, help="Cut out optional plots to speed things up.", default=True)
 
     # assign to desired variables
@@ -197,7 +196,6 @@ def main():
     repeat_id = args.repeat_id
     max_iterations_sa = args.max_iterations_sa
     spatial_aggregation = args.spatial_aggregation
-    validation_bw = args.validation_bw
     validation_n = args.validation_n
     no_frills = args.no_frills
 
@@ -537,8 +535,6 @@ def main():
     N_typed_sum = N_typed_sum.groupby("CD_MUN")["N_typed"].sum().sort_values()
     # compute percentile at which 1 case was sampled
     percentile_1_typed = percentileofscore(N_typed_sum, 1, kind="rank")/100
-    # construct linspace of sampling quantiles
-    quantiles = np.linspace(percentile_1_typed+validation_bw, 0.95-validation_bw, 5)
 
     # sample municipalities
     rng = np.random.default_rng()
@@ -546,39 +542,34 @@ def main():
     N_typed_sum = N_typed_sum.sort_values()
     validation_labels = []
     
-    for q in quantiles:
+    used_states_globally = set()
 
-        used_states_globally = set()
+    quantile_selections = []
 
-        quantile_selections = []
+    lower_bound = np.quantile(N_typed_sum, percentile_1_typed)  # lower_q 
+    upper_bound = np.quantile(N_typed_sum, 0.95)                # upper_q --> If you want to sample around bands
+    
+    candidates = N_typed_sum.loc[
+        (N_typed_sum >= lower_bound) & (N_typed_sum <= upper_bound)
+    ].index.tolist()
 
-        lower_q = max(0.0, q - validation_bw)
-        upper_q = min(1.0, q + validation_bw)
+    rng.shuffle(candidates)
+
+    for c in candidates:
+        if len(quantile_selections) >= validation_n:
+            break
+
+        state_code = str(c)[:2]
         
-        lower_bound = np.quantile(N_typed_sum, lower_q)
-        upper_bound = np.quantile(N_typed_sum, upper_q)
-        
-        candidates = N_typed_sum.loc[
-            (N_typed_sum >= lower_bound) & (N_typed_sum <= upper_bound)
-        ].index.tolist()
+        #if state_code not in used_states_globally and c not in validation_labels:
+        quantile_selections.append(c)
+        used_states_globally.add(state_code) # Lock this state globally
 
-        rng.shuffle(candidates)
+    if len(quantile_selections) < validation_n:
+        print(f"Warning: Only found {len(quantile_selections)} valid regions for Q={q:.2f} "
+            f"due to state constraints (Requested: {validation_n}).")
 
-        for c in candidates:
-            if len(quantile_selections) >= validation_n:
-                break
-
-            state_code = str(c)[:2]
-            
-            #if state_code not in used_states_globally and c not in validation_labels:
-            quantile_selections.append(c)
-            used_states_globally.add(state_code) # Lock this state globally
-
-        if len(quantile_selections) < validation_n:
-            print(f"Warning: Only found {len(quantile_selections)} valid regions for Q={q:.2f} "
-                f"due to state constraints (Requested: {validation_n}).")
-
-        validation_labels.extend(quantile_selections)
+    validation_labels.extend(quantile_selections)
 
     N_typed_sum.loc[validation_labels] = 0
 
