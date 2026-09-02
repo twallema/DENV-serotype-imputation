@@ -185,7 +185,7 @@ def main():
     parser.add_argument("--n_maxp", type=int, help="Number of max-p clustering runs to average.", default=250)
     parser.add_argument("--max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=10)
     parser.add_argument("--spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
-    parser.add_argument("--validation_bw", type=float, help="Bandwidth around Q1, Q2 and Q3 median serotype sampling effort to sample within-sample validation areas from.", default=0.05)
+    parser.add_argument("--validation_bw", type=float, help="Bandwidth around Q1, Q2 and Q3 median serotype sampling effort to sample within-sample validation areas from.", default=0.025)
     parser.add_argument("--validation_n", type=int, help="Number of within-sample validation areas to sample around each Q1, Q2, Q3 +/- bandwith.", default=56)
     parser.add_argument("--no_frills", type=bool, help="Cut out optional plots to speed things up.", default=True)
 
@@ -533,22 +533,12 @@ def main():
 
     # compute sum of all typed cases
     N_typed_sum = denv[denv['date'] < datetime(2020,1,1)]
-    # append season label
-    before_start_month = denv['date'].dt.month < season_start_month
-    season_year = denv['date'].dt.year
-    season_year = season_year.where(~before_start_month, season_year - 1)
-    N_typed_sum['season'] = season_year.astype(str) + '-' + (season_year + 1).astype(str)
-    # get total serotyped cases per month
     N_typed_sum['N_typed'] = N_typed_sum[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].sum(axis=1)
-    # get total serotyped cases per season
-    yearly_sum = N_typed_sum.groupby(["CD_MUN","season"])['N_typed'].sum().reset_index()
-    # take mean across seasons
-    yearly_sum_mean = yearly_sum.groupby("CD_MUN")["N_typed"].mean() # array for clustering
-    yearly_sum_mean.rename("N_typed_yearly_mean", inplace=True)
-    N_typed_sum = yearly_sum_mean.sort_values()
-
+    N_typed_sum = N_typed_sum.groupby("CD_MUN")["N_typed"].sum().sort_values()
+    # compute percentile at which 1 case was sampled
+    percentile_1_typed = percentileofscore(N_typed_sum, 1, kind="rank")/100
     # construct linspace of sampling quantiles
-    quantiles = np.array([0.10, 0.25, 0.50, 0.75, 0.90])
+    quantiles = np.linspace(percentile_1_typed+validation_bw, 0.95-validation_bw, 5)
 
     # sample municipalities
     rng = np.random.default_rng()
