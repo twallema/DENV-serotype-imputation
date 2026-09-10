@@ -14,6 +14,8 @@ import matplotlib.pyplot as plt
 start_year = 1999
 end_year = 2026
 
+assert start_year == 1999, 'script only works with start_year equal to 1999'
+
 ######################
 ## Helper functions ##
 ######################
@@ -111,34 +113,8 @@ for fn,yr in zip(filenames, extracted_years):
     print(f'\nWorking on year {yr}')
     print('---------------------')
     print("\nWorking on preprocessing the linelist data..\n")
-    # 1996, 1997, 1998
-    if 1996 <= yr <= 1998:
-        raise NotImplementedError("script no longer works for years before 1999.\n")
-        # define serotype column name
-        serotype_column = 'SOROTIPO'
-        # load data
-        df = pd.read_csv(f'../raw/datasus_DENV-linelist/composite_dataset/{fn}', delimiter=';', low_memory=False)
-        # rename municipality geocode column for consistency
-        df = df.rename(columns={'MUNIATEND': 'CD_MUN'})
-        # attach relevant spatial units
-        df['CD_UF'] = df['CD_MUN'].map(mun2uf_map)
-        # find most likely date
-        ## strategy: take minimum of columns containing a date: ['DTCOLETA', 'DTMAC1', 'DTMAC2', 'DTINIHEMA1', 'DTINIHEMA2']
-        ## BUT: MAC1/MAC2/DTINIHEMA1/DTINIHEMA2 always lag 'DTCOLECTA' (98% confidence interval > 0), except MAC1 in 1997 which has strongly negative lagging outliers compared to 'DTCOLECTA' (1% lags more than 150 days)
-        ## HENCE: use 'DTCOLECTA' only 
-        ## BUT: there are a lot of missing dates so we wind up missing out on a lot of data by only using 'DTCOLECTA'
-        date_columns = ['DTCOLETA', 'DTMAC1', 'DTMAC2', 'DTINIHEMA1', 'DTINIHEMA2']
-        df[date_columns] = df[date_columns].apply(pd.to_datetime)
-        # find minimum date
-        df['date'] = df[date_columns].min(axis=1)
-        # drop if date not present (very rare)
-        print(f"Fraction with a missing date: {100 - len(df.dropna(subset=['date'])) / len(df) * 100} %")
-        df = df.dropna(subset=['date'])
-        # the column telling us if the case was 'confirmed' is unknown --> assume no cases are confirmed, except the serotyped ones
-        df['confirmed'] = df[serotype_column].isin([1, 2, 3, 4]).astype(int)
-        pass
 
-    elif 1999 <= yr <= 2006:
+    if 1999 <= yr <= 2006:
         # define relevant column names
         serotype_column = 'RESUL_VIRA'
         age_column = 'NU_IDADE'
@@ -460,11 +436,11 @@ for fn,yr in zip(filenames, extracted_years):
         "4": "DENV_4",
     })
 
-    # Build Cartesian product
+    # Build Cartesian product (if the start year is set to 1999, keep everything in 1998!)
     if ((yr == start_year) & (yr == end_year)):
-        all_months = pl.datetime_range(date(yr,1,31), date(yr,12,31), interval="1mo", eager=True).dt.month_end()
+        all_months = pl.datetime_range(date(yr-1,1,31), date(yr,12,31), interval="1mo", eager=True).dt.month_end()
     elif yr == start_year:
-        all_months = pl.datetime_range(date(yr,1,31), date(yr+1,3,1), interval="1mo", eager=True).dt.month_end()
+        all_months = pl.datetime_range(date(yr-1,1,31), date(yr+1,3,1), interval="1mo", eager=True).dt.month_end()
     elif yr == end_year:
         all_months = pl.datetime_range(date(yr-1,11,30), date(yr,12,31), interval="1mo", eager=True).dt.month_end()
     else:
@@ -514,7 +490,11 @@ for fn,yr in zip(filenames, extracted_years):
 
     # Save
     os.makedirs("../interim/datasus_DENV-linelist/tmp/year/", exist_ok=True)
-    final_df.write_parquet(f"../interim/datasus_DENV-linelist/tmp/year/{yr}.parquet", compression="zstd")
+    if yr == start_year:
+        final_df.filter(pl.col("date").dt.year() == 1998).write_parquet(f"../interim/datasus_DENV-linelist/tmp/year/1998.parquet", compression="zstd")
+        final_df.filter(pl.col("date").dt.year() == 1999).write_parquet(f"../interim/datasus_DENV-linelist/tmp/year/1999.parquet", compression="zstd")
+    else:
+        final_df.write_parquet(f"../interim/datasus_DENV-linelist/tmp/year/{yr}.parquet", compression="zstd")
 
 
 # Concatenate all counts into one giant dataframe 
@@ -540,7 +520,7 @@ output_dir.mkdir(exist_ok=True)
 
 carry = {}
 
-for yr in range(start_year, end_year + 1):
+for yr in range(start_year-1, end_year + 1):
 
     print(f"\t\t..in year {yr}")
 
@@ -632,7 +612,7 @@ input_dir = Path("../interim/datasus_DENV-linelist/tmp/month")
 output_dir = Path("../interim/datasus_DENV-linelist/master")
 output_dir.mkdir(exist_ok=True)
 
-for yr in range(start_year, end_year + 1):
+for yr in range(start_year-1, end_year + 1):
 
     files = sorted(input_dir.glob(f"{yr}-*.parquet"))
 
