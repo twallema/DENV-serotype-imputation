@@ -19,10 +19,10 @@ pytensor.config.on_opt_error = "ignore"
 included_clusters = [11, 12, 13, 16]
 
 # analysis startdate
-start_year = 2000
+start_year = 1998
 start_month = 9
-end_year = 2016
-assert start_year >= 1999, "earliest start_year is 1999."
+end_year = 2026
+assert start_year >= 1999, "earliest start_year is 1998."
 
 # helper function for argument parsing
 def str_to_bool(value):
