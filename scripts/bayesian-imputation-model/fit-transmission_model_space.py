@@ -19,7 +19,7 @@ pytensor.config.on_opt_error = "ignore"
 included_clusters = [9,10]
 
 # analysis startdate
-start_year = 1999
+start_year = 1998
 start_month = 9
 end_year = 2008
 assert start_year >= 1998, "earliest start_year is 1998."
@@ -523,10 +523,8 @@ def ar1_step(eps_t, u_prev, rho, sigma_ar):
     u_t = rho * u_prev + sigma_ar * eps_t
     return u_t
 
-# TODO: hierarchical initial condition across clusters to improve flexibility
 # TODO: Incorporate the serotype data
 # TODO: Refactor to diffrax + NumPyro like flu model
-# TODO: Add MAP optimisation
 
 with pm.Model() as model:
 
@@ -544,14 +542,14 @@ with pm.Model() as model:
     f_P_cluster_raw = pm.Normal("f_P_cluster_raw", 0, 1, shape=n_clusters)
     f_P = pm.Deterministic("f_P", pm.math.sigmoid(f_P_global_logit + f_P_cluster_sd * f_P_cluster_raw))
     ## fraction in cross-protection after DENV-2 infection at simulation start
-    f_P2_global_logit = pm.Normal("f_P2_global_logit", mu=0, sigma=1)
+    f_P2_global_logit = pm.Normal("f_P2_global_logit", mu=-1, sigma=1)
     f_P2_global = pm.Deterministic("f_P2_global", pm.math.sigmoid(f_P_global_logit))
     f_P2_cluster_sd = pm.HalfNormal("f_P2_cluster_sd", 1)
     f_P2_cluster_raw = pm.Normal("f_P2_cluster_raw", 0, 1, shape=n_clusters)
     f_P2 = pm.Deterministic("f_P2", pm.math.sigmoid(f_P2_global_logit + f_P2_cluster_sd * f_P2_cluster_raw))
     ## others (global only)
     pi_d = pm.Dirichlet("pi_d", a=10*np.array([1, 2, 7]))   # division of the non-cross-protected across naive, mono, double
-    pi_mono2 = pm.Beta("pi_mono2", alpha=3, beta=1)         # division of the mono infected between DENV-1 and DENV-2
+    pi_mono2 = pm.Beta("pi_mono2", alpha=2, beta=3)         # division of the mono infected between DENV-1 and DENV-2
     ## construct them
     S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, f_P, pi_d, pi_mono2))
     P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, f_P2))
@@ -562,7 +560,7 @@ with pm.Model() as model:
     gamma = 1/2
 
     ## average duration cross-protection
-    omega = pm.Lognormal("omega", mu=3.15, sigma=0.05)
+    omega = pm.Lognormal("omega", mu=3.2, sigma=0.2)
 
     ## average FOI reduction for homologous infections (n_months x n_serotypes)
     ### time-dependent for DENV-1 / DENV-2
@@ -737,15 +735,15 @@ with pm.Model() as model:
 # optimise a MAP estimate first
 with model:
     map_estimate = pm.find_MAP(maxeval=5000,
-        start={'f_P_global_logit': pm.math.logit(0.25), 'f_P2_global_logit': pm.math.logit(0.75), 'pi_d': pt.as_tensor([0.1, 0.2, 0.7]), 'pi_mono2': 0.75,
+        start={'f_P_global_logit': pm.math.logit(0.35), 'f_P2_global_logit': pm.math.logit(0.25), 'pi_d': pt.as_tensor([0.1, 0.2, 0.7]), 'pi_mono2': 0.5,
                 'omega': 24, 'mu_f1': 0.8, 'mu_f2': 0.8, 'f3': 0.5, 'kappa0_logit': pm.math.logit(0.1),
                 'mu_beta': np.log(2.5) * pt.ones(n_clusters), 'A_beta': 1 * pt.ones(n_clusters), 'phi_beta': 1.5 * pt.ones(n_clusters),
                 'alpha_inv': 0.5})
 
 # start sampling from the MAP estimate
-draws=5
+draws=10
 with model:
-    trace = pm.sample(draws, tune=5, target_accept=0.8,
+    trace = pm.sample(draws, tune=25, target_accept=0.8,
                      chains=chains, cores=chains, init='adapt_diag', progressbar=True,
                      initvals=chains*[map_estimate],
                      idata_kwargs={'log_likelihood':True})

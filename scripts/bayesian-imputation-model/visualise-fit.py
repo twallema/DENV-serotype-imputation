@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 included_clusters = [9, 10]
 
 # analysis startdate
-start_year = 1999
+start_year = 1998
 start_month = 9
 end_year = 2008
 assert start_year >= 1998, "earliest start_year is 1998."
