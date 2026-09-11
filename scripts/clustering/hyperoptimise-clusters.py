@@ -1012,7 +1012,7 @@ def main():
             numpyro.deterministic("theta_log", theta_log)
 
             # Latent serotype probabilities
-            numpyro.deterministic("p", jnn.softmax(theta_log, axis=2))
+            p = numpyro.deterministic("p", jnn.softmax(theta_log, axis=2))
 
             # Hierarchical overdispersion
             d_region_hierarch = numpyro.sample("d_region_hierarch", dist.HalfNormal(0.1))
@@ -1033,7 +1033,7 @@ def main():
         mcmc = MCMC(kernel, num_warmup=n_tune, num_samples=n_draw, num_chains=n_cores, chain_method="parallel", progress_bar=False)
 
         mcmc.run(
-            jax.random.PRNGKey(jax.random.PRNGKey(int(time.time()))),
+            jax.random.PRNGKey(42),
             X=X,
             I=I,
             W=W,
