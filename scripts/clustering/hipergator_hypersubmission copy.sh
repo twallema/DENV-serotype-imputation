@@ -4,7 +4,7 @@ run_id="CD_RGINT_v4_mean"
 spatial_aggregation="rgint"
 
 N=50
-threads=8
+cores=8
 time="100:00:00"
 
 for i in $(seq 1 "$N"); do
@@ -14,13 +14,14 @@ for i in $(seq 1 "$N"); do
     echo "Submitting repeat ${repeat_id} of run ID '${run_id}'"
 
     job_id=$(sbatch --parsable \
-        -c "$threads" \
+        --cpus-per-task "$cores" \
         --time="$time" \
         --job-name="${run_id}_repeat_${repeat_id}" \
-        submit_hyperoptimise-clusters_single.sh \
+        --mem=8gb \
+        hipergator_submit_hyperoptimise-clusters_single.sh \
         "$run_id" \
         "$repeat_id" \
-        "$threads" \
+        "$cores" \
         "$spatial_aggregation")
 
 done
