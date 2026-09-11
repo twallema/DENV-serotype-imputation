@@ -19,7 +19,7 @@ pytensor.config.on_opt_error = "ignore"
 included_clusters = [9,10]
 
 # analysis startdate
-start_year = 1998
+start_year = 1999
 start_month = 9
 end_year = 2008
 assert start_year >= 1998, "earliest start_year is 1998."
@@ -441,7 +441,8 @@ def build_initial_susceptibles(demo, f_P, pi_d, pi_mono2):
     demo : np.ndarray
         shape (n_clusters,)
 
-    f_P: float
+    f_P: np.ndarray
+        shape (n_clusters,)
         fraction of total population in cross-protected state
 
     pi_d : TensorVariable
@@ -459,7 +460,7 @@ def build_initial_susceptibles(demo, f_P, pi_d, pi_mono2):
 
     S_frac = pt.stack([pi_d[0], pi_d[1]*(1-pi_mono2), pi_d[1]*pi_mono2, 0, 0, pi_d[2], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
 
-    return (1-f_P) * demo[:, None] * S_frac[None, :]
+    return (1-f_P[:, None]) * demo[:, None] * S_frac[None, :]
 
 
 def build_initial_crossprotection(demo, f_P, pi_d, f_P2):
@@ -471,9 +472,12 @@ def build_initial_crossprotection(demo, f_P, pi_d, f_P2):
     deg2_frac = pi_d[2] / pi_sum
 
     # set fractions
-    P_frac = pt.stack([deg1_frac*(1-f_P2), deg1_frac*f_P2, 0, 0, deg2_frac * f_P2, 0, 0, deg2_frac * (1-f_P2), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    P_frac = pt.stack([deg1_frac*(1-f_P2), deg1_frac*f_P2, pt.zeros_like(f_P2), pt.zeros_like(f_P2), deg2_frac * f_P2, pt.zeros_like(f_P2), pt.zeros_like(f_P2), deg2_frac * (1-f_P2),
+                       pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2),
+                       pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2),
+                       pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2)])
 
-    return f_P * demo[:, None] * P_frac[None, :]
+    return f_P[:, None] * demo[:, None] * pt.transpose(P_frac)
 
 
 def build_initial_infected(demo, DENV_total, p0, pi_d):
@@ -531,12 +535,24 @@ with pm.Model() as model:
     # ----------------
 
     # initial states
-    ## initial susceptible and cross-protected states (cluster x state_idx)
-    f_P = pm.Beta("f_P", alpha=15, beta=30)                 # first division of cluster population happens based on amount in a cross-protected state
-    f_P2 = pm.Beta("f_P2", alpha=1, beta=10)                # fraction cross-protected after DENV-2 infection
-    pi_d = pm.Dirichlet("pi_d", a=10*np.array([1, 2, 7]))   # divide the non-cross-protected across naive, mono, double
-    pi_mono2 = pm.Beta("pi_mono2", alpha=1, beta=5)         # divide the mono between DENV-1 and DENV-2
-    I0_est = pm.HalfNormal("I0_est", sigma=1e-6, shape=n_clusters)
+    ## amount of infected 
+    I0_est = pm.HalfNormal("I0_est", sigma=1e-5, shape=n_clusters)
+    ## fraction in cross protection at simulation start
+    f_P_global_logit = pm.Normal("f_P_global_logit", mu=pm.math.logit(0.25), sigma=1)
+    f_P_global = pm.Deterministic("f_P_global", pm.math.sigmoid(f_P_global_logit))
+    f_P_cluster_sd = pm.HalfNormal("f_P_cluster_sd", 1)
+    f_P_cluster_raw = pm.Normal("f_P_cluster_raw", 0, 1, shape=n_clusters)
+    f_P = pm.Deterministic("f_P", pm.math.sigmoid(f_P_global_logit + f_P_cluster_sd * f_P_cluster_raw))
+    ## fraction in cross-protection after DENV-2 infection at simulation start
+    f_P2_global_logit = pm.Normal("f_P2_global_logit", mu=0, sigma=1)
+    f_P2_global = pm.Deterministic("f_P2_global", pm.math.sigmoid(f_P_global_logit))
+    f_P2_cluster_sd = pm.HalfNormal("f_P2_cluster_sd", 1)
+    f_P2_cluster_raw = pm.Normal("f_P2_cluster_raw", 0, 1, shape=n_clusters)
+    f_P2 = pm.Deterministic("f_P2", pm.math.sigmoid(f_P2_global_logit + f_P2_cluster_sd * f_P2_cluster_raw))
+    ## others (global only)
+    pi_d = pm.Dirichlet("pi_d", a=10*np.array([1, 2, 7]))   # division of the non-cross-protected across naive, mono, double
+    pi_mono2 = pm.Beta("pi_mono2", alpha=3, beta=1)         # division of the mono infected between DENV-1 and DENV-2
+    ## construct them
     S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, f_P, pi_d, pi_mono2))
     P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, f_P2))
     I0 = pm.Deterministic("I0", build_initial_infected(demo, I0_est, pt.as_tensor(p0.values), pi_d))
@@ -546,7 +562,7 @@ with pm.Model() as model:
     gamma = 1/2
 
     ## average duration cross-protection
-    omega = pm.Lognormal("omega", mu=3.5, sigma=0.2)
+    omega = pm.Lognormal("omega", mu=3.15, sigma=0.05)
 
     ## average FOI reduction for homologous infections (n_months x n_serotypes)
     ### time-dependent for DENV-1 / DENV-2
@@ -718,14 +734,15 @@ with pm.Model() as model:
 ## Running the model ##
 #######################
 
+# optimise a MAP estimate first
 with model:
-      map_estimate = pm.find_MAP(maxeval=5000,
-          start={'f_P': 0.33, 'f_P2': 0.10, 'pi_d': pt.as_tensor([0.1, 0.2, 0.7]), 'pi_mono2': 0.25,
-                    'omega': 36, 'mu_f1': 0.8, 'mu_f2': 0.8, 'f3': 0.5, 'kappa0_logit': pm.math.logit(0.1),
-                    'mu_beta': np.log(2.5) * pt.ones(n_clusters), 'A_beta': 1 * pt.ones(n_clusters), 'phi_beta': 1.5 * pt.ones(n_clusters),
-                    'alpha_inv': 0.5})
+    map_estimate = pm.find_MAP(maxeval=5000,
+        start={'f_P_global_logit': pm.math.logit(0.25), 'f_P2_global_logit': pm.math.logit(0.75), 'pi_d': pt.as_tensor([0.1, 0.2, 0.7]), 'pi_mono2': 0.75,
+                'omega': 24, 'mu_f1': 0.8, 'mu_f2': 0.8, 'f3': 0.5, 'kappa0_logit': pm.math.logit(0.1),
+                'mu_beta': np.log(2.5) * pt.ones(n_clusters), 'A_beta': 1 * pt.ones(n_clusters), 'phi_beta': 1.5 * pt.ones(n_clusters),
+                'alpha_inv': 0.5})
 
-# NUTS
+# start sampling from the MAP estimate
 draws=5
 with model:
     trace = pm.sample(draws, tune=5, target_accept=0.8,
@@ -747,7 +764,7 @@ posterior_predictive.to_netcdf(f"{output_folder}/posterior_predictive.nc")
 
 # Traceplot
 variables2plot = [
-                 'f_P', 'f_P2', 'pi_d', 'pi_mono2', 'I0_est', 'omega', 'mu_f1', 'sigma_f1', 'rho_f1', 'mu_f2', 'sigma_f2', 'rho_f2', 'f3', 'kappa', 'kappa0_logit', 'or_34', 'or_cluster', 'or_serotype', 'or_homologous', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
+                 'f_P_global', 'f_P', 'f_P2_global', 'f_P2', 'pi_d', 'pi_mono2', 'I0_est', 'omega', 'mu_f1', 'sigma_f1', 'rho_f1', 'mu_f2', 'sigma_f2', 'rho_f2', 'f3', 'kappa', 'kappa0_logit', 'or_34', 'or_cluster', 'or_serotype', 'or_homologous', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 # Save traces
