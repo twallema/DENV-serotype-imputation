@@ -17,7 +17,7 @@ for i in $(seq 1 "$N"); do
         -c "$threads" \
         --time="$time" \
         --job-name="${run_id}_repeat_${repeat_id}" \
-        submit_hyperoptimise-clusters_single.sh \
+        seneca_submit_hyperoptimise-clusters_single.sh \
         "$run_id" \
         "$repeat_id" \
         "$threads" \
