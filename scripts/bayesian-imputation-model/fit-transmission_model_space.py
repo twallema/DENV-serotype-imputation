@@ -91,7 +91,7 @@ bd = bd.groupby(['year', 'cluster'], as_index=False).agg(births=('births', 'sum'
 # Adjacency matrix
 # ~~~~~~~~~~~~~~~~
 
-W = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/adjacency_matrix_{spatial_aggregation}.csv'), index_col=0).values
+W = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/clustering_pipeline/{ID}/clusters/adjacency_matrix.csv'), index_col=0).values
 
 # Incidence data
 # ~~~~~~~~~~~~~~

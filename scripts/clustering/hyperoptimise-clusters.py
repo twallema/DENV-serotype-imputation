@@ -866,7 +866,7 @@ def main():
                 adj_matrix.loc[uf, neighbor] = 1
 
         # Save in a .csv
-        adj_matrix.to_csv(os.path.join(output_folder, f'index_{index}/adjacency_matrix_{spatial_aggregation}.csv'))
+        adj_matrix.to_csv(os.path.join(output_folder, f'index_{index}/adjacency_matrix.csv'))
 
 
         # Impute the case data
