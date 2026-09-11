@@ -17,7 +17,7 @@ for i in $(seq 1 "$N"); do
         --cpus-per-task "$cores" \
         --time="$time" \
         --job-name="${run_id}_repeat_${repeat_id}" \
-        --mem=8gb \
+        --mem-per-cpu=4gb \
         hipergator_submit_hyperoptimise-clusters_single.sh \
         "$run_id" \
         "$repeat_id" \
