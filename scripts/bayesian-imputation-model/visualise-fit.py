@@ -77,7 +77,7 @@ mapping = mapping.merge(clusters[[region, 'cluster']], on=region, how='left')
 # Get demography in start_year per cluster
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-demo = pl.scan_parquet(os.path.join(abs_dir,'../../data/interim/demographics/population_mun-age_1999-2026.parquet')).group_by([ "CD_MUN", "year"]).agg(pl.col("population").sum().alias("population")).sort([ "CD_MUN", "year"]).filter(pl.col("year") == start_year).select("CD_MUN","population").collect().to_pandas()
+demo = pl.scan_parquet(os.path.join(abs_dir,'../../data/interim/demographics/population_mun-age_1998-2026.parquet')).group_by([ "CD_MUN", "year"]).agg(pl.col("population").sum().alias("population")).sort([ "CD_MUN", "year"]).filter(pl.col("year") == start_year).select("CD_MUN","population").collect().to_pandas()
 demo = demo.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
 demo = demo.groupby('cluster', as_index=False)['population'].sum()
 

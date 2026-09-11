@@ -15,7 +15,7 @@ for bd in ['births', 'deaths']:
     df = pd.read_csv(f'../raw/demographics/{bd}_2000-2024_clean.csv')
     
     # load demography
-    pop = pl.scan_parquet('../../data/interim/demographics/population_mun-age_1999-2026.parquet').group_by([ "CD_MUN", "year"]).agg(pl.col("population").sum().alias("population")).sort([ "CD_MUN", "year"]).collect().to_pandas()
+    pop = pl.scan_parquet('../../data/interim/demographics/population_mun-age_1998-2026.parquet').group_by([ "CD_MUN", "year"]).agg(pl.col("population").sum().alias("population")).sort([ "CD_MUN", "year"]).collect().to_pandas()
 
     # load area code mapping
     mun2uf_map = gpd.read_parquet('../interim/geographic-dataset.parquet')[['CD_UF', 'CD_MUN']].drop_duplicates().set_index('CD_MUN')['CD_UF'].to_dict()

@@ -160,4 +160,4 @@ df = df.astype({'CD_MUN': 'int32', 'population': 'int32', 'year': 'int16', 'age'
 df = df.sort_values(["CD_MUN", "age", "year"])
 
 # save result
-df.to_parquet(os.path.join(abs_dir, f'../../data/interim/demographics/population_mun-age_1999-2026.parquet'), index=False, compression='zstd')
+df.to_parquet(os.path.join(abs_dir, f'../../data/interim/demographics/population_mun-age_1998-2026.parquet'), index=False, compression='zstd')

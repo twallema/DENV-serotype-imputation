@@ -45,7 +45,7 @@ cases = (
 
 # load the age-municipality year demographic data
 demo = (
-    pl.scan_parquet('../../data/interim/demographics/population_mun-age_1999-2026.parquet')
+    pl.scan_parquet('../../data/interim/demographics/population_mun-age_1998-2026.parquet')
     .sort(["CD_MUN", "year", "age"])
     # aggregate to clusters
     .with_columns(pl.col("CD_MUN").replace_strict(mapping).alias("cluster"))

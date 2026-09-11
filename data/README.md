@@ -105,7 +105,7 @@ These data are partly confidential and can be found on the Bento lab box.
 
 + `deaths_mun_1999-2026.csv`: Made from `~/data/raw/demographics/deaths_2000-2024_clean.csv` using `build_births-deaths.py`.
 
-+ `population_mun-age_1999-2026.parquet`: Made from `~/data/raw/demographics/population/pop_age_XXXX_clean.csv` using `build_population-by-age_datasus.py`.
++ `population_mun-age_1998-2026.parquet`: Made from `~/data/raw/demographics/population/pop_age_XXXX_clean.csv` using `build_population-by-age_datasus.py`.
 
 ### DTW-MDS-embeddings
 
