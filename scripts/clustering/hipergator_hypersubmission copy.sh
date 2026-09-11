@@ -3,8 +3,8 @@
 run_id="CD_RGINT_v4_mean"
 spatial_aggregation="rgint"
 
-N=50
-cores=8
+N=25
+cores=4
 time="100:00:00"
 
 for i in $(seq 1 "$N"); do
