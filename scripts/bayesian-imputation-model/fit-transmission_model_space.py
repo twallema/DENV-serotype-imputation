@@ -16,13 +16,13 @@ pytensor.config.cxx = '/usr/bin/clang++'
 pytensor.config.on_opt_error = "ignore"
 
 # included clusters
-included_clusters = [11, 12, 13, 16]
+included_clusters = [9,10]
 
 # analysis startdate
-start_year = 2000
+start_year = 1998
 start_month = 9
-end_year = 2016
-assert start_year >= 1999, "earliest start_year is 1999."
+end_year = 2008
+assert start_year >= 1998, "earliest start_year is 1998."
 
 # helper function for argument parsing
 def str_to_bool(value):
@@ -44,7 +44,7 @@ ID = args.ID
 
 # pipeline output folder
 abs_dir = os.path.dirname(__file__) # make sure all referenced paths are relative to the lcoation of this file and not the terminal's pwd
-output_folder = os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/bayesian-imputation-model_output/new_model/')
+output_folder = os.path.join(abs_dir, f'../../data/interim/clustering_pipeline/{ID}/transmission-model_output')
 # check if output dir exists, if not, make it
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
@@ -54,35 +54,29 @@ if not os.path.exists(output_folder):
 ## Preparing the data ##
 ########################
 
-# Load left out spatial units
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-validation_labels = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/validation_labels.csv')).squeeze()
-
 # Load clusters
 # >>>>>>>>>>>>>
 
-clusters = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/clusters_{spatial_aggregation}.csv'))
-region = clusters.columns.to_list()[0]
+clusters = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/clustering_pipeline/{ID}/clusters.csv'))
 
 # Load mapping
 # >>>>>>>>>>>>
 
 mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
-mapping = mapping.merge(clusters[[region, 'cluster']], on=region, how='left')
+mapping = mapping.merge(clusters[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
 
 # Compute population in start_year per cluster
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-demo = pl.scan_parquet(os.path.join(abs_dir,'../../data/interim/demographics/population_mun-age_1999-2026.parquet')).group_by([ "CD_MUN", "year"]).agg(pl.col("population").sum().alias("population")).sort([ "CD_MUN", "year"]).filter(pl.col("year") == start_year).select("CD_MUN","population").collect().to_pandas()
+demo = pl.scan_parquet(os.path.join(abs_dir,'../../data/interim/demographics/population_mun-age_1998-2026.parquet')).group_by([ "CD_MUN", "year"]).agg(pl.col("population").sum().alias("population")).sort([ "CD_MUN", "year"]).filter(pl.col("year") == start_year).select("CD_MUN","population").collect().to_pandas()
 demo = demo.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
 demo = demo.groupby('cluster', as_index=False)['population'].sum()
 
 # Compute births and death rates per cluster
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-births = pd.read_csv(os.path.join(abs_dir,'../../data/interim/demographics/births_mun_1999-2026.csv'))
-deaths = pd.read_csv(os.path.join(abs_dir,'../../data/interim/demographics/deaths_mun_1999-2026.csv'))
+births = pd.read_csv(os.path.join(abs_dir,'../../data/interim/demographics/births_mun_1998-2026.csv'))
+deaths = pd.read_csv(os.path.join(abs_dir,'../../data/interim/demographics/deaths_mun_1998-2026.csv'))
 bd = births.merge(deaths, on=['CD_MUN', 'year', 'population'], how='left')
 
 bd = bd.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
@@ -91,29 +85,15 @@ bd = bd.groupby(['year', 'cluster'], as_index=False).agg(births=('births', 'sum'
 # Adjacency matrix
 # ~~~~~~~~~~~~~~~~
 
-W = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/adjacency_matrix_{spatial_aggregation}.csv'), index_col=0).values
+W = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/clustering_pipeline/{ID}/adjacency_matrix.csv'), index_col=0).values
 
 # Incidence data
 # ~~~~~~~~~~~~~~
 
 # Fetch incidence data
-df = pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet").collect().to_pandas()
+df = pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1998_2026-month-mun-age_group-no_diagnostics.parquet").collect().to_pandas()
 
-# 1. Check if all columns are present
-sero_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4"]
-required_cols = ["CD_MUN", "date", "DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
-assert all(col in df.columns for col in required_cols)
-
-# 2. Sort for safety
-df = df.sort_values(["CD_MUN", "date"]).reset_index(drop=True)
-
-# 4. Remove within-sample validation municipalities
-df.loc[df['CD_MUN'].isin(validation_labels.values), ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'DENV_total'] ] = np.nan
-
-# 5. Aggregate to the spatial clusters
-# make right mapping
-mapping = mapping[['CD_MUN', f'{region}']]
-mapping = clusters.merge(mapping, on=f'{region}', how="left")
+# Aggregate to the spatial clusters
 # do DENV_total first
 df_with_mapping = df.merge(mapping[["CD_MUN", "cluster"]], on="CD_MUN", how="left")
 ## custom aggregation function
@@ -145,23 +125,24 @@ agg_2.loc[mask] = agg_2.loc[mask].fillna(0)
 ## merge both dataframes
 df = agg_1.merge(agg_2)
 
-# 6. Add number of serotyped cases
+# Add number of serotyped cases
+sero_cols = ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']
 df["N_typed"] = df[sero_cols].sum(axis=1, skipna=False)           # if serotypes available --> sum them
 df.loc[df[sero_cols].isna().all(axis=1), 'N_typed'] = np.nan      # if all serotypes are Nan --> N_typed = 0 --> Wait, I don't think this is appropriate.
 
-# 7. Compute delta (typing fraction)
+# Compute delta (typing fraction)
 df["delta"] = df["N_typed"] / df["DENV_total"]
 df['delta'] = df['delta'].where(df['N_typed'] > 0, np.nan) # When N_typed == 0, we don't know delta — mark as missing
 df["delta"] = df["delta"].clip(lower=1e-12, upper=1 - 1e-12)
 
-# only do first X clusters
+# Only do first X clusters
 df = df[df['cluster'].isin(included_clusters)]
 
-# 3. Take only from start_year to end_year
+# Take only from start_year to end_year
 df_alldates = df.copy()
 df = df[((df['date'] > datetime(start_year,start_month,1)) & (df['date'] <= datetime(end_year,12,31)))]
 
-# 8. Compute year and month index
+# Compute year and month index
 df["year"] = pd.to_datetime(df["date"]).dt.year
 df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
@@ -460,7 +441,8 @@ def build_initial_susceptibles(demo, f_P, pi_d, pi_mono2):
     demo : np.ndarray
         shape (n_clusters,)
 
-    f_P: float
+    f_P: np.ndarray
+        shape (n_clusters,)
         fraction of total population in cross-protected state
 
     pi_d : TensorVariable
@@ -478,7 +460,7 @@ def build_initial_susceptibles(demo, f_P, pi_d, pi_mono2):
 
     S_frac = pt.stack([pi_d[0], pi_d[1]*(1-pi_mono2), pi_d[1]*pi_mono2, 0, 0, pi_d[2], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
 
-    return (1-f_P) * demo[:, None] * S_frac[None, :]
+    return (1-f_P[:, None]) * demo[:, None] * S_frac[None, :]
 
 
 def build_initial_crossprotection(demo, f_P, pi_d, f_P2):
@@ -490,9 +472,12 @@ def build_initial_crossprotection(demo, f_P, pi_d, f_P2):
     deg2_frac = pi_d[2] / pi_sum
 
     # set fractions
-    P_frac = pt.stack([deg1_frac*(1-f_P2), deg1_frac*f_P2, 0, 0, deg2_frac * f_P2, 0, 0, deg2_frac * (1-f_P2), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    P_frac = pt.stack([deg1_frac*(1-f_P2), deg1_frac*f_P2, pt.zeros_like(f_P2), pt.zeros_like(f_P2), deg2_frac * f_P2, pt.zeros_like(f_P2), pt.zeros_like(f_P2), deg2_frac * (1-f_P2),
+                       pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2),
+                       pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2),
+                       pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2), pt.zeros_like(f_P2)])
 
-    return f_P * demo[:, None] * P_frac[None, :]
+    return f_P[:, None] * demo[:, None] * pt.transpose(P_frac)
 
 
 def build_initial_infected(demo, DENV_total, p0, pi_d):
@@ -538,6 +523,9 @@ def ar1_step(eps_t, u_prev, rho, sigma_ar):
     u_t = rho * u_prev + sigma_ar * eps_t
     return u_t
 
+# TODO: Incorporate the serotype data
+# TODO: Refactor to diffrax + NumPyro like flu model
+
 with pm.Model() as model:
 
     # ----------------
@@ -545,12 +533,24 @@ with pm.Model() as model:
     # ----------------
 
     # initial states
-    ## initial susceptible and cross-protected states (cluster x state_idx)
-    f_P = pm.Beta("f_P", alpha=8, beta=24)                 # first division of cluster population happens based on amount in a cross-protected state
-    f_P2 = pm.Beta("f_P2", alpha=3, beta=1)                # fraction cross-protected after DENV-2 infection
-    pi_d = pm.Dirichlet("pi_d", a=10*np.array([1, 2, 7]))   # divide the non-cross-protected across naive, mono, double
-    pi_mono2 = pm.Beta("pi_mono2", alpha=3, beta=1)        # divide the mono between DENV-1 and DENV-2
-    I0_est = pm.HalfNormal("I0_est", sigma=1e-6, shape=n_clusters)
+    ## amount of infected 
+    I0_est = pm.HalfNormal("I0_est", sigma=1e-5, shape=n_clusters)
+    ## fraction in cross protection at simulation start
+    f_P_global_logit = pm.Normal("f_P_global_logit", mu=pm.math.logit(0.25), sigma=1)
+    f_P_global = pm.Deterministic("f_P_global", pm.math.sigmoid(f_P_global_logit))
+    f_P_cluster_sd = pm.HalfNormal("f_P_cluster_sd", 1)
+    f_P_cluster_raw = pm.Normal("f_P_cluster_raw", 0, 1, shape=n_clusters)
+    f_P = pm.Deterministic("f_P", pm.math.sigmoid(f_P_global_logit + f_P_cluster_sd * f_P_cluster_raw))
+    ## fraction in cross-protection after DENV-2 infection at simulation start
+    f_P2_global_logit = pm.Normal("f_P2_global_logit", mu=-1, sigma=1)
+    f_P2_global = pm.Deterministic("f_P2_global", pm.math.sigmoid(f_P_global_logit))
+    f_P2_cluster_sd = pm.HalfNormal("f_P2_cluster_sd", 1)
+    f_P2_cluster_raw = pm.Normal("f_P2_cluster_raw", 0, 1, shape=n_clusters)
+    f_P2 = pm.Deterministic("f_P2", pm.math.sigmoid(f_P2_global_logit + f_P2_cluster_sd * f_P2_cluster_raw))
+    ## others (global only)
+    pi_d = pm.Dirichlet("pi_d", a=10*np.array([1, 2, 7]))   # division of the non-cross-protected across naive, mono, double
+    pi_mono2 = pm.Beta("pi_mono2", alpha=2, beta=3)         # division of the mono infected between DENV-1 and DENV-2
+    ## construct them
     S0 = pm.Deterministic("S0", build_initial_susceptibles(demo, f_P, pi_d, pi_mono2))
     P0 = pm.Deterministic("P0", build_initial_crossprotection(demo, f_P, pi_d, f_P2))
     I0 = pm.Deterministic("I0", build_initial_infected(demo, I0_est, pt.as_tensor(p0.values), pi_d))
@@ -560,7 +560,7 @@ with pm.Model() as model:
     gamma = 1/2
 
     ## average duration cross-protection
-    omega = pm.Lognormal("omega", mu=3.15, sigma=0.05)
+    omega = pm.Lognormal("omega", mu=3.2, sigma=0.2)
 
     ## average FOI reduction for homologous infections (n_months x n_serotypes)
     ### time-dependent for DENV-1 / DENV-2
@@ -727,19 +727,25 @@ with pm.Model() as model:
     # --- Observed subtyped incidences ---
     Y_obs = pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial)
 
+
 #######################
 ## Running the model ##
 #######################
 
-# NUTS
-draws=50
+# optimise a MAP estimate first
 with model:
-    trace = pm.sample(draws, tune=50, target_accept=0.8,
+    map_estimate = pm.find_MAP(maxeval=5000,
+        start={'f_P_global_logit': pm.math.logit(0.35), 'f_P2_global_logit': pm.math.logit(0.25), 'pi_d': pt.as_tensor([0.1, 0.2, 0.7]), 'pi_mono2': 0.5,
+                'omega': 24, 'mu_f1': 0.8, 'mu_f2': 0.8, 'f3': 0.5, 'kappa0_logit': pm.math.logit(0.1),
+                'mu_beta': np.log(2.5) * pt.ones(n_clusters), 'A_beta': 1 * pt.ones(n_clusters), 'phi_beta': 1.5 * pt.ones(n_clusters),
+                'alpha_inv': 0.5})
+
+# start sampling from the MAP estimate
+draws=10
+with model:
+    trace = pm.sample(draws, tune=25, target_accept=0.8,
                      chains=chains, cores=chains, init='adapt_diag', progressbar=True,
-                     initvals=chains*[{'f_P': 0.25, 'f_P2': 0.75, 'pi_d': pt.as_tensor([0.1, 0.2, 0.7]), 'pi_mono2': 0.75,
-                                       'omega': 24, 'mu_f1': 0.8, 'mu_f2': 0.8, 'f3': 0.5, 'kappa0_logit': pm.math.logit(0.1),
-                                       'mu_beta': np.log(2.5) * pt.ones(n_clusters), 'A_beta': 1 * pt.ones(n_clusters), 'phi_beta': 1.5 * pt.ones(n_clusters),
-                                       'alpha_inv': 0.5}],
+                     initvals=chains*[map_estimate],
                      idata_kwargs={'log_likelihood':True})
 
 #######################
@@ -749,24 +755,20 @@ with model:
 # Plot posterior predictive checks
 with model:
     posterior_predictive = pm.sample_posterior_predictive(trace)
-arviz.plot_ppc(posterior_predictive)
-os.makedirs(f'{output_folder}/fig/posterior_predictive', exist_ok=True)
-plt.savefig(f'{output_folder}/fig/posterior_predictive/ppc.pdf')
-plt.close()    
 
 # Assume `trace` is the result of pm.sample()
-arviz.to_netcdf(trace, f"{output_folder}/trace.nc")
-arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc")
+trace.to_netcdf(f"{output_folder}/trace.nc")
+posterior_predictive.to_netcdf(f"{output_folder}/posterior_predictive.nc")
 
 # Traceplot
 variables2plot = [
-                 'f_P', 'f_P2', 'pi_d', 'pi_mono2', 'I0_est', 'omega', 'mu_f1', 'sigma_f1', 'rho_f1', 'mu_f2', 'sigma_f2', 'rho_f2', 'f3', 'kappa', 'kappa0_logit', 'or_34', 'or_cluster', 'or_serotype', 'or_homologous', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
+                 'f_P_global', 'f_P', 'f_P2_global', 'f_P2', 'pi_d', 'pi_mono2', 'I0_est', 'omega', 'mu_f1', 'sigma_f1', 'rho_f1', 'mu_f2', 'sigma_f2', 'rho_f2', 'f3', 'kappa', 'kappa0_logit', 'or_34', 'or_cluster', 'or_serotype', 'or_homologous', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta', 'alpha_inv', 'd_cluster_hierarch', 'd_cluster',
                 ]
 
 # Save traces
 os.makedirs(f'{output_folder}/fig/trace', exist_ok=True)
 for var in variables2plot:
-    arviz.plot_trace(trace, var_names=[var]) 
+    arviz.plot_trace_dist(trace, var_names=[var], compact=True, combined=True, kind='kde') 
     plt.savefig(f'{output_folder}/fig/trace/trace-{var}_typing-effort-model.pdf')
     plt.close()
 

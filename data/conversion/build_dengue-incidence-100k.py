@@ -28,7 +28,7 @@ for region, name in zip(regions, names):
     denv = pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet").collect().to_pandas()
 
     # population data
-    pop = pl.scan_parquet("../../data/interim/demographics/population_mun-age_1999-2026.parquet").group_by(["CD_MUN", "year"]).agg(pl.col("population").sum()).sort(by=["CD_MUN", "year"]).collect().to_pandas()
+    pop = pl.scan_parquet("../../data/interim/demographics/population_mun-age_1998-2026.parquet").group_by(["CD_MUN", "year"]).agg(pl.col("population").sum()).sort(by=["CD_MUN", "year"]).collect().to_pandas()
 
     # Geography
     # >>>>>>>>>

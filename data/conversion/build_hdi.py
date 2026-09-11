@@ -61,7 +61,7 @@ for name,region in zip(names,regions):
     hdi[f'{region}'] = hdi['CD_MUN'].map(muncipality_region_map)
 
     # attach population count in 2010
-    pop = pl.scan_parquet("../../data/interim/demographics/population_mun-age_1999-2026.parquet").filter(pl.col("year") == 2010).group_by("CD_MUN").agg(pl.col("population").sum()).collect().to_pandas()
+    pop = pl.scan_parquet("../../data/interim/demographics/population_mun-age_1998-2026.parquet").filter(pl.col("year") == 2010).group_by("CD_MUN").agg(pl.col("population").sum()).collect().to_pandas()
     hdi = pd.merge(
         hdi, 
         pop, 

@@ -15,7 +15,7 @@ for bd in ['births', 'deaths']:
     df = pd.read_csv(f'../raw/demographics/{bd}_2000-2024_clean.csv')
     
     # load demography
-    pop = pl.scan_parquet('../../data/interim/demographics/population_mun-age_1999-2026.parquet').group_by([ "CD_MUN", "year"]).agg(pl.col("population").sum().alias("population")).sort([ "CD_MUN", "year"]).collect().to_pandas()
+    pop = pl.scan_parquet('../../data/interim/demographics/population_mun-age_1998-2026.parquet').group_by([ "CD_MUN", "year"]).agg(pl.col("population").sum().alias("population")).sort([ "CD_MUN", "year"]).collect().to_pandas()
 
     # load area code mapping
     mun2uf_map = gpd.read_parquet('../interim/geographic-dataset.parquet')[['CD_UF', 'CD_MUN']].drop_duplicates().set_index('CD_MUN')['CD_UF'].to_dict()
@@ -88,11 +88,15 @@ for bd in ['births', 'deaths']:
 
     intercept = y_mean - slope * x_mean
 
+    # insert 1999
     df.insert(0, "1999", intercept + slope * 1999)
-
     df["1999"] = df["1999"].fillna(0)
-
     df["1999"] = df["1999"].round().clip(lower=0)
+
+    # insert 1998
+    df.insert(0, "1998", intercept + slope * 1998)
+    df["1998"] = df["1998"].fillna(0)
+    df["1998"] = df["1998"].round().clip(lower=0)
 
     # perform a regression on the last five years, extrapolate to find 2025 and 2026
     X = np.array([2020, 2021, 2022, 2023, 2024], dtype=float)
@@ -135,4 +139,4 @@ for bd in ['births', 'deaths']:
     df = df.merge(pop, on=['CD_MUN','year'], how='left')
 
     # save result
-    df.to_csv(f'../interim/demographics/{bd}_mun_1999-2026.csv', index=False)
+    df.to_csv(f'../interim/demographics/{bd}_mun_1998-2026.csv', index=False)

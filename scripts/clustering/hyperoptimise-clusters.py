@@ -31,6 +31,11 @@ from patsy import dmatrix
 ## helper functions ##
 ######################
 
+# helper function for argument parsing
+def str_to_bool(value):
+    """Convert string arguments to boolean (for SLURM environment variables)."""
+    return value.lower() in ["true", "1", "yes"]
+
 def build_co_association_matrix(regions, clusters):
     """
     Build a co-association matrix containing 1 when BR regions belong to the same cluster and 0 if they don't
@@ -186,7 +191,7 @@ def main():
     parser.add_argument("--max_iterations_sa", type=int, help="Number of simulated annealing steps.", default=10)
     parser.add_argument("--spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
     parser.add_argument("--validation_n", type=int, help="Number of within-sample validation municipalities to take out.", default=279)
-    parser.add_argument("--no_frills", type=bool, help="Cut out optional plots to speed things up.", default=True)
+    parser.add_argument("--no_frills", type=str_to_bool, help="Cut out optional plots to speed things up.", default=True)
 
     # assign to desired variables
     args = parser.parse_args()
@@ -866,7 +871,7 @@ def main():
                 adj_matrix.loc[uf, neighbor] = 1
 
         # Save in a .csv
-        adj_matrix.to_csv(os.path.join(output_folder, f'index_{index}/adjacency_matrix_{spatial_aggregation}.csv'))
+        adj_matrix.to_csv(os.path.join(output_folder, f'index_{index}/adjacency_matrix.csv'))
 
 
         # Impute the case data
