@@ -1,5 +1,6 @@
 import io, sys, os
 import math
+import time
 import itertools
 import numpy as np
 import polars as pl
@@ -210,17 +211,11 @@ def main():
         os.makedirs(output_folder)
 
 
-    # ---------------------------------------------------------------------
-    # JAX / NumPyro configuration
-    # ---------------------------------------------------------------------
+    # configure JAX/numpyro
+    # >>>>>>>>>>>>>>>>>>>>>
 
     # Must be set before JAX initializes its backend.
-    # This gives NumPyro one CPU device per requested chain when using
-    # chain_method="parallel".
-    os.environ.setdefault(
-        "XLA_FLAGS",
-        f"--xla_force_host_platform_device_count={n_cores}"
-    )
+    os.environ.setdefault("XLA_FLAGS", f"--xla_force_host_platform_device_count={n_cores}")
 
     import jax
     import jax.numpy as jnp
@@ -232,7 +227,6 @@ def main():
     import numpyro
     import numpyro.distributions as dist
     from numpyro.infer import MCMC, NUTS
-
 
 
     # make an experimental design matrix
@@ -948,14 +942,14 @@ def main():
         ).to_pandas()
 
         # total number of serotyped cases
-        N_typed = cases.pivot(index="date", columns="cluster", values="DENV_serotyped_count").fillna(0).to_numpy().astype(int) # (n_months, n_regions)
+        N_typed = jnp.asarray(cases.pivot(index="date", columns="cluster", values="DENV_serotyped_count").fillna(0).to_numpy().astype(int)) # (n_months, n_regions)
 
         # number of cases per DENV serotype
         Y_list = []
         for col in ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']:
             Y_mat = cases.pivot(index="date", columns="cluster", values=col).to_numpy()
             Y_list.append(Y_mat)
-        Y_multinomial = np.nan_to_num(np.stack(Y_list, axis=2), nan=0).astype(int) # (n_months, n_regions, n_serotypes)
+        Y_multinomial = jnp.asarray(np.nan_to_num(np.stack(Y_list, axis=2), nan=0).astype(int)) # (n_months, n_regions, n_serotypes)
 
         # lengths
         n_months = Y_multinomial.shape[0]
@@ -978,10 +972,7 @@ def main():
         n_basis = X.shape[1]
         X = jnp.asarray(X)
 
-        N_typed_jax = jnp.asarray(N_typed)
-        Y_multinomial_jax = jnp.asarray(Y_multinomial)
-
-        # construct model coordinates
+        # construct model coordinates and dimensions
         coords = {
             "date": cases['date'].unique(),
             "cluster": cases["cluster"].unique(),
@@ -990,188 +981,65 @@ def main():
             "spline_basis": np.arange(n_basis),
         }
 
+        dims={
+            "beta_raw": ["spline_basis", "serotype_nonref", "cluster"],
+            "beta": ["cluster", "serotype_nonref", "spline_basis"],
+            "theta_log": ["date", "cluster", "serotype"],
+            "p": ["date", "cluster", "serotype"],
+            "phi": ["date", "cluster"],
+            "d_region": ["cluster"],
+            "Y_obs": ["date", "cluster", "serotype"]
+        }
+        
+        # numpyro model
+        def imputation_model(X, I, W, D, N_typed, Y_multinomial, n_basis, n_months, n_regions, n_serotypes):
 
-        def imputation_model(
-            X,
-            I,
-            W,
-            D,
-            N_typed,
-            Y_multinomial,
-            n_basis,
-            n_months,
-            n_regions,
-            n_serotypes,
-        ):
-
-            # -----------------------------------------------------------
             # Spatially correlated spline coefficients
-            # -----------------------------------------------------------
+            psi = numpyro.sample("psi", dist.Beta(3.0, 3.0))
+            sigma_beta = numpyro.sample("sigma_beta", dist.HalfNormal(1.0))
 
-            psi = numpyro.sample(
-                "psi",
-                dist.Beta(3.0, 3.0)
-            )
-
-            sigma_beta = numpyro.sample(
-                "sigma_beta",
-                dist.HalfNormal(1.0)
-            )
-
-            Q = (
-                (1.0 - psi) * I
-                + psi * (D - W)
-            )
-
+            Q = (1.0 - psi) * I + psi * (D - W)
             L_Q = jnp.linalg.cholesky(Q)
+            L_cov = jnp.linalg.solve(L_Q, I)
 
-            L_cov = jnp.linalg.solve(
-                L_Q,
-                I
-            )
+            beta_raw = numpyro.sample("beta_raw", dist.Normal(0.0, 1.0).expand((n_basis, n_serotypes - 1, n_regions)))
+            beta_corr = (sigma_beta * jnp.einsum("ij,bsj->bsi", L_cov, beta_raw))
+            beta = numpyro.deterministic("beta", jnp.transpose(beta_corr, (2, 1, 0)))
 
-            beta_raw = numpyro.sample(
-                "beta_raw",
-                dist.Normal(0.0, 1.0).expand(
-                    (n_basis, n_serotypes - 1, n_regions)
-                )
-            )
-
-            beta_corr = (
-                sigma_beta
-                * jnp.einsum(
-                    "ij,bsj->bsi",
-                    L_cov,
-                    beta_raw
-                )
-            )
-
-            beta = jnp.transpose(
-                beta_corr,
-                (2, 1, 0)
-            )
-
-            numpyro.deterministic(
-                "beta",
-                beta
-            )
-
-            # -----------------------------------------------------------
             # Splined latent state
-            # -----------------------------------------------------------
+            theta = jnp.einsum("tb,rsb->trs", X, beta)
+            theta_log = jnp.concatenate([theta, jnp.zeros((n_months, n_regions, 1), dtype=theta.dtype)], axis=2)
+            numpyro.deterministic("theta_log", theta_log)
 
-            theta = jnp.einsum(
-                "tb,rsb->trs",
-                X,
-                beta
-            )
+            # Latent serotype probabilities
+            numpyro.deterministic("p", jnn.softmax(theta_log, axis=2))
 
-            theta_log = jnp.concatenate(
-                [
-                    theta,
-                    jnp.zeros(
-                        (n_months, n_regions, 1),
-                        dtype=theta.dtype
-                    ),
-                ],
-                axis=2
-            )
-
-            numpyro.deterministic(
-                "theta_log",
-                theta_log
-            )
-
-            # -----------------------------------------------------------
-            # Serotype probabilities
-            # -----------------------------------------------------------
-
-            p = jnn.softmax(
-                theta_log,
-                axis=2
-            )
-
-            numpyro.deterministic(
-                "p",
-                p
-            )
-
-            # -----------------------------------------------------------
             # Hierarchical overdispersion
-            # -----------------------------------------------------------
-
-            d_region_hierarch = numpyro.sample(
-                "d_region_hierarch",
-                dist.HalfNormal(0.1)
-            )
-
-            d_region = numpyro.sample(
-                "d_region",
-                dist.HalfNormal(
-                    d_region_hierarch
-                ).expand((n_regions,))
-            )
-
-            phi_region = (
-                1.0
-                / jnp.maximum(
-                    d_region,
-                    1e-12
-                )
-            )
-
-            phi = jnp.broadcast_to(
-                phi_region[None, :],
-                (n_months, n_regions)
-            )
-
-            numpyro.deterministic(
-                "phi",
-                phi
-            )
-
+            d_region_hierarch = numpyro.sample("d_region_hierarch", dist.HalfNormal(0.1))
+            d_region = numpyro.sample("d_region", dist.HalfNormal(d_region_hierarch).expand((n_regions,)))
+            phi_region = (1.0/ jnp.maximum(d_region, 1e-12))
+            phi = numpyro.deterministic("phi", jnp.broadcast_to(phi_region[None, :], (n_months, n_regions)))
             alpha = phi[:, :, None] * p
 
-            # -----------------------------------------------------------
             # Observed serotype counts
-            # -----------------------------------------------------------
+            numpyro.sample("Y_obs", dist.DirichletMultinomial(concentration=alpha, total_count=N_typed), obs=Y_multinomial)
 
-            numpyro.sample(
-                "Y_obs",
-                dist.DirichletMultinomial(
-                    concentration=alpha,
-                    total_count=N_typed,
-                ),
-                obs=Y_multinomial,
-            )
+            pass
 
 
-        # ---------------------------------------------------------------
-        # NUTS
-        # ---------------------------------------------------------------
+        # Run NUTS sampler
+        kernel = NUTS(imputation_model, target_accept_prob=0.8)
 
-        kernel = NUTS(
-            imputation_model,
-            target_accept_prob=0.8,
-        )
-
-        mcmc = MCMC(
-            kernel,
-            num_warmup=n_tune,
-            num_samples=n_draw,
-            num_chains=n_cores,
-            chain_method="parallel",
-            progress_bar=False,
-        )
+        mcmc = MCMC(kernel, num_warmup=n_tune, num_samples=n_draw, num_chains=n_cores, chain_method="parallel", progress_bar=False)
 
         mcmc.run(
-            jax.random.PRNGKey(42),
+            jax.random.PRNGKey(jax.random.PRNGKey(int(time.time()))),
             X=X,
             I=I,
             W=W,
             D=D,
-            N_typed=N_typed_jax,
-            Y_multinomial=Y_multinomial_jax,
+            N_typed=N_typed,
+            Y_multinomial=Y_multinomial,
             n_basis=n_basis,
             n_months=n_months,
             n_regions=n_regions,
@@ -1179,50 +1047,7 @@ def main():
         )
 
         # Convert NumPyro output to ArviZ InferenceData
-        trace = arviz.from_numpyro(
-            mcmc,
-            coords=coords,
-            dims={
-                "beta_raw": [
-                    "spline_basis",
-                    "serotype_nonref",
-                    "cluster",
-                ],
-
-                "beta": [
-                    "cluster",
-                    "serotype_nonref",
-                    "spline_basis",
-                ],
-
-                "theta_log": [
-                    "date",
-                    "cluster",
-                    "serotype",
-                ],
-
-                "p": [
-                    "date",
-                    "cluster",
-                    "serotype",
-                ],
-
-                "phi": [
-                    "date",
-                    "cluster",
-                ],
-
-                "d_region": [
-                    "cluster",
-                ],
-
-                "Y_obs": [
-                    "date",
-                    "cluster",
-                    "serotype",
-                ],
-            },
-        )
+        trace = arviz.from_numpyro(mcmc, coords=coords, dims=dims)
 
         # save traces
         variables2plot = ['sigma_beta', 'psi', 'd_region_hierarch', 'd_region']
