@@ -81,8 +81,8 @@ demo = demo.groupby('cluster', as_index=False)['population'].sum()
 # Compute births and death rates per cluster
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-births = pd.read_csv(os.path.join(abs_dir,'../../data/interim/demographics/births_mun_1999-2026.csv'))
-deaths = pd.read_csv(os.path.join(abs_dir,'../../data/interim/demographics/deaths_mun_1999-2026.csv'))
+births = pd.read_csv(os.path.join(abs_dir,'../../data/interim/demographics/births_mun_1998-2026.csv'))
+deaths = pd.read_csv(os.path.join(abs_dir,'../../data/interim/demographics/deaths_mun_1998-2026.csv'))
 bd = births.merge(deaths, on=['CD_MUN', 'year', 'population'], how='left')
 
 bd = bd.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')

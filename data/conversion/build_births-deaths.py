@@ -88,11 +88,15 @@ for bd in ['births', 'deaths']:
 
     intercept = y_mean - slope * x_mean
 
+    # insert 1999
     df.insert(0, "1999", intercept + slope * 1999)
-
     df["1999"] = df["1999"].fillna(0)
-
     df["1999"] = df["1999"].round().clip(lower=0)
+
+    # insert 1998
+    df.insert(0, "1998", intercept + slope * 1998)
+    df["1998"] = df["1998"].fillna(0)
+    df["1998"] = df["1998"].round().clip(lower=0)
 
     # perform a regression on the last five years, extrapolate to find 2025 and 2026
     X = np.array([2020, 2021, 2022, 2023, 2024], dtype=float)
@@ -135,4 +139,4 @@ for bd in ['births', 'deaths']:
     df = df.merge(pop, on=['CD_MUN','year'], how='left')
 
     # save result
-    df.to_csv(f'../interim/demographics/{bd}_mun_1999-2026.csv', index=False)
+    df.to_csv(f'../interim/demographics/{bd}_mun_1998-2026.csv', index=False)
