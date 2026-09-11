@@ -24,4 +24,6 @@ for i in $(seq 1 "$N"); do
         "$cores" \
         "$spatial_aggregation")
 
+    sleep(1)
+
 done
