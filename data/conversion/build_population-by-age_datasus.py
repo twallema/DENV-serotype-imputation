@@ -99,7 +99,7 @@ df = df.dropna()
 # sort dataframe
 df = df.sort_values(by=['CD_MUN', 'age', 'year'])
 
-# extrapolate results to 1999
+# extrapolate results to 1998 and 1999
 X = np.array([2000, 2001, 2002, 2003, 2004], dtype=float)
 Y = df.loc[df['year'].isin(["2000", "2001", "2002", "2003", "2004"]), ('CD_MUN', 'age', 'year', 'population')]['population'].to_numpy().reshape([5570,81,5])
 
@@ -107,8 +107,8 @@ x = X - X.mean()
 slope = np.sum(x * Y, axis=2) / np.sum(x**2)
 intercept = Y.mean(axis=2) - slope * X.mean()
 
+# do 1999
 prediction = np.round(np.maximum(intercept + slope * 1999, 0))
-
 muns = np.sort(df["CD_MUN"].unique())
 ages = np.sort(df["age"].unique())
 df1999 = pd.DataFrame({
@@ -117,8 +117,19 @@ df1999 = pd.DataFrame({
     "year": 1999,
     "population": prediction.ravel()
 })
-
 df = pd.concat([df1999, df], ignore_index=True)
+
+# do 1998
+prediction = np.round(np.maximum(intercept + slope * 1998, 0))
+muns = np.sort(df["CD_MUN"].unique())
+ages = np.sort(df["age"].unique())
+df1998 = pd.DataFrame({
+    "CD_MUN": np.repeat(muns, len(ages)),
+    "age": np.tile(ages, len(muns)),
+    "year": 1998,
+    "population": prediction.ravel()
+})
+df = pd.concat([df1998, df], ignore_index=True)
 
 # extrapolate results to 2026
 X = np.array([2021, 2022, 2023, 2024, 2025], dtype=float)
