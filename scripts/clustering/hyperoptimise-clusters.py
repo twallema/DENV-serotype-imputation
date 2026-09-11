@@ -995,7 +995,7 @@ def main():
 
         # NUTS
         with model:
-            trace = pm.sample(n_draw, tune=n_tune, target_accept=0.8, chains=4, cores=4, init='adapt_diag', progressbar=True, mp_ctx=mp.get_context("spawn"), blas_cores=1)
+            trace = pm.sample(n_draw, tune=n_tune, target_accept=0.8, chains=n_cores, cores=n_cores, init='adapt_diag', progressbar=True, mp_ctx=mp.get_context("spawn"), blas_cores=1)
 
 
         # save traces
