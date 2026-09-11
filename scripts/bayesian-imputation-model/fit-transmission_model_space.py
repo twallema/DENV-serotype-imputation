@@ -16,12 +16,12 @@ pytensor.config.cxx = '/usr/bin/clang++'
 pytensor.config.on_opt_error = "ignore"
 
 # included clusters
-included_clusters = [11, 12, 13, 14]
+included_clusters = [9,10]
 
 # analysis startdate
 start_year = 1998
 start_month = 9
-end_year = 2026
+end_year = 2008
 assert start_year >= 1998, "earliest start_year is 1998."
 
 # helper function for argument parsing
@@ -519,6 +519,11 @@ def ar1_step(eps_t, u_prev, rho, sigma_ar):
     u_t = rho * u_prev + sigma_ar * eps_t
     return u_t
 
+# TODO: hierarchical initial condition across clusters to improve flexibility
+# TODO: Incorporate the serotype data
+# TODO: Refactor to diffrax + NumPyro like flu model
+# TODO: Add MAP optimisation
+
 with pm.Model() as model:
 
     # ----------------
@@ -713,20 +718,20 @@ with pm.Model() as model:
 ## Running the model ##
 #######################
 
+with model:
+      map_estimate = pm.find_MAP(maxeval=5000,
+          start={'f_P': 0.33, 'f_P2': 0.10, 'pi_d': pt.as_tensor([0.1, 0.2, 0.7]), 'pi_mono2': 0.25,
+                    'omega': 36, 'mu_f1': 0.8, 'mu_f2': 0.8, 'f3': 0.5, 'kappa0_logit': pm.math.logit(0.1),
+                    'mu_beta': np.log(2.5) * pt.ones(n_clusters), 'A_beta': 1 * pt.ones(n_clusters), 'phi_beta': 1.5 * pt.ones(n_clusters),
+                    'alpha_inv': 0.5})
+
 # NUTS
 draws=5
 with model:
     trace = pm.sample(draws, tune=5, target_accept=0.8,
                      chains=chains, cores=chains, init='adapt_diag', progressbar=True,
-                     initvals=chains*[{'f_P': 0.25, 'f_P2': 0.75, 'pi_d': pt.as_tensor([0.1, 0.2, 0.7]), 'pi_mono2': 0.75,
-                                       'omega': 24, 'mu_f1': 0.8, 'mu_f2': 0.8, 'f3': 0.5, 'kappa0_logit': pm.math.logit(0.1),
-                                       'mu_beta': np.log(2.5) * pt.ones(n_clusters), 'A_beta': 1 * pt.ones(n_clusters), 'phi_beta': 1.5 * pt.ones(n_clusters),
-                                       'alpha_inv': 0.5}],
+                     initvals=chains*[map_estimate],
                      idata_kwargs={'log_likelihood':True})
-
-import sys
-sys.exit()
-
 
 #######################
 ## Running the model ##
@@ -735,14 +740,10 @@ sys.exit()
 # Plot posterior predictive checks
 with model:
     posterior_predictive = pm.sample_posterior_predictive(trace)
-arviz.plot_ppc(posterior_predictive)
-os.makedirs(f'{output_folder}/fig/posterior_predictive', exist_ok=True)
-plt.savefig(f'{output_folder}/fig/posterior_predictive/ppc.pdf')
-plt.close()    
 
 # Assume `trace` is the result of pm.sample()
-arviz.to_netcdf(trace, f"{output_folder}/trace.nc")
-arviz.to_netcdf(posterior_predictive, f"{output_folder}/posterior_predictive.nc")
+trace.to_netcdf(f"{output_folder}/trace.nc")
+posterior_predictive.to_netcdf(f"{output_folder}/posterior_predictive.nc")
 
 # Traceplot
 variables2plot = [
@@ -752,7 +753,7 @@ variables2plot = [
 # Save traces
 os.makedirs(f'{output_folder}/fig/trace', exist_ok=True)
 for var in variables2plot:
-    arviz.plot_trace(trace, var_names=[var]) 
+    arviz.plot_trace_dist(trace, var_names=[var], compact=True, combined=True, kind='kde') 
     plt.savefig(f'{output_folder}/fig/trace/trace-{var}_typing-effort-model.pdf')
     plt.close()
 

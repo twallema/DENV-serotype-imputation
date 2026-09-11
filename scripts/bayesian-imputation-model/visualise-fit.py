@@ -9,13 +9,13 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 
 # included clusters
-included_clusters = [11, 12, 13, 16]
+included_clusters = [9, 10]
 
 # analysis startdate
-start_year = 2000
+start_year = 1998
 start_month = 9
-end_year = 2016
-assert start_year >= 1999, "earliest start_year is 1999."
+end_year = 2008
+assert start_year >= 1998, "earliest start_year is 1998."
 
 # helper function for argument parsing
 def str_to_bool(value):
@@ -27,8 +27,6 @@ def str_to_bool(value):
 parser = argparse.ArgumentParser()
 parser.add_argument("-ID", type=str, help="Identifier of the pipeline run.")
 parser.add_argument("-spatial_aggregation", type=str, help="Spatial aggregation clustering was performed on.")
-#parser.add_argument("-p", type=int, help="Order of AR(p) process.", default=1)
-#parser.add_argument("-q", type=int, help="Order of MA(q) process.", default=1)
 args = parser.parse_args()
 
 # assign to desired variables
@@ -37,7 +35,7 @@ ID = args.ID
 
 # pipeline output folder
 abs_dir = os.path.dirname(__file__) # make sure all referenced paths are relative to the lcoation of this file and not the terminal's pwd
-output_folder = os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/bayesian-imputation-model_output/new_model/')
+output_folder = os.path.join(abs_dir, f'../../data/interim/clustering_pipeline/{ID}/transmission-model_output')
 # check if output dir exists, if not, raise an error
 if not os.path.exists(output_folder):
     raise ValueError('result not found.')
@@ -59,20 +57,20 @@ trace = arviz.from_netcdf(f"{output_folder}/trace.nc")
 # Load the posterior samples
 posterior_predictive = arviz.from_netcdf(f"{output_folder}/posterior_predictive.nc")
 
-###########################################################################
-## Preparing the incidence data (excludes within-sample validation data) ##
-###########################################################################
-
-# Load left out spatial units
-validation_labels = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/validation_labels.csv')).squeeze()
+########################
+## Preparing the data ##
+########################
 
 # Load clusters
-clusters = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/pipeline_output/{ID}/clusters/clusters_{spatial_aggregation}.csv'))
-region = clusters.columns.to_list()[0]
+# >>>>>>>>>>>>>
+
+clusters = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/clustering_pipeline/{ID}/clusters.csv'))
 
 # Load mapping
+# >>>>>>>>>>>>
+
 mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
-mapping = mapping.merge(clusters[[region, 'cluster']], on=region, how='left')
+mapping = mapping.merge(clusters[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
 
 # Get demography in start_year per cluster
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -82,33 +80,11 @@ demo = demo.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
 demo = demo.groupby('cluster', as_index=False)['population'].sum()
 
 # Fetch incidence data
-df = pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet").collect().to_pandas()
+# ~~~~~~~~~~~~~~~~~~~~
 
-# 1. Check if all columns are present
-sero_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4"]
-required_cols = ["CD_MUN", "date", "DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
-assert all(col in df.columns for col in required_cols)
+df = pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1998_2026-month-mun-age_group-no_diagnostics.parquet").collect().to_pandas()
 
-# 2. Sort for safety
-df = df.sort_values(["CD_MUN", "date"]).reset_index(drop=True)
-
-# 3. Take only from start_year to end_year
-df = df[((df['date'] > datetime(start_year,start_month,1)) & (df['date'] <= datetime(end_year,12,31)))]
-
-# 4. Remove within-sample validation municipalities
-## Save validation data
-df_validation = df.loc[df['CD_MUN'].isin(validation_labels.values)]
-## Add the cluster label
-mapping = mapping[['CD_MUN', f'{region}']]
-mapping = clusters.merge(mapping, on=f'{region}', how="left")
-df_validation = df_validation.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
-## Remove from visualisation dataset
-df.loc[df['CD_MUN'].isin(validation_labels.values), ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'DENV_total'] ] = np.nan
-
-# 5. Aggregate to the spatial clusters
-# make right mapping
-mapping = mapping[['CD_MUN', f'{region}']]
-mapping = clusters.merge(mapping, on=f'{region}', how="left")
+# Aggregate to the spatial clusters
 # do DENV_total first
 df_with_mapping = df.merge(mapping[["CD_MUN", "cluster"]], on="CD_MUN", how="left")
 ## custom aggregation function
@@ -140,37 +116,50 @@ agg_2.loc[mask] = agg_2.loc[mask].fillna(0)
 ## merge both dataframes
 df = agg_1.merge(agg_2)
 
-# 6. Add number of serotyped cases
+# Add number of serotyped cases
+sero_cols = ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']
 df["N_typed"] = df[sero_cols].sum(axis=1, skipna=False)           # if serotypes available --> sum them
 df.loc[df[sero_cols].isna().all(axis=1), 'N_typed'] = np.nan      # if all serotypes are Nan --> N_typed = 0 --> Wait, I don't think this is appropriate.
 
-# 7. Compute delta (typing fraction)
+# Compute delta (typing fraction)
 df["delta"] = df["N_typed"] / df["DENV_total"]
 df['delta'] = df['delta'].where(df['N_typed'] > 0, np.nan) # When N_typed == 0, we don't know delta — mark as missing
 df["delta"] = df["delta"].clip(lower=1e-12, upper=1 - 1e-12)
 
-# 8. Compute year and month index
+# Only do first X clusters
+df = df[df['cluster'].isin(included_clusters)]
+
+# Take only from start_year to end_year
+df_alldates = df.copy()
+df = df[((df['date'] > datetime(start_year,start_month,1)) & (df['date'] <= datetime(end_year,12,31)))]
+
+# Compute year and month index
 df["year"] = pd.to_datetime(df["date"]).dt.year
 df["year_idx"] = df["year"] - df["year"].min()
 df['month_idx'], _ = pd.factorize(df['date'])
 
-# only do first X clusters
-df = df[df['cluster'].isin(included_clusters)]
+# # 9. Build PyMC arrays
+# # --- For DirichletMultinomial model ---
+# # Total number of typed cases
+# N_typed = df.pivot(index="date", columns="cluster", values="N_typed").to_numpy().astype(int)    # (n_months, n_clusters)
+# # Number of cases per DENV serotype
+# Y_list = []
+# for col in sero_cols:
+#     Y_mat = df.pivot(index="date", columns="cluster", values=col).to_numpy()
+#     Y_list.append(Y_mat)
+# Y_multinomial = np.stack(Y_list, axis=2).astype(int)    # (n_months, n_clusters, n_serotypes)
 
-# 9. Build PyMC arrays
-# --- For Multinomial model (subtypes, only when typed) ---
-# Total number of typed cases
-N_typed = df.pivot(index="date", columns="cluster", values="N_typed").to_numpy().astype(int)    # (n_months, n_clusters)
-# Number of cases per DENV serotype
-Y_list = []
-for col in sero_cols:
-    Y_mat = df.pivot(index="date", columns="cluster", values=col).to_numpy()
-    Y_list.append(Y_mat)
-Y_multinomial = np.stack(Y_list, axis=2).astype(int)    # (n_months, n_clusters, n_serotypes)
-# --- Indices ---
-cluster_idx = df["cluster"].to_numpy().astype(int)
-month_idx = df["month_idx"].to_numpy().astype(int)
-year_idx = df["year_idx"].to_numpy().astype(int)
+# # --- For imunity model ---
+# # Total number of dengue cases
+# DENV_total = df.pivot(index="date", columns="cluster", values="DENV_total").to_numpy().astype(int)  # (n_months, n_clusters)
+# # Initial demography
+# demo = demo[demo['cluster'].isin(included_clusters)]['population'].values 
+
+# # --- Indices ---
+# cluster_idx = df["cluster"].to_numpy().astype(int)
+# month_idx = df["month_idx"].to_numpy().astype(int)
+# year_idx = df["year_idx"].to_numpy().astype(int)
+
 # --- Lengths ---
 n_clusters = int(len(df['cluster'].unique()))
 n_months = int(len(df["month_idx"].unique()))
@@ -206,44 +195,6 @@ output_mun = output_mun.merge(
 
 # save result
 output_mun.to_parquet(f'{output_folder}/DENV-serotypes-imputed_1996-2025_monthly.parquet', compression='zstd')
-
-
-##############################################
-## Compute within-sample validation metrics ##
-##############################################
-
-# Extract p_i per municipality
-df_p = output_mun.loc[output_mun['CD_MUN'].isin(validation_labels.values)][['date', 'CD_MUN', 'p_1', 'p_2', 'p_3', 'p_4']]
-
-# Extract phi per cluster
-phi_mean = df[['cluster','date']]
-phi_mean['phi'] = trace['posterior']['phi'].mean(dim=['chain','draw']).values.flatten()
-phi_mean = phi_mean.set_index(['cluster','date'])
-phi_mean = phi_mean.groupby(by='cluster')['phi'].mean()
-
-# Merge p_i and phi --> compute alpha_i = p_i * phi
-df_p = df_p.merge(mapping[['CD_MUN', 'cluster']], on='CD_MUN', how='left')
-df_p = df_p.merge(phi_mean, on='cluster', how='left')
-df_p[['a_1', 'a_2', 'a_3', 'a_4']] = df_p[['p_1', 'p_2', 'p_3', 'p_4']].values * df_p[['phi']].values
-
-# Only evaluate log-likelihood when data are valid
-mask = ~df_validation[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].isna().all(axis=1)
-df_validation = df_validation.dropna(subset=['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4'], how='all')
-df_validation = df_validation.fillna(0)
-df_p = df_p.loc[mask]
-
-# Compute log likelihood
-from scipy.stats import dirichlet_multinomial
-x = df_validation[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].values
-n = np.sum(x, axis=1)
-alpha = df_p[['a_1', 'a_2', 'a_3', 'a_4']].values
-logp = dirichlet_multinomial.logpmf(x=x, alpha=alpha, n=n)
-
-# Save result
-df_validation['ll_dirichletmultinomial'] = logp
-df_validation[['p_1', 'p_2', 'p_3', 'p_4']] = df_p[['p_1', 'p_2', 'p_3', 'p_4']].values
-df_validation['phi'] = df_p[['phi']].values
-df_validation[['date', 'CD_MUN', 'cluster', 'phi', 'DENV_1', 'DENV_2', 'DENV_3', 'DENV_4', 'p_1', 'p_1', 'p_3', 'p_4', 'll_dirichletmultinomial']].to_csv(f'{output_folder}/validation_loglikelihood.csv', index=False)
 
 
 ################################################
