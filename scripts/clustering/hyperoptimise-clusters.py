@@ -1039,7 +1039,7 @@ def main():
 
         kernel = NUTS(imputation_model, target_accept_prob=0.8)
 
-        mcmc = MCMC(kernel, num_warmup=n_tune, num_samples=n_draw, num_chains=n_cores, chain_method="parallel", progress_bar=True)
+        mcmc = MCMC(kernel, num_warmup=n_tune, num_samples=n_draw, num_chains=n_cores, chain_method="parallel", progress_bar=False)
 
         mcmc.run(
             jax.random.PRNGKey(42),
