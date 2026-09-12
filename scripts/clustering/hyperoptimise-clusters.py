@@ -796,7 +796,7 @@ def main():
         # Save clustermap
         import seaborn as sns
         sns.clustermap(1-distance, cmap='viridis')
-        plt.savefig(os.path.join(output_folder, f'index_{index}/clustermap_probmatrix_{spatial_aggregation}.svg'))
+        plt.savefig(os.path.join(output_folder, f'index_{index}/clustermap_probmatrix_{spatial_aggregation}.png'), dpi=400)
         plt.close()
 
         # visualise clusters on a map
@@ -815,7 +815,7 @@ def main():
         ax.axis("off")
         fig.suptitle('Consensus clusters')
         plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, f'index_{index}/consensus_clusters_{spatial_aggregation}.png'), dpi=600)
+        plt.savefig(os.path.join(output_folder, f'index_{index}/consensus_clusters_{spatial_aggregation}.png'), dpi=400)
         plt.close()
 
         # Save the consensus clusters (hierarchical)
