@@ -14,11 +14,11 @@ from contextlib import redirect_stdout
 from scipy.special import softmax
 from glasbey import create_palette
 from matplotlib.colors import ListedColormap
-from sklearn.cluster import SpectralClustering
 from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform
 import argparse
 from scipy.stats import percentileofscore
+from datetime import timedelta
 
 # bayesian imputation model
 import arviz
@@ -894,6 +894,8 @@ def main():
         # Impute the case data
         # >>>>>>>>>>>>>>>>>>>>
 
+        print('\ncompiling numpyro model\n')
+
         # write a NaN-retaining aggregation function
         agg_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
         agg_exprs = []
@@ -1028,6 +1030,11 @@ def main():
 
 
         # Run NUTS sampler
+        start_dt = datetime.now()
+        start_time = time.time()
+
+        print(f"starting the NUTS sampler at: {start_dt.strftime('%Y-%m-%d %H:%M:%S')} ..")
+
         kernel = NUTS(imputation_model, target_accept_prob=0.8)
 
         mcmc = MCMC(kernel, num_warmup=n_tune, num_samples=n_draw, num_chains=n_cores, chain_method="parallel", progress_bar=False)
@@ -1045,6 +1052,19 @@ def main():
             n_regions=n_regions,
             n_serotypes=n_serotypes,
         )
+
+        # Chain collection prevents jax asynchronous dispatch from weirdly sequencing printouts
+        time.sleep(1)
+        jax.tree_util.tree_map(lambda x: x.block_until_ready(), mcmc.get_samples())
+
+        # Record the end timestamp and compute elapsed time
+        end_dt = datetime.now()
+        elapsed_seconds = time.time() - start_time
+        elapsed_formatted = str(timedelta(seconds=int(elapsed_seconds)))
+
+        print(f"..and finished sampling at: {end_dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        print(f"total elapsed time: {elapsed_formatted}\n")
+        print(f"there were {int(jnp.sum(mcmc.get_extra_fields()["diverging"]))} divergent transitions\n")
 
         # Convert NumPyro output to ArviZ InferenceData
         trace = arviz.from_numpyro(mcmc, coords=coords, dims=dims)
