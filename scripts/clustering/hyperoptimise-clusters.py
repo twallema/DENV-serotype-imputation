@@ -174,8 +174,8 @@ def main():
 
     season_start_month = 9
 
-    n_draw = 50
-    n_tune = 100
+    n_draw = 25
+    n_tune = 75
 
     # parse arguments
     # >>>>>>>>>>>>>>>
@@ -896,7 +896,7 @@ def main():
 
         print('\ncompiling numpyro model\n')
         sys.stdout.flush()
-        
+
         # write a NaN-retaining aggregation function
         agg_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
         agg_exprs = []
@@ -1039,7 +1039,7 @@ def main():
 
         kernel = NUTS(imputation_model, target_accept_prob=0.8)
 
-        mcmc = MCMC(kernel, num_warmup=n_tune, num_samples=n_draw, num_chains=n_cores, chain_method="parallel", progress_bar=False)
+        mcmc = MCMC(kernel, num_warmup=n_tune, num_samples=n_draw, num_chains=n_cores, chain_method="parallel", progress_bar=True)
 
         mcmc.run(
             jax.random.PRNGKey(42),
