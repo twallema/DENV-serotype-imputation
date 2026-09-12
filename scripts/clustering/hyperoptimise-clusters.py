@@ -174,7 +174,7 @@ def main():
 
     season_start_month = 9
 
-    n_draw = 100
+    n_draw = 50
     n_tune = 100
 
     # parse arguments
@@ -895,7 +895,8 @@ def main():
         # >>>>>>>>>>>>>>>>>>>>
 
         print('\ncompiling numpyro model\n')
-
+        sys.stdout.flush()
+        
         # write a NaN-retaining aggregation function
         agg_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
         agg_exprs = []
@@ -1034,6 +1035,7 @@ def main():
         start_time = time.time()
 
         print(f"starting the NUTS sampler at: {start_dt.strftime('%Y-%m-%d %H:%M:%S')} ..")
+        sys.stdout.flush()
 
         kernel = NUTS(imputation_model, target_accept_prob=0.8)
 
@@ -1065,6 +1067,7 @@ def main():
         print(f"..and finished sampling at: {end_dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
         print(f"total elapsed time: {elapsed_formatted}\n")
         print(f"there were {int(jnp.sum(mcmc.get_extra_fields()["diverging"]))} divergent transitions\n")
+        sys.stdout.flush()
 
         # Convert NumPyro output to ArviZ InferenceData
         trace = arviz.from_numpyro(mcmc, coords=coords, dims=dims)
