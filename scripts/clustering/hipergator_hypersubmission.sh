@@ -3,7 +3,7 @@
 run_id="CD_RGINT_v4_mean"
 spatial_aggregation="rgint"
 
-N=25
+N=50
 cores=8
 time="120:00:00"
 
@@ -24,6 +24,6 @@ for i in $(seq 1 "$N"); do
         "$cores" \
         "$spatial_aggregation")
 
-    sleep(1)
+    sleep 0.5
 
 done
