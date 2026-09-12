@@ -3,9 +3,9 @@
 run_id="CD_RGINT_v4_mean"
 spatial_aggregation="rgint"
 
-N=25
-cores=4
-time="100:00:00"
+N=50
+cores=8
+time="120:00:00"
 
 for i in $(seq 1 "$N"); do
 
@@ -17,11 +17,13 @@ for i in $(seq 1 "$N"); do
         --cpus-per-task "$cores" \
         --time="$time" \
         --job-name="${run_id}_repeat_${repeat_id}" \
-        --mem=8gb \
+        --mem-per-cpu=4gb \
         hipergator_submit_hyperoptimise-clusters_single.sh \
         "$run_id" \
         "$repeat_id" \
         "$cores" \
         "$spatial_aggregation")
+
+    sleep 0.5
 
 done

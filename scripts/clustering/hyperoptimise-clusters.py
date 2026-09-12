@@ -1,5 +1,6 @@
 import io, sys, os
 import math
+import time
 import itertools
 import numpy as np
 import polars as pl
@@ -13,16 +14,14 @@ from contextlib import redirect_stdout
 from scipy.special import softmax
 from glasbey import create_palette
 from matplotlib.colors import ListedColormap
-from sklearn.cluster import SpectralClustering
 from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform
 import argparse
 from scipy.stats import percentileofscore
+from datetime import timedelta
 
 # bayesian imputation model
 import arviz
-import pymc as pm
-import pytensor.tensor as pt
 from patsy import dmatrix
 
 # Scripts follows canonical "spawn" multiprocessing structure
@@ -176,7 +175,7 @@ def main():
     season_start_month = 9
 
     n_draw = 25
-    n_tune = 25
+    n_tune = 75
 
     # parse arguments
     # >>>>>>>>>>>>>>>
@@ -210,6 +209,24 @@ def main():
     # check if output dir exists, if not, make it
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
+
+
+    # configure JAX/numpyro
+    # >>>>>>>>>>>>>>>>>>>>>
+
+    # Must be set before JAX initializes its backend.
+    os.environ.setdefault("XLA_FLAGS", f"--xla_force_host_platform_device_count={n_cores}")
+
+    import jax
+    import jax.numpy as jnp
+    import jax.nn as jnn
+
+    # Match the double-precision behavior typically used by PyMC/PyTensor.
+    jax.config.update("jax_enable_x64", True)
+
+    import numpyro
+    import numpyro.distributions as dist
+    from numpyro.infer import MCMC, NUTS
 
 
     # make an experimental design matrix
@@ -877,6 +894,9 @@ def main():
         # Impute the case data
         # >>>>>>>>>>>>>>>>>>>>
 
+        print('\ncompiling numpyro model\n')
+        sys.stdout.flush()
+
         # write a NaN-retaining aggregation function
         agg_cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4", "DENV_total"]
         agg_exprs = []
@@ -925,14 +945,14 @@ def main():
         ).to_pandas()
 
         # total number of serotyped cases
-        N_typed = cases.pivot(index="date", columns="cluster", values="DENV_serotyped_count").fillna(0).to_numpy().astype(int) # (n_months, n_regions)
+        N_typed = jnp.asarray(cases.pivot(index="date", columns="cluster", values="DENV_serotyped_count").fillna(0).to_numpy().astype(int)) # (n_months, n_regions)
 
         # number of cases per DENV serotype
         Y_list = []
         for col in ['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']:
             Y_mat = cases.pivot(index="date", columns="cluster", values=col).to_numpy()
             Y_list.append(Y_mat)
-        Y_multinomial = np.nan_to_num(np.stack(Y_list, axis=2), nan=0).astype(int) # (n_months, n_regions, n_serotypes)
+        Y_multinomial = jnp.asarray(np.nan_to_num(np.stack(Y_list, axis=2), nan=0).astype(int)) # (n_months, n_regions, n_serotypes)
 
         # lengths
         n_months = Y_multinomial.shape[0]
@@ -940,9 +960,9 @@ def main():
         n_serotypes = Y_multinomial.shape[2]
 
         # precision matrix
-        I = pt.eye(len(adj_matrix))
-        W = pt.as_tensor_variable(adj_matrix)
-        D = pt.diag(pt.sum(W, axis=1))
+        I = jnp.eye(len(adj_matrix))
+        W = jnp.asarray(adj_matrix)
+        D = jnp.diag(jnp.sum(W, axis=1))
 
         # build a spline basis
         t = np.arange(n_months)
@@ -953,50 +973,104 @@ def main():
             )
         )
         n_basis = X.shape[1]
-        X = pt.constant(X)
+        X = jnp.asarray(X)
 
-        # construct model coordinates
+        # construct model coordinates and dimensions
         coords = {
             "date": cases['date'].unique(),
             "cluster": cases["cluster"].unique(),
             "serotype": np.array([1, 2, 3, 4]),
+            "serotype_nonref": np.array([1, 2, 3]),
             "spline_basis": np.arange(n_basis),
         }
 
-        # build pymc imputation model
-        with pm.Model(coords=coords) as model:
+        dims={
+            "beta_raw": ["spline_basis", "serotype_nonref", "cluster"],
+            "beta": ["cluster", "serotype_nonref", "spline_basis"],
+            "theta_log": ["date", "cluster", "serotype"],
+            "p": ["date", "cluster", "serotype"],
+            "phi": ["date", "cluster"],
+            "d_region": ["cluster"],
+            "Y_obs": ["date", "cluster", "serotype"]
+        }
+        
+        # numpyro model
+        def imputation_model(X, I, W, D, N_typed, Y_multinomial, n_basis, n_months, n_regions, n_serotypes):
 
-            # spatially correlated spline coefficients
-            psi = pm.Beta("psi", 3, 3)
-            sigma_beta = pm.HalfNormal("sigma_beta", 1)
-            Q = (1 - psi) * I + psi * (D - W)
-            L_Q = pt.linalg.cholesky(Q)
-            L_cov = pt.linalg.solve(L_Q, I)
+            # Spatially correlated spline coefficients
+            psi = numpyro.sample("psi", dist.Beta(3.0, 3.0))
+            sigma_beta = numpyro.sample("sigma_beta", dist.HalfNormal(1.0))
 
-            beta_raw = pm.Normal("beta_raw", 0, 1, shape=(n_basis, n_serotypes - 1, n_regions))
-            beta_corr = sigma_beta * pt.einsum("ij,bsj->bsi", L_cov, beta_raw)
-            beta = pm.Deterministic("beta", beta_corr.dimshuffle(2, 1, 0))
-            
-            # build splined latent state 
-            theta_log = pm.Deterministic("theta_log", pt.concatenate([pt.einsum("tb,rsb->trs", X, beta), pt.zeros((n_months,n_regions,1))], axis=2), dims=("date", "cluster", "serotype"))
+            Q = (1.0 - psi) * I + psi * (D - W)
+            L_Q = jnp.linalg.cholesky(Q)
+            L_cov = jnp.linalg.solve(L_Q, I)
 
-            # softmax splined latent state to obtain latent serotype distribution
-            p = pm.Deterministic("p", pm.math.softmax(theta_log, axis=2), dims=("date", "cluster", "serotype"))
+            beta_raw = numpyro.sample("beta_raw", dist.Normal(0.0, 1.0).expand((n_basis, n_serotypes - 1, n_regions)))
+            beta_corr = (sigma_beta * jnp.einsum("ij,bsj->bsi", L_cov, beta_raw))
+            beta = numpyro.deterministic("beta", jnp.transpose(beta_corr, (2, 1, 0)))
 
-            # overdispersion model
-            ## time-independent hierarchical overdispersion (per region)
-            d_region_hierarch = pm.HalfNormal("d_region_hierarch", sigma=1/10)    # --> phi ~ 1000 --> low overdispersion
-            d_region = pm.HalfNormal("d_region", sigma=d_region_hierarch, dims="cluster")
-            phi = pm.Deterministic("phi", pt.repeat((1.0 / pm.math.maximum(d_region, 1e-12))[None, :], n_months, axis=0), dims=("date", "cluster"))
-            alpha = phi[:, :, None] * p # Broadcast phi over serotypes
+            # Splined latent state
+            theta = jnp.einsum("tb,rsb->trs", X, beta)
+            theta_log = jnp.concatenate([theta, jnp.zeros((n_months, n_regions, 1), dtype=theta.dtype)], axis=2)
+            numpyro.deterministic("theta_log", theta_log)
 
-            # observed subtyped incidences ---
-            pm.DirichletMultinomial("Y_obs", a=alpha, n=N_typed, observed=Y_multinomial, dims=("date", "cluster", "serotype"))
+            # Latent serotype probabilities
+            p = numpyro.deterministic("p", jnn.softmax(theta_log, axis=2))
 
-        # NUTS
-        with model:
-            trace = pm.sample(n_draw, tune=n_tune, target_accept=0.8, chains=4, cores=4, init='adapt_diag', progressbar=True, mp_ctx=mp.get_context("spawn"), blas_cores=1)
+            # Hierarchical overdispersion
+            d_region_hierarch = numpyro.sample("d_region_hierarch", dist.HalfNormal(0.1))
+            d_region = numpyro.sample("d_region", dist.HalfNormal(d_region_hierarch).expand((n_regions,)))
+            phi_region = (1.0/ jnp.maximum(d_region, 1e-12))
+            phi = numpyro.deterministic("phi", jnp.broadcast_to(phi_region[None, :], (n_months, n_regions)))
+            alpha = phi[:, :, None] * p
 
+            # Observed serotype counts
+            numpyro.sample("Y_obs", dist.DirichletMultinomial(concentration=alpha, total_count=N_typed), obs=Y_multinomial)
+
+            pass
+
+
+        # Run NUTS sampler
+        start_dt = datetime.now()
+        start_time = time.time()
+
+        print(f"starting the NUTS sampler at: {start_dt.strftime('%Y-%m-%d %H:%M:%S')} ..")
+        sys.stdout.flush()
+
+        kernel = NUTS(imputation_model, target_accept_prob=0.8)
+
+        mcmc = MCMC(kernel, num_warmup=n_tune, num_samples=n_draw, num_chains=n_cores, chain_method="parallel", progress_bar=False)
+
+        mcmc.run(
+            jax.random.PRNGKey(42),
+            X=X,
+            I=I,
+            W=W,
+            D=D,
+            N_typed=N_typed,
+            Y_multinomial=Y_multinomial,
+            n_basis=n_basis,
+            n_months=n_months,
+            n_regions=n_regions,
+            n_serotypes=n_serotypes,
+        )
+
+        # Chain collection prevents jax asynchronous dispatch from weirdly sequencing printouts
+        time.sleep(1)
+        jax.tree_util.tree_map(lambda x: x.block_until_ready(), mcmc.get_samples())
+
+        # Record the end timestamp and compute elapsed time
+        end_dt = datetime.now()
+        elapsed_seconds = time.time() - start_time
+        elapsed_formatted = str(timedelta(seconds=int(elapsed_seconds)))
+
+        print(f"..and finished sampling at: {end_dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        print(f"total elapsed time: {elapsed_formatted}\n")
+        print(f"there were {int(jnp.sum(mcmc.get_extra_fields()["diverging"]))} divergent transitions\n")
+        sys.stdout.flush()
+
+        # Convert NumPyro output to ArviZ InferenceData
+        trace = arviz.from_numpyro(mcmc, coords=coords, dims=dims)
 
         # save traces
         variables2plot = ['sigma_beta', 'psi', 'd_region_hierarch', 'd_region']
