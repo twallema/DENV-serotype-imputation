@@ -171,11 +171,12 @@ def run_parallel_maxp(n_cores, n, geography, region, covariate_names, threshold,
         }
 
         # Iterate over completed futures with a progress bar
-        with tqdm(total=n, desc="\nRunning Max-P optimization") as pbar:
+        with tqdm(total=n, desc="Running Max-P optimization") as pbar:
             for fut in as_completed(future_to_index):
                 results.append(fut.result())
                 pbar.update(1)  # Advance progress bar by 1 as each job finishes
-
+        print('\n')
+        
     # Sort by run index so output ordering is guaranteed
     results.sort(key=lambda x: x[0])
 
