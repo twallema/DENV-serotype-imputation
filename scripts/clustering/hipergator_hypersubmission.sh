@@ -24,6 +24,6 @@ for i in $(seq 1 "$N"); do
         "$cores" \
         "$spatial_aggregation")
 
-    sleep 0.5
+    sleep 0.1
 
 done
