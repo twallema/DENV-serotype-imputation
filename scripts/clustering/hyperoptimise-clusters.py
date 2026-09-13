@@ -30,6 +30,26 @@ from patsy import dmatrix
 ## helper functions ##
 ######################
 
+# clean up memory
+import gc
+def cleanup_memory():
+    gc.collect()
+
+    try:
+        import jax
+        jax.clear_caches()
+    except Exception:
+        pass
+
+    gc.collect()
+
+# report memory use
+import psutil
+process = psutil.Process(os.getpid())
+def report_memory(label):
+    rss = process.memory_info().rss / 1024**3
+    print(f"\n[MEMORY] {label}: {rss:.2f} GB")
+
 # helper function for argument parsing
 def str_to_bool(value):
     """Convert string arguments to boolean (for SLURM environment variables)."""
@@ -151,7 +171,7 @@ def run_parallel_maxp(n_cores, n, geography, region, covariate_names, threshold,
         }
 
         # Iterate over completed futures with a progress bar
-        with tqdm(total=n, desc="Running Max-P optimization") as pbar:
+        with tqdm(total=n, desc="\nRunning Max-P optimization") as pbar:
             for fut in as_completed(future_to_index):
                 results.append(fut.result())
                 pbar.update(1)  # Advance progress bar by 1 as each job finishes
@@ -215,7 +235,7 @@ def main():
     # >>>>>>>>>>>>>>>>>>>>>
 
     # Must be set before JAX initializes its backend.
-    os.environ.setdefault("XLA_FLAGS", f"--xla_force_host_platform_device_count={n_cores}")
+    os.environ.setdefault("XLA_FLAGS", f"--xla_force_host_platform_device_count={4}")
 
     import jax
     import jax.numpy as jnp
@@ -706,6 +726,9 @@ def main():
         print("\n")
         print(f"\nWorking on repeat {repeat_id}, index: {index}\n")
 
+        report_memory(f"at start of configuration")
+
+
         os.makedirs(os.path.join(output_folder, f'index_{index}'), exist_ok=True)
         
         covariate_names = [col for col, val in row.to_dict().items() if val is True] # Filter covariate columns that evaluate to True
@@ -754,6 +777,7 @@ def main():
                 threshold=threshold,
             )
 
+        report_memory(f"memory use after Max-P")
 
         # Assign weights to every run using tuned softmax
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -1039,7 +1063,7 @@ def main():
 
         kernel = NUTS(imputation_model, target_accept_prob=0.8)
 
-        mcmc = MCMC(kernel, num_warmup=n_tune, num_samples=n_draw, num_chains=n_cores, chain_method="parallel", progress_bar=False)
+        mcmc = MCMC(kernel, num_warmup=n_tune, num_samples=n_draw, num_chains=4, chain_method="parallel", progress_bar=False)
 
         mcmc.run(
             jax.random.PRNGKey(42),
@@ -1080,6 +1104,7 @@ def main():
             plt.savefig(os.path.join(output_folder, f'index_{index}/imputation_model/trace/trace-{var}_typing-effort-model.pdf'))
             plt.close()
 
+        report_memory(f"memory use after bayesian imputation")
 
         # Visualise the imputed case data
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -1201,6 +1226,25 @@ def main():
         os.makedirs(os.path.join(output_folder, f'../results'), exist_ok=True)
         design_matrix.to_csv(os.path.join(output_folder, f'../results/repeat_{repeat_id}.csv'), index=False)
 
+        # Explicitly clean up after every iteration
+        ## max-p
+        del labels
+        del matrices
+        del best_obj_vals
+        del prob_matrix
+        del distance
+        del Z
+        ## Bayesian imputation
+        del kernel
+        del mcmc
+        del trace
+        del Y_multinomial
+        del N_typed
+        del X
+        ## JAX caches
+        cleanup_memory()
+
+        report_memory(f"memory use after cleaning")
 
 ###########################
 ## execute script safely ##
