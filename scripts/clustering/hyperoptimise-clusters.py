@@ -727,7 +727,7 @@ def main():
         print("\n")
         print(f"\nWorking on repeat {repeat_id}, index: {index}\n")
 
-        report_memory(f"at start of configuration")
+        report_memory(f"at start of configuration\n")
 
 
         os.makedirs(os.path.join(output_folder, f'index_{index}'), exist_ok=True)
