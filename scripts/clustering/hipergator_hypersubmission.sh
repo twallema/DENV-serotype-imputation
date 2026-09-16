@@ -1,11 +1,11 @@
 #!/bin/bash
 
-run_id="CD_RGINT_v4_mean"
+run_id="CD_RGINT_v4_median"
 spatial_aggregation="rgint"
 
-N=10
+N=50
 cores=8
-time="120:00:00"
+time="60:00:00"
 
 for i in $(seq 1 "$N"); do
 
