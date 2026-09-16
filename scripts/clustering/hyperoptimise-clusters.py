@@ -1,4 +1,4 @@
-import io, sys, os
+import io, sys, os, gc
 import math
 import time
 import itertools
@@ -31,7 +31,6 @@ from patsy import dmatrix
 ######################
 
 # clean up memory
-import gc
 def cleanup_memory():
     gc.collect()
 
@@ -42,13 +41,6 @@ def cleanup_memory():
         pass
 
     gc.collect()
-
-# report memory use
-import psutil
-process = psutil.Process(os.getpid())
-def report_memory(label):
-    rss = process.memory_info().rss / 1024**3
-    print(f"\n[MEMORY] {label}: {rss:.2f} GB")
 
 # helper function for argument parsing
 def str_to_bool(value):
@@ -727,9 +719,6 @@ def main():
         print("\n")
         print(f"\nWorking on repeat {repeat_id}, index: {index}\n")
 
-        report_memory(f"at start of configuration\n")
-
-
         os.makedirs(os.path.join(output_folder, f'index_{index}'), exist_ok=True)
         
         covariate_names = [col for col, val in row.to_dict().items() if val is True] # Filter covariate columns that evaluate to True
@@ -777,8 +766,6 @@ def main():
                 covariate_names=covariate_names_raw,
                 threshold=threshold,
             )
-
-        report_memory(f"memory use after Max-P")
 
         # Assign weights to every run using tuned softmax
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -1105,8 +1092,6 @@ def main():
             plt.savefig(os.path.join(output_folder, f'index_{index}/imputation_model/trace/trace-{var}_typing-effort-model.pdf'))
             plt.close()
 
-        report_memory(f"memory use after bayesian imputation")
-
         # Visualise the imputed case data
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -1242,10 +1227,8 @@ def main():
         del Y_multinomial
         del N_typed
         del X
-        ## JAX caches
+        ## clear JAX caches
         cleanup_memory()
-
-        report_memory(f"memory use after cleaning")
 
 ###########################
 ## execute script safely ##
