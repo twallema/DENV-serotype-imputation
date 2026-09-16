@@ -110,7 +110,7 @@ def run_single_maxp(
         geography_df,
         w,
         attrs_name=covariate_names,
-        threshold_name="N_typed_yearly_mean",
+        threshold_name="N_typed_yearly_median",
         threshold=threshold,
         top_n=2,
         policy="multiple",
@@ -251,7 +251,7 @@ def main():
     threshold_values = [60,] # CD_RGINT: 27.5, 40, 55, 90 results in 25, 20, 15, 10 clusters --> Peak log likelihood at 15 clusters --> Makes sense because there are only 14 regions of high quality sampling -->  Set clusters to 14 (= 60)
 
     # if using mean
-    threshold_values = [180,] # CD_RGINT: 180 = 14 clusters
+    # threshold_values = [180,] # CD_RGINT: 180 = 14 clusters
 
     # Generate combinations of grid_covariates (True/False) AND thresholds
     covariate_combinations = list(
@@ -700,12 +700,12 @@ def main():
     # sum cases by season
     yearly_sum = denv.groupby([f"{region}","season"])['N_typed'].sum().reset_index()
     # take mean across seasons
-    yearly_sum_mean = yearly_sum.groupby(f"{region}")["N_typed"].mean() # array for clustering
-    yearly_sum_mean.rename("N_typed_yearly_mean", inplace=True)
-    yearly_sum_mean = yearly_sum_mean.sort_values()
+    yearly_sum_median = yearly_sum.groupby(f"{region}")["N_typed"].median() # array for clustering
+    yearly_sum_median.rename("N_typed_yearly_median", inplace=True)
+    yearly_sum_median = yearly_sum_median.sort_values()
     # merge them to the geography dataframe
     geography = geography.merge(
-        yearly_sum_mean, 
+        yearly_sum_median, 
         on=f"{region}",
         how="left"
     )
