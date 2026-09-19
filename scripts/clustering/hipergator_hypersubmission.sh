@@ -3,7 +3,7 @@
 run_id="CD_RGINT_v4_median"
 spatial_aggregation="rgint"
 
-N=50
+N=100
 cores=8
 time="60:00:00"
 
