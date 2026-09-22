@@ -6,13 +6,14 @@ library(patchwork)
 library(tidyr)
 library(ggnewscale)
 library(tidyverse)
+library(lmerTest)
 
 # Set working directory to location of this script
 if(!require(rstudioapi)) install.packages("rstudioapi")
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 
 # Load the data
-path <- file.path(getwd(), '../../data/interim/clustering_pipeline/CD_RGINT_v2/merge_12/results')
+path <- file.path(getwd(), '../../data/interim/clustering_pipeline/CD_RGINT_v4/median/data')
 
 file_list <- list.files(
   path = path, 
@@ -691,9 +692,10 @@ df$fraction_urban_land <- factor(df$fraction_urban_land)
 df$denv_100k_cumulative <- factor(df$denv_100k_cumulative)
 df$human_development_index <- factor(df$human_development_index)
 
-# fit linear mixed effects model
+# fit linear mixed effects model (additive)
 model <- lmer(
-  log_likelihood ~ indexP_DTW + temperature_DTW + humidity_DTW + precipitation_DTW + fraction_urban_land + denv_100k_cumulative + human_development_index + (1 | repeat_id),
+  log_likelihood ~ indexP_DTW + temperature_DTW + humidity_DTW + precipitation_DTW + fraction_urban_land + denv_100k_cumulative + human_development_index
+  + (1 | repeat_id),
   data = df
 )
 
@@ -710,3 +712,31 @@ qqline(ranef(model)$repeat_id[[1]])
 qqnorm(residuals(model),
        main = "QQ plot: residuals")
 qqline(residuals(model))
+
+
+###############################
+## Try to do model selection ##
+###############################
+
+max_model <- lmer(
+  log_likelihood ~ (indexP_DTW + temperature_DTW + humidity_DTW  + precipitation_DTW + 
+                      fraction_urban_land + denv_100k_cumulative + human_development_index)^3 
+  + (1 | repeat_id),
+  data = df
+)
+
+selected_step <- step(max_model, reduce.fixed = TRUE, reduce.random = FALSE)
+
+best_model <- get_model(selected_step)
+
+summary(best_model)
+
+# QQ plots
+qqnorm(ranef(best_model)$repeat_id[[1]],
+       main = "QQ plot: random intercepts")
+qqline(ranef(best_model)$repeat_id[[1]])
+
+qqnorm(residuals(best_model),
+       main = "QQ plot: residuals")
+qqline(residuals(best_model))
+
