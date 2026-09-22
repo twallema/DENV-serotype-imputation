@@ -1,4 +1,4 @@
-import io, sys, os
+import io, sys, os, gc
 import math
 import time
 import itertools
@@ -31,7 +31,6 @@ from patsy import dmatrix
 ######################
 
 # clean up memory
-import gc
 def cleanup_memory():
     gc.collect()
 
@@ -42,13 +41,6 @@ def cleanup_memory():
         pass
 
     gc.collect()
-
-# report memory use
-import psutil
-process = psutil.Process(os.getpid())
-def report_memory(label):
-    rss = process.memory_info().rss / 1024**3
-    print(f"\n[MEMORY] {label}: {rss:.2f} GB")
 
 # helper function for argument parsing
 def str_to_bool(value):
@@ -118,7 +110,7 @@ def run_single_maxp(
         geography_df,
         w,
         attrs_name=covariate_names,
-        threshold_name="N_typed_yearly_mean",
+        threshold_name="N_typed_yearly_median",
         threshold=threshold,
         top_n=2,
         policy="multiple",
@@ -259,7 +251,7 @@ def main():
     threshold_values = [60,] # CD_RGINT: 27.5, 40, 55, 90 results in 25, 20, 15, 10 clusters --> Peak log likelihood at 15 clusters --> Makes sense because there are only 14 regions of high quality sampling -->  Set clusters to 14 (= 60)
 
     # if using mean
-    threshold_values = [180,] # CD_RGINT: 180 = 14 clusters
+    # threshold_values = [180,] # CD_RGINT: 180 = 14 clusters
 
     # Generate combinations of grid_covariates (True/False) AND thresholds
     covariate_combinations = list(
@@ -708,12 +700,12 @@ def main():
     # sum cases by season
     yearly_sum = denv.groupby([f"{region}","season"])['N_typed'].sum().reset_index()
     # take mean across seasons
-    yearly_sum_mean = yearly_sum.groupby(f"{region}")["N_typed"].mean() # array for clustering
-    yearly_sum_mean.rename("N_typed_yearly_mean", inplace=True)
-    yearly_sum_mean = yearly_sum_mean.sort_values()
+    yearly_sum_median = yearly_sum.groupby(f"{region}")["N_typed"].median() # array for clustering
+    yearly_sum_median.rename("N_typed_yearly_median", inplace=True)
+    yearly_sum_median = yearly_sum_median.sort_values()
     # merge them to the geography dataframe
     geography = geography.merge(
-        yearly_sum_mean, 
+        yearly_sum_median, 
         on=f"{region}",
         how="left"
     )
@@ -726,9 +718,6 @@ def main():
 
         print("\n")
         print(f"\nWorking on repeat {repeat_id}, index: {index}\n")
-
-        report_memory(f"at start of configuration\n")
-
 
         os.makedirs(os.path.join(output_folder, f'index_{index}'), exist_ok=True)
         
@@ -777,8 +766,6 @@ def main():
                 covariate_names=covariate_names_raw,
                 threshold=threshold,
             )
-
-        report_memory(f"memory use after Max-P")
 
         # Assign weights to every run using tuned softmax
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -1105,8 +1092,6 @@ def main():
             plt.savefig(os.path.join(output_folder, f'index_{index}/imputation_model/trace/trace-{var}_typing-effort-model.pdf'))
             plt.close()
 
-        report_memory(f"memory use after bayesian imputation")
-
         # Visualise the imputed case data
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -1242,10 +1227,8 @@ def main():
         del Y_multinomial
         del N_typed
         del X
-        ## JAX caches
+        ## clear JAX caches
         cleanup_memory()
-
-        report_memory(f"memory use after cleaning")
 
 ###########################
 ## execute script safely ##

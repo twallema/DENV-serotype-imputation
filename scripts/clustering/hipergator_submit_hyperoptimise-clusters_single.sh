@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --account=epi
-#SBATCH --qos=epi
+#SBATCH --qos=epi-b
 
 # The IDs and number of cores
 run_id=$1
