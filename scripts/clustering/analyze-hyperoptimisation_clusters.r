@@ -26,7 +26,7 @@ df <- map_dfr(file_list, read_csv)
 df$n_clusters[df$n_clusters != 14] <- 14
 
 # Take out indexP
-#df <- df[df$precipitation_DTW,]
+# df <- df[!df$indexP_DTW,]
 
 # Add configurations
 df$configuration <- interaction(
