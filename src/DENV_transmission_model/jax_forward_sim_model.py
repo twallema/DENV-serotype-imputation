@@ -6,16 +6,14 @@ import polars as pl
 import pandas as pd
 import ast
 import numpy as np
+from datetime import datetime, timedelta
 
 abs_dir = os.path.dirname(__file__)
 
-###############################
-## Transmission model object ##
-###############################
 
 class DengueModel:
 
-    def __init__(self, age_groups, municipalities, simulation_start, simulation_end):
+    def __init__(self, age_groups, municipalities, simulation_start, intro_dates_DENV3, intro_dates_DENV4):
         """
         Initialises the dengue transmission model
 
@@ -29,11 +27,10 @@ class DengueModel:
 
         simulation_start: datetime.datetime
             startdate of simulation
-            # TODO: must be first of month
+            must be first of month
 
-        simulation_end: datetime.datetime
-            enddate of simulation
-            # TODO: must be last day of month
+        intro_dates_DENV3/4: list containing datetime.datetime
+            per municipality, contains the introduction date of DENV3/4
 
         Returns
         -------
@@ -44,12 +41,16 @@ class DengueModel:
             to format output cleanly, use `` on the simulation output
         """
 
-        # load in the age groups, spatial units, simulation start and end --> compute ts
+        # load in the age groups and spatial units
         self.age_groups = age_groups
         self.age_groups_labels = [f"[{start}, {end})" for start, end in age_groups]
-
         self.municipalities = municipalities
 
+        # validate simulation start and enddate (current range: 1998-2026)
+        simulation_end = datetime(2026, 12, 31)
+        assert ((simulation_start.year >= 1998) & (simulation_start.year <= 2026))
+        assert (simulation_start - timedelta(days=1)).month != simulation_start.month, "`simulation_start` must fall on the first day of the month."
+        assert simulation_end > simulation_start, "`simulation_end` must greater than `simulation_end`"
         self.months = pd.date_range(start=simulation_start, end=simulation_end, freq="ME")
 
         # load in demographics
@@ -65,6 +66,11 @@ class DengueModel:
         self.deaths = self._get_deaths(data_path, municipalities, self.months, self.age_groups)
 
         # load in seeding and introduction masks
+        data_path = os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/DENV-1998_2026-month-mun-age_group-no_diagnostics.parquet')
+        self.seeding = self._get_seeding(data_path, municipalities, self.months)
+        self.introduction = self._make_introduction_mask(municipalities, self.months, intro_dates_DENV3, intro_dates_DENV4)
+        self.seeding_monthly = self.seeding * self.introduction
+        self.seeding_monthly /= jnp.sum(self.seeding_monthly, axis=-1)[..., None]   # sum-to-one
 
         # load in the transitions between states
         S_mapping, IP_mapping = self._get_raw_compartmental_flows(os.path.join(abs_dir, '../../data/raw/transmission_model'))
@@ -74,6 +80,11 @@ class DengueModel:
         # --> remaining for user: omega, gamma, beta_monthly, p_hom_monthly, S0, I0, P0
     
         pass
+
+
+    #####################################
+    ## Initialisation helper functions ##
+    #####################################
 
     @staticmethod
     def _get_demographics_simstart(data_path, age_groups, municipalities, age_groups_labels, simulation_start_year):
@@ -160,8 +171,82 @@ class DengueModel:
         deaths_2d = deaths_monthly.pivot(index="date", columns="CD_MUN", values="death_rate").to_numpy()
         deaths = np.repeat(deaths_2d[:,:,None], len(age_groups), axis=-1)
 
-        return deaths
+        return jnp.array(deaths)
 
+    @staticmethod
+    def _get_seeding(data_path, municipalities, months):
+        """
+        A function that fetches the incidence data, smooths it and computes the serotype distribution on a rolling window
+
+        Returns
+        -------
+
+        estimated_proportions: jnp.ndarray
+            shape: (n_months, n_munis, n_serotypes)
+        """
+
+        inc = (
+            pl.scan_parquet(data_path)
+            .filter(pl.col("CD_MUN").is_in(municipalities))
+                .filter(pl.col("date").is_in(months))
+            .sort([ "date", "CD_MUN"])
+            .collect()
+        ).to_pandas()
+
+        # Rolling-window version for seeding
+        alpha=1/2
+        window = 24
+        # Aggregate by month and cluster
+        cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4"]
+        inc_monthly = inc.groupby(['date', 'CD_MUN'])[cols].sum().reset_index()
+
+        # Initialize output array
+        rolling_array = np.zeros((len(inc_monthly.date.unique()), len(municipalities), 4))
+        # Compute rolling Bayesian for each cluster
+        for c_idx, cl in enumerate(municipalities):
+            df_cl = inc_monthly[inc_monthly['CD_MUN'] == cl].set_index('date').reindex(months, fill_value=0)[cols]
+            for i in range(len(inc_monthly.date.unique())):
+                start_idx = max(0, i - window + 1)
+                window_sum = df_cl.iloc[start_idx:i+1].sum()
+                bayes = (window_sum + alpha) / (window_sum.sum() + 4*alpha)
+                rolling_array[i, c_idx, :] = bayes.values
+        estimated_proportions = rolling_array   # shape: (n_months, n_clusters, n_serotypes)
+
+        return jnp.array(estimated_proportions)
+
+    @staticmethod
+    def _make_introduction_mask(municipalities, months, intro_dates_DENV3, intro_dates_DENV4):
+        """
+        A function that fetches the incidence data, smooths it and computes the serotype distribution on a rolling window
+
+        Parameters
+        ----------
+
+        municipalities: list
+            7-digit IBGE municipality codes
+
+        months: DatetimeIndex
+            simulation timesteps
+
+        intro_dates_DENV3/4: list containing datetime.datetime
+            per municipality, contains the introduction date of DENV3/4
+
+        Returns
+        -------
+
+        estimated_proportions: jnp.ndarray
+            shape: (n_months, n_munis, n_serotypes)
+        """
+
+        assert len(intro_dates_DENV3) == len(intro_dates_DENV4) == len(municipalities)
+
+        intro_mask = np.ones((len(months), len(municipalities), 4))
+
+        for i, (intro_date_DENV3, intro_date_DENV4) in enumerate(zip(intro_dates_DENV3, intro_dates_DENV4)):
+            intro_mask[:, i, 2] = (months >= intro_date_DENV3).astype(int)
+            intro_mask[:, i, 3] = (months >= intro_date_DENV4).astype(int)
+
+        return jnp.array(intro_mask)
 
     @staticmethod
     def _get_raw_compartmental_flows(data_path):
@@ -285,6 +370,167 @@ class DengueModel:
         return O, R_het, R_hom, D
 
 
-####################################
-## Initial state helper functions ##
-####################################
+    ####################################
+    ## Initial state helper functions ##
+    ####################################
+
+    def infection_history_from_foi(self, foi_year):
+        """
+        Compute age- and municipality-specific infection-history probabilities
+        from a constant force of infection per municipality.
+
+        Parameters
+        ----------
+        foi_year : jnp.ndarray
+            shape: (n_munis,)
+            Annual force of infection for each municipality.
+            
+        [self] age_groups : list[tuple]
+            Age intervals as (lower_age, upper_age), e.g. [(0, 1), (1, 6), (6, 12), ...]
+
+        Returns
+        -------
+        f_P : jnp.ndarray
+            shape: (n_munis, n_age_groups, 3)
+            Probability of having 0, 1, or >=2 prior infections for each municipality and age group.
+        """
+        
+        midpoint_age = jnp.array([(lo + hi) / 2 for lo, hi in self.age_groups])
+
+        foi = foi_year[:, None]     # foi: (n_munis, 1)
+        age = midpoint_age[None, :] # age: (1, n_age_groups)
+
+        # Poisson survival process given FOI
+        cumulative_foi = foi * age
+        P0 = jnp.exp(-cumulative_foi)
+        P1 = cumulative_foi * jnp.exp(-cumulative_foi)
+        P2plus = 1.0 - P0 - P1
+
+        return jnp.stack([P0, P1, P2plus], axis=-1)
+
+
+    def build_initial_susceptibles(self, f_P, pi_d, pi_mono2):
+        """
+        Construct initial susceptibles for 1999 (only DENV-1 and DENV-2)
+
+        Parameters
+        ----------
+        [from self] demographics : jnp.ndarray
+            shape (n_munis, n_age_groups)
+            population count
+
+        f_P: jnp.ndarray
+            shape (n_munis, n_age_groups)
+            fraction of total population in cross-protected state
+
+        pi_d : jnp.ndarray
+            shape (n_munis, n_age_groups, 3)
+            fraction of (muni,age) in degree of infection: [naive, mono, double]
+
+        pi_mono2 : jnp.ndarray
+            shape (n_munis, n_age_groups)
+            fraction of mono infected by DENV-2
+
+        Returns
+        -------
+        S0 : jnp.ndarray
+            shape (n_munis, n_age_groups, 16)
+            initial S states
+        """
+        
+        z = jnp.zeros_like(pi_d[..., 0])                                   # (n_munis, n_age_groups)
+        S_frac = jnp.stack([pi_d[..., 0],
+                        pi_d[..., 1] * (1 - pi_mono2),
+                        pi_d[..., 1] * pi_mono2,
+                        z, z,
+                        pi_d[..., 2]] + [z] * 10, axis=-1)             # (n_munis, n_age_groups, 16)
+        return (1 - f_P)[..., None] * self.demographics[..., None] * S_frac
+
+
+    def build_initial_crossprotection(self, f_P, pi_d, f_P2):
+        """
+        Construct the initial cross-protected state (only DENV-1 and DENV-2 histories).
+
+        Parameters
+        ----------
+        [from self] demographics : jnp.ndarray
+            shape (n_munis, n_age_groups)
+            population count
+
+        f_P : jnp.ndarray
+            shape (n_munis, n_age_groups)
+            fraction of total population in cross-protected state
+
+        pi_d : jnp.ndarray
+            shape (n_munis, n_age_groups, 3)
+            fraction of (muni,age) in degree of infection: [naive, mono, double]
+
+        f_P2 : jnp.ndarray
+            shape (n_munis, n_age_groups)
+            fraction of the cross-protected population that is protected after a DENV-2 infection
+
+        Returns
+        -------
+        P0 : jnp.ndarray
+            shape (n_munis, n_age_groups, 32)
+        """
+        # normalize pi_d over degree of infection 1 and 2
+        pi_sum = pi_d[..., 1] + pi_d[..., 2] + 1e-12         # prevent division by zero
+        deg1_frac = pi_d[..., 1] / pi_sum                    # (n_munis, n_age_groups)
+        deg2_frac = pi_d[..., 2] / pi_sum                    
+
+        # P states: 0 = P_1^∅, 1 = P_2^∅, 4 = P_2^1, 7 = P_1^2; all other states start empty
+        z = jnp.zeros_like(f_P2)
+        P_frac = jnp.stack([deg1_frac * (1 - f_P2), deg1_frac * f_P2, z, z,
+                            deg2_frac * f_P2, z, z, deg2_frac * (1 - f_P2)]
+                        + [z] * 24, axis=-1)              
+
+        return (f_P * self.demographics)[..., None] * P_frac
+
+
+    def build_initial_infected(self, I_estim, p0, pi_d):
+        """
+        Construct the initial infected state (only DENV-1 and DENV-2 histories).
+        
+        Parameters
+        ----------
+
+        [from self] demographics : jnp.ndarray
+            shape (n_munis, n_age_groups)
+            population count
+
+        I_estim: jnp.ndarray
+            shape: (n_munis,)
+            initial fraction of population infected
+            (assumed uniform over age groups)
+        
+        p0: jnp.ndarray
+            shape: (n_clusters, n_serotypes)
+            initial serotype distribution 
+            
+        pi_d : jnp.ndarray
+            shape (n_munis, n_age_groups, 3)
+            fraction of (muni,age) in degree of infection: [naive, mono, double]
+
+        Returns
+        -------
+        I0 : jnp.ndarray
+            shape (n_munis, n_age_groups, 32)
+        """
+
+        # divide the total dengue cases over the serotypes under the assumption they are heterologous infections
+        I_estim_star = ((I_estim[:, None] * self.demographics)[:, :, None] * p0[:,None,:])[:, :, None, :] * jnp.stack([ pi_d[..., 0],  pi_d[..., 1],  pi_d[..., 2], jnp.zeros_like(pi_d[..., 0]), jnp.zeros_like(pi_d[..., 0])], axis=-1)[:, :, :, None]
+        # shape: n_munis, n_age_groups, n_prior_heterologous infections, n_serotypes
+
+        z = jnp.zeros_like(I_estim_star[:, :, 0, 0])
+        return jnp.stack([I_estim_star[:, :, 0, 0], I_estim_star[:, :, 0, 1], I_estim_star[:, :, 0, 2], I_estim_star[:, :, 0, 3], # naive
+                            I_estim_star[:, :, 1, 1], I_estim_star[:, :, 1, 2], I_estim_star[:, :, 1, 3],                       # one prior DENV 1
+                            I_estim_star[:, :, 1, 0], I_estim_star[:, :, 1, 2], I_estim_star[:, :, 1, 3],                       # one prior DENV 2
+                                z, z, z, z, z, z,
+                                I_estim_star[:, :, 2, 2], I_estim_star[:, :, 2, 3],                                             # two prior DENV 1 + 2
+                                    z, z, z, z, z, z, z, z, z, z, z, z, z, z], axis=-1)
+
+
+    ##########################
+    ## Simulation mechanics ##
+    ##########################
