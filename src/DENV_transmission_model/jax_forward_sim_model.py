@@ -6,6 +6,7 @@ import polars as pl
 import pandas as pd
 import ast
 import numpy as np
+import xarray as xr
 from datetime import datetime, timedelta
 
 abs_dir = os.path.dirname(__file__)
@@ -69,8 +70,8 @@ class DengueModel:
         data_path = os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/DENV-1998_2026-month-mun-age_group-no_diagnostics.parquet')
         self.seeding = self._get_seeding(data_path, municipalities, self.months)
         self.introduction = self._make_introduction_mask(municipalities, self.months, intro_dates_DENV3, intro_dates_DENV4)
-        self.seeding_monthly = self.seeding * self.introduction
-        self.seeding_monthly /= jnp.sum(self.seeding_monthly, axis=-1)[..., None]   # sum-to-one
+        self.seeding *= self.introduction
+        self.seeding /= jnp.sum(self.seeding, axis=-1)[..., None]   # sum-to-one
 
         # load in the transitions between states
         S_mapping, IP_mapping = self._get_raw_compartmental_flows(os.path.join(abs_dir, '../../data/raw/transmission_model'))
@@ -368,6 +369,356 @@ class DengueModel:
             D = D.at[i, int(row["no_prior_heterol_inf"])].set(1.0)
 
         return O, R_het, R_hom, D
+    
+
+    ##########################
+    ## Simulation mechanics ##
+    ##########################
+
+    @staticmethod
+    def RHS(t, y, args):
+        """
+        Continuous-time derivatives for one spatial unit across age groups.
+
+        Inputs: y, args (see `simulate_one_jax`)
+        Returns dS_dt (n_age_groups, n_S), dI_dt (n_age_groups, n_I), dP_dt (n_age_groups, n_P),
+                dI_hom (n_age_groups, n_I), dI_het (n_age_groups, n_I)
+        """
+        
+        # unpack states
+        S_t, I_t, P_t, _, _ = y
+        
+        # unpack parameters
+        gamma, omega, beta_monthly, births_monthly, deaths_monthly, p_hom_monthly, seeding_monthly, A, C, W, L, H_het, H_hom, K_het, K_hom, birth_vec, ts = args
+        
+        # look up beta, births and deaths, and seeding (jnp.interp)
+        beta_t = jnp.interp(t, xp=ts, fp=beta_monthly)
+        births_t = jnp.interp(t, xp=ts, fp=births_monthly)
+        deaths_t = jax.vmap(lambda x: jnp.interp(t, ts, x))(deaths_monthly.T)
+        p_hom_t = jax.vmap(lambda x: jnp.interp(t, ts, x))(p_hom_monthly.T)
+        seeding_t = jax.vmap(lambda x: jnp.interp(t, ts, x))(seeding_monthly.T)
+        
+        # --- FOI: shared across age groups --------------------------------------------
+        N_t = S_t.sum() + I_t.sum() + P_t.sum()                                    # scalar
+        I_per_sero = I_t.sum(axis=0) @ C                                           # (n_serotypes,)
+        lambda_t = beta_t * I_per_sero / N_t                                       # (n_serotypes,)
+        lambda_t = lambda_t + 1e-7 * seeding_t                                     # (n_serotypes)
+
+        # --- Susceptible --------------------------------------------------------------
+        effective_lambda = lambda_t @ H_het + (lambda_t * p_hom_t) @ H_hom             # (n_S,)
+        dS_dt = (births_t * birth_vec
+                - deaths_t[:, None] * S_t
+                + (1.0 / omega) * (P_t @ W)
+                - effective_lambda[None, :] * S_t
+                + A @ S_t)                                                        # (n_age_groups, n_S)
+    
+        # --- Infectious ---------------------------------------------------------------
+        f_per_I = p_hom_t @ L                                                      # (n_I,)
+        lambda_per_I = lambda_t @   L                                              # (n_I,)
+        dI_het_dt = lambda_per_I[None, :] * (S_t @   K_het)                        # (n_age_groups, n_I)
+        dI_hom_dt = lambda_per_I[None, :] * f_per_I[None, :] * (S_t @ K_hom)       # (n_age_groups, n_I)
+        dI_dt = (- deaths_t[:, None] * I_t
+                - (1 / gamma) * I_t
+                + dI_het_dt + dI_hom_dt
+                + A @ I_t)
+
+        # --- Cross-protected ----------------------------------------------------------
+        dP_dt = (- (1 / omega) * P_t
+                - deaths_t[:, None] * P_t
+                + (1 / gamma) * I_t
+                + A @ P_t)
+
+        return dS_dt, dI_dt, dP_dt, dI_hom_dt, dI_het_dt
+
+
+    def simulate_jax_single(self,
+                            gamma, omega,
+                            A, C, W, L, H_het, H_hom, K_het, K_hom, birth_vec, 
+                            beta_monthly, births_monthly, deaths_monthly, p_hom_monthly, seeding_monthly,
+                            S0, I0, P0,
+                            ts, stepsize):
+        
+        """
+        Simulate the age-structured dengue transmission model.
+
+        Uses Bosh3 with a fixed step size
+
+        Parameters
+        ----------
+        gamma: scalar
+            Duration of infection.
+            
+        omega: scalar
+            Duration of cross protection.
+            
+        A: jnp.ndarray
+            (n_age_groups, n_age_groups)
+            Aging transition matrix.
+            
+        C: jnp.ndarray
+            (32, n_serotypes)
+            Maps infected states onto serotypes.
+
+        W: jnp.ndarray
+            (32, 16)
+            Maps how P states wane to S states.
+
+        L: jnp.ndarray
+            (4, 32)
+            Map serotype-specific FOI to the per I state FOI.
+
+        H_het / H_hom: jnp.ndarray
+            (16, 4)
+            Susceptibility of S states to serotypes.
+                
+        K_het / K_hom : jnp.ndarray
+            (16, 32)
+            Flow of S states into I states.
+                
+        birth_vec: jnp.ndarray
+            (n_age_groups, 16)
+            All elements zero except at index (0,0).
+            
+        beta_monthly: jnp.ndarray
+            (n_months,)
+            Time-varying transmission rate.
+            
+        births_monthly: jnp.ndarray
+            (n_months,)
+            Time-varying number of births.
+            
+        deaths_monthly: jnp.ndarray
+            (n_months,)
+            Time-varying number of deaths.
+            
+        p_hom_monthly: jnp.ndarray
+            (n_months, n_age_groups, n_serotypes)
+            Time-varying homologous reinfection probability.
+            
+        seeding_monthly: jnp.ndarray
+            (n_months, n_age_groups, n_serotypes)
+            Time-varying seeding.
+            
+        S0 : jnp.ndarray
+            (n_age_groups, 16)
+            Initial susceptibles.
+            
+        I0 : jnp.ndarray
+            (n_age_groups, 32)
+            Initial infected.
+
+        P0: jnp.ndarray
+            (n_age_groups, 32)
+            Initial cross-protected.
+
+        ts : array
+            Simulation and observation dates.
+
+        stepsize: float
+            Simulation stepsize (fixed)
+
+        Returns
+        -------
+        sol.ys : tuple containing jnp.ndarray
+            0: S_t (n_months, n_age_groups, 16)
+            1: I_t (n_months, n_age_groups, 32)
+            2: P_t (n_months, n_age_groups, 32)
+            3: C_het_t (n_months, n_age_groups, 32) --> cumulative of dI_het_t
+            4: C_hom_t (n_months, n_age_groups, 32) --> cumulative of dI_hom_t
+        """
+
+        # Create diffrax term
+        term = diffrax.ODETerm(self.RHS)
+
+        # Solve
+        sol = diffrax.diffeqsolve(
+            term,
+            diffrax.Bosh3(),
+            t0=ts[0],
+            t1=ts[-1],
+            dt0=stepsize,
+            y0=(S0, I0, P0, jnp.zeros_like(I0), jnp.zeros_like(I0)),
+            args=(gamma, omega, beta_monthly, births_monthly, deaths_monthly, p_hom_monthly, seeding_monthly, A, C, W, L, H_het, H_hom, K_het, K_hom, birth_vec, ts),
+            saveat=diffrax.SaveAt(ts=ts),
+            stepsize_controller=diffrax.ConstantStepSize(),
+            adjoint=diffrax.DirectAdjoint(),
+        )
+        
+        return sol.ys
+
+
+    def batch_jax_single(self, static_pars, dynamic_pars, initial_states, model_structure_pars, solver_pars):
+        
+        """
+        Batch the age-structured dengue transmission model across spatial units using jax.vmap
+
+        Parameters
+        ----------
+        see `simulate_jax_single`
+
+        Returns
+        -------
+        sol.ys : tuple containing jnp.ndarray
+            0: S_t (n_months, n_munis, n_age_groups, 16)
+            1: I_t (n_months, n_munis, n_age_groups, 32)
+            2: P_t (n_months, n_munis, n_age_groups, 32)
+            3: C_het_t (n_months, n_munis, n_age_groups, 32)
+            4: C_hom_t (n_months, n_munis, n_age_groups, 32)
+        """
+
+        # define where to find spatial axis
+        in_axes = (
+            *([None] * len(static_pars)),           # static_pars map to None (no spatial axis)
+            *([None] * len(model_structure_pars)),  # model_structure_pars map to None (no spatial axis)
+            *([1] * len(dynamic_pars)),             # dynamic_pars map to 1 (spatial axis in position 1)
+            *([0] * len(initial_states)),           # initial_states map to 0 (spatial axis in position 0)
+            *([None] * len(solver_pars))            # solver_pars map to None (no spatial axis)
+        )
+
+        simulation = jax.vmap(self.simulate_jax_single, in_axes=in_axes)
+        
+        return simulation(*static_pars.values(), *model_structure_pars.values(), *dynamic_pars.values(), *initial_states.values(), *solver_pars.values())
+
+
+    def sim(self,
+            kappa,
+            gamma, omega,
+            beta_monthly, p_hom_monthly,
+            S0, I0, P0,
+            simulation_end_date, stepsize):
+        
+        """
+        Simulates the age-structured dengue transmission model across spatial units
+        
+        Parameters
+        ----------
+        see `simulate_jax_single`
+
+        Returns
+        -------
+        #TODO: S_t, I_t, P_t, dI_hom_t, dI_het_t, dI_expanded, S_expanded, dI_obs, p_obs, p_true
+        """
+
+        assert ((stepsize > 0) & (stepsize <= 0.5)), "`stepsize` must be in interval )0, 0.5]"
+        assert simulation_end_date <= self.months[-1], f"`simulation_end_date` must be smaller than {self.months[-1].strftime("%Y-%m-%d")}."
+
+        # find index of simulation_end_date along date axis --> cut births, deaths, seeding
+        idx = self.months.searchsorted(simulation_end_date, side='right')
+        assert beta_monthly.shape[0] == idx, f"length of date dimension on `beta_monthly` ({beta_monthly.shape[0]}) must match the number of requested simulated months ({idx})"
+        assert p_hom_monthly.shape[0] == idx, f"length of date dimension on `p_hom_monthly` ({beta_monthly.shape[0]}) must match the number of requested simulated months ({idx})"
+        
+        # divide parameters into functional groups
+        static_pars = {'gamma': gamma, 'omega': omega}
+        dynamic_pars = {'beta_monthly': beta_monthly, 'births_monthly': self.births[:idx,...], 'deaths_monthly': self.deaths[:idx,...],
+                        'p_hom_monthly': p_hom_monthly, 'seeding_monthly': self.seeding[:idx,...]}
+        initial_states = {'S0': S0, 'I0': I0, 'P0': P0}
+        model_structure_pars = {'A': self.A, 'C': self.C, 'W': self.W, 'L': self.L, 'H_het': self.H_het, 'H_hom': self.H_hom,
+                                'K_het': self.K_het, 'K_hom': self.K_hom, 'birth_vec': self.birth_vec}
+        solver_pars = {'ts': jnp.arange(idx), 'stepsize': stepsize}
+        
+        # call batch_jax_single to run the ODE
+        outputs = self.batch_jax_single(static_pars, dynamic_pars, initial_states, model_structure_pars, solver_pars)
+        
+        # put time axis on simulation output first
+        S_t, I_t, P_t, C_hom_t, C_het_t = jax.tree.map(lambda x: jnp.moveaxis(x, source=1, destination=0), outputs)
+        
+        # differentiate cumulative infected arrays using padding
+        dI_hom_t, dI_het_t = [
+            jnp.pad(jnp.diff(C, axis=0), pad_width=((1, 0), *[(0, 0)] * (C.ndim - 1)), mode='constant',  constant_values=0)
+            for C in (C_hom_t, C_het_t)
+        ]
+
+        # compute derived simulation products
+        ## reconstruct the FOI
+        N = S_t.sum(axis=(-2, -1)) + I_t.sum(axis=(-2, -1)) + P_t.sum(axis=(-2, -1)) # total population across disease state, age group
+        I_per_sero = I_t.sum(axis=2) @ self.C # total infectious population by serotype
+        lambda_t = beta_monthly[..., None] * I_per_sero / N[..., None] # force of infection
+        
+        ## expand the S and I states
+        ### reshape dI_het (time, cluster, age, I_state) --> (time, cluster, age_group, infection_degree, serotype, hom/het infection) 
+        dI_expanded = jax.nn.softplus(jnp.stack([jnp.einsum("tcai,ids->tcads", dI_hom_t, self.O), jnp.einsum("tcai,ids->tcads", dI_het_t, self.O)], axis=-1))
+        
+        ### reshape S into susceptibility slots per (time, cluster, age_group, infection_degree, serotype, hom/het infection)
+        S_expanded = jnp.stack([jnp.einsum("tcai,ids->tcads", S_t, self.R_hom), jnp.einsum("tcai,ids,tcs->tcads", S_t, self.R_het, p_hom_monthly)], axis=-1)
+        
+        ## compute observations
+        ### compute observed number of cases per serotype
+        dI_obs_sero = jnp.sum(dI_expanded * kappa[None,][...,None], axis=(-1, -3)) # (time, cluster, age_group, serotype)
+        dI_obs = jnp.sum(dI_expanded * kappa[None,][...,None], axis=(-1, -2, -3)) # (time, cluster, age_group)
+        
+        ### compute observed serotyped proportions (time, cluster, serotype)
+        p_obs = jnp.sum(dI_obs_sero, axis=-2) / jnp.sum(dI_obs_sero, axis=(-2,-1))[..., None]
+
+        ### compute "true" serotype proportions (time, cluster, serotype)
+        p_true = I_per_sero / jnp.sum(I_per_sero, axis=-1)[:, :, None]
+        
+        return S_t, I_t, P_t, dI_hom_t, dI_het_t, dI_expanded, S_expanded, dI_obs, p_obs, p_true, lambda_t
+
+
+    def simout_to_xarray(self, simout):
+        """
+        Wrap the simulation output in an xarray with labeled dimensions and coordinates
+
+        Parameters
+        ----------
+
+        simout: tuple
+            contains raw simulation output ordered:
+            S, I, P, dI_hom, dI_het, dI_expanded, S_expanded, dI_obs, p_obs, p_true, lambda_t
+
+        Returns
+        -------
+
+        simout: xarray
+            formatted simulation output
+        """
+
+        _, _, _, _, _, dI_expanded, S_expanded, dI_obs, p_obs, p_true, lambda_t = simout
+
+        len_sim = lambda_t.shape[0]
+
+        simout = xr.Dataset(
+            {
+                # expanded states
+                "S_expanded": (
+                    ["date", "CD_MUN", "age_group", "n_prior_het_infections", "serotype", "infection_type"],
+                    S_expanded,
+                ),    
+                "dI_expanded": (
+                    ["date", "CD_MUN", "age_group", "n_het_infections", "serotype", "infection_type"],
+                    dI_expanded,
+                ),          
+                # latent derived states
+                "lambda_t": (
+                    ["date", "CD_MUN", "serotype"],
+                    lambda_t
+                ),
+                "p_true": (
+                    ["date", "CD_MUN", "serotype"],
+                    p_true
+                ),
+                # observations
+                "dI_obs": (
+                    ["date", "CD_MUN", "age_group"],
+                    dI_obs
+                ),   
+                "p_obs": (
+                    ["date", "CD_MUN", "serotype"],
+                    p_obs
+                ),        
+            },
+            coords={
+                "CD_MUN": self.municipalities,
+                "date": self.months[:len_sim],
+                "age_group": self.age_groups_labels,
+                "serotype": [1,2,3,4],
+                "n_prior_het_infections": [0, 1, 2, 3, 4],
+                "n_het_infections": [1, 2, 3, 4],
+                "infection_type": ['hom','het']
+            },
+        )
+
+        return simout
 
 
     ####################################
@@ -531,6 +882,3 @@ class DengueModel:
                                     z, z, z, z, z, z, z, z, z, z, z, z, z, z], axis=-1)
 
 
-    ##########################
-    ## Simulation mechanics ##
-    ##########################
