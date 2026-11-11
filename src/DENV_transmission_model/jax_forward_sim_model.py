@@ -14,7 +14,7 @@ abs_dir = os.path.dirname(__file__)
 
 class DengueModel:
 
-    def __init__(self, age_groups, municipalities, simulation_start, intro_dates_DENV3, intro_dates_DENV4):
+    def __init__(self, age_groups, muni_clusters, simulation_start, intro_dates_DENV3, intro_dates_DENV4):
         """
         Initialises the dengue transmission model
 
@@ -23,15 +23,17 @@ class DengueModel:
         age_groups: list[tuple]
             age intervals as (lower_age, upper_age), e.g. [(0, 1), (1, 6), (6, 12), ...]
         
-        municipalities: list
-            7-digit IBGE municipality codes
+        muni_clusters: pd.DataFrame
+            must contain exactly two columns, of which one must be named 'CD_MUN' and the other's name is free to be chosen by the user
+            the free column name will be used as the spatial dimension name
+            the dataframe must contain a mapping from the desired spatial dimension to the constituent municipalities
 
         simulation_start: datetime.datetime
             startdate of simulation
             must be first of month
 
         intro_dates_DENV3/4: list containing datetime.datetime
-            per municipality, contains the introduction date of DENV3/4
+            per cluster of municipalities, contains the introduction date of DENV3/4
 
         Returns
         -------
@@ -45,7 +47,11 @@ class DengueModel:
         # load in the age groups and spatial units
         self.age_groups = age_groups
         self.age_groups_labels = [f"[{start}, {end})" for start, end in age_groups]
-        self.municipalities = municipalities
+
+        # load in the spatial grouping
+        self.spatial_dimension = muni_clusters.columns[muni_clusters.columns != 'CD_MUN'].values[0]
+        self.spatial_coordinates = muni_clusters[self.spatial_dimension].unique()
+        municipality_mapping = [muni_clusters.loc[muni_clusters[self.spatial_dimension] == coord, 'CD_MUN'].values for coord in self.spatial_coordinates]
 
         # validate simulation start and enddate (current range: 1998-2026)
         simulation_end = datetime(2026, 12, 31)
@@ -56,20 +62,20 @@ class DengueModel:
 
         # load in demographics
         data_path = os.path.join(abs_dir, '../../data/interim/demographics/population_mun-age_1998-2026.parquet')
-        self.demographics = self._get_demographics_simstart(data_path, age_groups, municipalities, self.age_groups_labels, simulation_start.year)
+        self.demographics = self._get_demographics_simstart(data_path, age_groups, municipality_mapping, self.age_groups_labels, simulation_start.year)
 
         # load in births
         data_path = os.path.join(abs_dir, '../../data/interim/demographics/births_mun_1998-2026.csv')
-        self.births = self._get_births(data_path, municipalities, self.months)
+        self.births = self._get_births(data_path, municipality_mapping, self.months)
 
         # load in deaths
         data_path = os.path.join(abs_dir, '../../data/interim/demographics/deaths_mun_1998-2026.csv')
-        self.deaths = self._get_deaths(data_path, municipalities, self.months, self.age_groups)
+        self.death_rate = self._get_deaths(data_path, municipality_mapping, self.months, self.age_groups)
 
         # load in seeding and introduction masks
         data_path = os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/DENV-1998_2026-month-mun-age_group-no_diagnostics.parquet')
-        self.seeding = self._get_seeding(data_path, municipalities, self.months)
-        self.introduction = self._make_introduction_mask(municipalities, self.months, intro_dates_DENV3, intro_dates_DENV4)
+        self.seeding = self._get_seeding(data_path, municipality_mapping, self.months)
+        self.introduction = self._make_introduction_mask(municipality_mapping, self.months, intro_dates_DENV3, intro_dates_DENV4)
         self.seeding *= self.introduction
         self.seeding /= jnp.sum(self.seeding, axis=-1)[..., None]   # sum-to-one
 
@@ -88,7 +94,7 @@ class DengueModel:
     #####################################
 
     @staticmethod
-    def _get_demographics_simstart(data_path, age_groups, municipalities, age_groups_labels, simulation_start_year):
+    def _get_demographics_simstart(data_path, age_groups, muni_mapping, age_groups_labels, simulation_start_year):
         """
         A function to fetch and format the number of inhabitants in each modeled territory and age group during the simulation start year
 
@@ -96,27 +102,27 @@ class DengueModel:
         -------
 
         demographics: jnp.ndarray
-            shape: (n_munis, n_age_groups)
+            shape: (n_clusters, n_age_groups)
         """
 
         breaks = [end for _, end in age_groups[:-1]]
 
         demo = (
             pl.scan_parquet(data_path)
-            .filter(pl.col("CD_MUN").is_in(municipalities))
             .filter(pl.col("year") == simulation_start_year)
             .with_columns(pl.col("age").cut(breaks=breaks, labels=age_groups_labels, left_closed=True).alias("age_group"))
             .group_by([ "CD_MUN", "age_group"]).agg(pl.col("population").sum().alias("population"))
             .sort([ "CD_MUN", "age_group"])
             .collect()
+            .to_pandas()
         )
 
-        demo = demo.pivot(values="population", index="CD_MUN", on="age_group", aggregate_function="sum") 
+        demo = demo.pivot(values="population", index="CD_MUN", columns="age_group") 
 
-        return jnp.array(demo.select(pl.exclude("CD_MUN")).to_numpy())
+        return jnp.array([demo.loc[group].sum(axis=0).to_numpy() for group in muni_mapping])    # sum across munis in cluster
 
     @staticmethod
-    def _get_births(data_path, municipalities, months):
+    def _get_births(data_path, muni_mapping, months):
         """
         A function that fetches the number of births in each modeled territory
 
@@ -124,28 +130,33 @@ class DengueModel:
         -------
 
         births: jnp.ndarray
-            shape: (n_months, n_munis)
+            shape: (n_months, n_clusters)
         """
 
         births = pd.read_csv(data_path)
 
-        births = births[births['CD_MUN'].isin(municipalities)]
+        mun_to_group = {int(mun): idx for idx, group in enumerate(muni_mapping) for mun in group} # create mapping: {CD_MUN: group_index}
+
+        births = (
+            births.assign(group_id=births["CD_MUN"].map(mun_to_group))
+            .dropna(subset=["group_id"])
+            .astype({"group_id": int})
+            .groupby(["group_id", "year"], as_index=False)[["births", "population"]]
+            .sum()
+        )
 
         births['births'] /= 12
 
         # expand to monthly timestep of the model
-        monthly_template = pd.MultiIndex.from_product([municipalities, months], names=["CD_MUN", "date"]).to_frame(index=False)
+        monthly_template = pd.MultiIndex.from_product([births['group_id'].unique(), months], names=["group_id", "date"]).to_frame(index=False)
         monthly_template["year"] = monthly_template["date"].dt.year
-        births_monthly = pd.merge(monthly_template, births, on=["CD_MUN", "year"], how="left")
+        births_monthly = pd.merge(monthly_template, births, on=["group_id", "year"], how="left")
 
-        # births (all in first age group) --> (n_months, n_munis)
-        births = jnp.array(births_monthly.pivot(index="date", columns="CD_MUN", values="births").to_numpy())
-
-        return births
+        return jnp.array(births_monthly.pivot(index="date", columns="group_id", values="births").to_numpy())
 
 
     @staticmethod
-    def _get_deaths(data_path, municipalities, months, age_groups):
+    def _get_deaths(data_path, muni_mapping, months, age_groups):
         """
         A function that fetches the death rate in each modeled territory
 
@@ -155,27 +166,36 @@ class DengueModel:
         -------
 
         deaths: jnp.ndarray
-            shape: (n_months, n_munis, n_age_groups)
+            shape: (n_months, n_clusters, n_age_groups)
         """
 
         deaths = pd.read_csv(data_path)
 
-        deaths = deaths[deaths['CD_MUN'].isin(municipalities)]
+        mun_to_group = {int(mun): idx for idx, group in enumerate(muni_mapping) for mun in group} # create mapping: {CD_MUN: group_index}
+
+        deaths = (
+            deaths.assign(group_id=deaths["CD_MUN"].map(mun_to_group))
+            .dropna(subset=["group_id"])
+            .astype({"group_id": int})
+            .groupby(["group_id", "year"], as_index=False)[["deaths", "population"]]
+            .sum()
+        )
 
         deaths['death_rate'] = (deaths['deaths'] / 12) / deaths['population']   # compute monthly death rate
 
         # expand to monthly timestep of the model
-        monthly_template = pd.MultiIndex.from_product([municipalities, months], names=["CD_MUN", "date"]).to_frame(index=False)
+        monthly_template = pd.MultiIndex.from_product([deaths['group_id'].unique(), months], names=["group_id", "date"]).to_frame(index=False)
         monthly_template["year"] = monthly_template["date"].dt.year
-        deaths_monthly = pd.merge(monthly_template, deaths, on=["CD_MUN", "year"], how="left")
+        death_rate_monthly = pd.merge(monthly_template, deaths, on=["group_id", "year"], how="left")
 
-        deaths_2d = deaths_monthly.pivot(index="date", columns="CD_MUN", values="death_rate").to_numpy()
+        # repeat across age groups
+        deaths_2d = death_rate_monthly.pivot(index="date", columns="group_id", values="death_rate").to_numpy()
         deaths = np.repeat(deaths_2d[:,:,None], len(age_groups), axis=-1)
 
         return jnp.array(deaths)
 
     @staticmethod
-    def _get_seeding(data_path, municipalities, months):
+    def _get_seeding(data_path, muni_mapping, months):
         """
         A function that fetches the incidence data, smooths it and computes the serotype distribution on a rolling window
 
@@ -183,30 +203,36 @@ class DengueModel:
         -------
 
         estimated_proportions: jnp.ndarray
-            shape: (n_months, n_munis, n_serotypes)
+            shape: (n_months, n_clusters, n_serotypes)
         """
 
         inc = (
             pl.scan_parquet(data_path)
-            .filter(pl.col("CD_MUN").is_in(municipalities))
-                .filter(pl.col("date").is_in(months))
+            .filter(pl.col("date").is_in(months))
             .sort([ "date", "CD_MUN"])
             .collect()
         ).to_pandas()
 
+        mun_to_group = {int(mun): idx for idx, group in enumerate(muni_mapping) for mun in group} # create mapping: {CD_MUN: group_index}
+
+        inc = (
+            inc.assign(group_id=inc["CD_MUN"].map(mun_to_group))
+            .dropna(subset=["group_id"])
+            .astype({"group_id": int})
+            .groupby(["group_id", "date"], as_index=False)[["DENV_1", "DENV_2", "DENV_3", "DENV_4"]]
+            .sum()
+        )
+
         # Rolling-window version for seeding
         alpha=1/2
         window = 24
-        # Aggregate by month and cluster
-        cols = ["DENV_1", "DENV_2", "DENV_3", "DENV_4"]
-        inc_monthly = inc.groupby(['date', 'CD_MUN'])[cols].sum().reset_index()
 
         # Initialize output array
-        rolling_array = np.zeros((len(inc_monthly.date.unique()), len(municipalities), 4))
+        rolling_array = np.zeros((len(inc.date.unique()), len(muni_mapping), 4))
         # Compute rolling Bayesian for each cluster
-        for c_idx, cl in enumerate(municipalities):
-            df_cl = inc_monthly[inc_monthly['CD_MUN'] == cl].set_index('date').reindex(months, fill_value=0)[cols]
-            for i in range(len(inc_monthly.date.unique())):
+        for c_idx, cl in enumerate(inc['group_id'].unique()):
+            df_cl = inc[inc['group_id'] == cl].set_index('date').reindex(months, fill_value=0)[["DENV_1", "DENV_2", "DENV_3", "DENV_4"]]
+            for i in range(len(inc.date.unique())):
                 start_idx = max(0, i - window + 1)
                 window_sum = df_cl.iloc[start_idx:i+1].sum()
                 bayes = (window_sum + alpha) / (window_sum.sum() + 4*alpha)
@@ -216,32 +242,32 @@ class DengueModel:
         return jnp.array(estimated_proportions)
 
     @staticmethod
-    def _make_introduction_mask(municipalities, months, intro_dates_DENV3, intro_dates_DENV4):
+    def _make_introduction_mask(muni_mapping, months, intro_dates_DENV3, intro_dates_DENV4):
         """
         A function that fetches the incidence data, smooths it and computes the serotype distribution on a rolling window
 
         Parameters
         ----------
 
-        municipalities: list
-            7-digit IBGE municipality codes
+        muni_mapping: list containing lists
+            1st level: municipality clusters, 2nd level: 7-digit IBGE code for municipalities in cluster
 
         months: DatetimeIndex
             simulation timesteps
 
         intro_dates_DENV3/4: list containing datetime.datetime
-            per municipality, contains the introduction date of DENV3/4
+            per cluster of municipalities, contains the introduction date of DENV3/4
 
         Returns
         -------
 
         estimated_proportions: jnp.ndarray
-            shape: (n_months, n_munis, n_serotypes)
+            shape: (n_months, n_clusters, n_serotypes)
         """
 
-        assert len(intro_dates_DENV3) == len(intro_dates_DENV4) == len(municipalities)
+        assert len(intro_dates_DENV3) == len(intro_dates_DENV4) == len(muni_mapping)
 
-        intro_mask = np.ones((len(months), len(municipalities), 4))
+        intro_mask = np.ones((len(months), len(muni_mapping), 4))
 
         for i, (intro_date_DENV3, intro_date_DENV4) in enumerate(zip(intro_dates_DENV3, intro_dates_DENV4)):
             intro_mask[:, i, 2] = (months >= intro_date_DENV3).astype(int)
@@ -389,12 +415,12 @@ class DengueModel:
         S_t, I_t, P_t, _, _ = y
         
         # unpack parameters
-        gamma, omega, beta_monthly, births_monthly, deaths_monthly, p_hom_monthly, seeding_monthly, A, C, W, L, H_het, H_hom, K_het, K_hom, birth_vec, ts = args
+        gamma, omega, beta_monthly, births_monthly, death_rate_monthly, p_hom_monthly, seeding_monthly, A, C, W, L, H_het, H_hom, K_het, K_hom, birth_vec, ts = args
         
         # look up beta, births and deaths, and seeding (jnp.interp)
         beta_t = jnp.interp(t, xp=ts, fp=beta_monthly)
         births_t = jnp.interp(t, xp=ts, fp=births_monthly)
-        deaths_t = jax.vmap(lambda x: jnp.interp(t, ts, x))(deaths_monthly.T)
+        deaths_t = jax.vmap(lambda x: jnp.interp(t, ts, x))(death_rate_monthly.T)
         p_hom_t = jax.vmap(lambda x: jnp.interp(t, ts, x))(p_hom_monthly.T)
         seeding_t = jax.vmap(lambda x: jnp.interp(t, ts, x))(seeding_monthly.T)
         
@@ -434,7 +460,7 @@ class DengueModel:
     def simulate_jax_single(self,
                             gamma, omega,
                             A, C, W, L, H_het, H_hom, K_het, K_hom, birth_vec, 
-                            beta_monthly, births_monthly, deaths_monthly, p_hom_monthly, seeding_monthly,
+                            beta_monthly, births_monthly, death_rate_monthly, p_hom_monthly, seeding_monthly,
                             S0, I0, P0,
                             ts, stepsize):
         
@@ -487,7 +513,7 @@ class DengueModel:
             (n_months,)
             Time-varying number of births.
             
-        deaths_monthly: jnp.ndarray
+        death_rate_monthly: jnp.ndarray
             (n_months,)
             Time-varying number of deaths.
             
@@ -538,7 +564,7 @@ class DengueModel:
             t1=ts[-1],
             dt0=stepsize,
             y0=(S0, I0, P0, jnp.zeros_like(I0), jnp.zeros_like(I0)),
-            args=(gamma, omega, beta_monthly, births_monthly, deaths_monthly, p_hom_monthly, seeding_monthly, A, C, W, L, H_het, H_hom, K_het, K_hom, birth_vec, ts),
+            args=(gamma, omega, beta_monthly, births_monthly, death_rate_monthly, p_hom_monthly, seeding_monthly, A, C, W, L, H_het, H_hom, K_het, K_hom, birth_vec, ts),
             saveat=diffrax.SaveAt(ts=ts),
             stepsize_controller=diffrax.ConstantStepSize(),
             adjoint=diffrax.DirectAdjoint(),
@@ -559,11 +585,11 @@ class DengueModel:
         Returns
         -------
         sol.ys : tuple containing jnp.ndarray
-            0: S_t (n_months, n_munis, n_age_groups, 16)
-            1: I_t (n_months, n_munis, n_age_groups, 32)
-            2: P_t (n_months, n_munis, n_age_groups, 32)
-            3: C_het_t (n_months, n_munis, n_age_groups, 32)
-            4: C_hom_t (n_months, n_munis, n_age_groups, 32)
+            0: S_t (n_months, n_clusters, n_age_groups, 16)
+            1: I_t (n_months, n_clusters, n_age_groups, 32)
+            2: P_t (n_months, n_clusters, n_age_groups, 32)
+            3: C_het_t (n_months, n_clusters, n_age_groups, 32)
+            4: C_hom_t (n_months, n_clusters, n_age_groups, 32)
         """
 
         # define where to find spatial axis
@@ -609,7 +635,7 @@ class DengueModel:
         
         # divide parameters into functional groups
         static_pars = {'gamma': gamma, 'omega': omega}
-        dynamic_pars = {'beta_monthly': beta_monthly, 'births_monthly': self.births[:idx,...], 'deaths_monthly': self.deaths[:idx,...],
+        dynamic_pars = {'beta_monthly': beta_monthly, 'births_monthly': self.births[:idx,...], 'death_rate_monthly': self.death_rate[:idx,...],
                         'p_hom_monthly': p_hom_monthly, 'seeding_monthly': self.seeding[:idx,...]}
         initial_states = {'S0': S0, 'I0': I0, 'P0': P0}
         model_structure_pars = {'A': self.A, 'C': self.C, 'W': self.W, 'L': self.L, 'H_het': self.H_het, 'H_hom': self.H_hom,
@@ -681,34 +707,34 @@ class DengueModel:
             {
                 # expanded states
                 "S_expanded": (
-                    ["date", "CD_MUN", "age_group", "n_prior_het_infections", "serotype", "infection_type"],
+                    ["date", self.spatial_dimension, "age_group", "n_prior_het_infections", "serotype", "infection_type"],
                     S_expanded,
                 ),    
                 "dI_expanded": (
-                    ["date", "CD_MUN", "age_group", "n_het_infections", "serotype", "infection_type"],
+                    ["date", self.spatial_dimension, "age_group", "n_het_infections", "serotype", "infection_type"],
                     dI_expanded,
                 ),          
                 # latent derived states
                 "lambda_t": (
-                    ["date", "CD_MUN", "serotype"],
+                    ["date", self.spatial_dimension, "serotype"],
                     lambda_t
                 ),
                 "p_true": (
-                    ["date", "CD_MUN", "serotype"],
+                    ["date", self.spatial_dimension, "serotype"],
                     p_true
                 ),
                 # observations
                 "dI_obs": (
-                    ["date", "CD_MUN", "age_group"],
+                    ["date", self.spatial_dimension, "age_group"],
                     dI_obs
                 ),   
                 "p_obs": (
-                    ["date", "CD_MUN", "serotype"],
+                    ["date", self.spatial_dimension, "serotype"],
                     p_obs
                 ),        
             },
             coords={
-                "CD_MUN": self.municipalities,
+                self.spatial_dimension: self.spatial_coordinates,
                 "date": self.months[:len_sim],
                 "age_group": self.age_groups_labels,
                 "serotype": [1,2,3,4],
@@ -733,7 +759,7 @@ class DengueModel:
         Parameters
         ----------
         foi_year : jnp.ndarray
-            shape: (n_munis,)
+            shape: (n_clusters,)
             Annual force of infection for each municipality.
             
         [self] age_groups : list[tuple]
@@ -742,13 +768,13 @@ class DengueModel:
         Returns
         -------
         f_P : jnp.ndarray
-            shape: (n_munis, n_age_groups, 3)
+            shape: (n_clusters, n_age_groups, 3)
             Probability of having 0, 1, or >=2 prior infections for each municipality and age group.
         """
         
         midpoint_age = jnp.array([(lo + hi) / 2 for lo, hi in self.age_groups])
 
-        foi = foi_year[:, None]     # foi: (n_munis, 1)
+        foi = foi_year[:, None]     # foi: (n_clusters, 1)
         age = midpoint_age[None, :] # age: (1, n_age_groups)
 
         # Poisson survival process given FOI
@@ -767,34 +793,34 @@ class DengueModel:
         Parameters
         ----------
         [from self] demographics : jnp.ndarray
-            shape (n_munis, n_age_groups)
+            shape (n_clusters, n_age_groups)
             population count
 
         f_P: jnp.ndarray
-            shape (n_munis, n_age_groups)
+            shape (n_clusters, n_age_groups)
             fraction of total population in cross-protected state
 
         pi_d : jnp.ndarray
-            shape (n_munis, n_age_groups, 3)
+            shape (n_clusters, n_age_groups, 3)
             fraction of (muni,age) in degree of infection: [naive, mono, double]
 
         pi_mono2 : jnp.ndarray
-            shape (n_munis, n_age_groups)
+            shape (n_clusters, n_age_groups)
             fraction of mono infected by DENV-2
 
         Returns
         -------
         S0 : jnp.ndarray
-            shape (n_munis, n_age_groups, 16)
+            shape (n_clusters, n_age_groups, 16)
             initial S states
         """
         
-        z = jnp.zeros_like(pi_d[..., 0])                                   # (n_munis, n_age_groups)
+        z = jnp.zeros_like(pi_d[..., 0])                                   # (n_clusters, n_age_groups)
         S_frac = jnp.stack([pi_d[..., 0],
                         pi_d[..., 1] * (1 - pi_mono2),
                         pi_d[..., 1] * pi_mono2,
                         z, z,
-                        pi_d[..., 2]] + [z] * 10, axis=-1)             # (n_munis, n_age_groups, 16)
+                        pi_d[..., 2]] + [z] * 10, axis=-1)             # (n_clusters, n_age_groups, 16)
         return (1 - f_P)[..., None] * self.demographics[..., None] * S_frac
 
 
@@ -805,29 +831,29 @@ class DengueModel:
         Parameters
         ----------
         [from self] demographics : jnp.ndarray
-            shape (n_munis, n_age_groups)
+            shape (n_clusters, n_age_groups)
             population count
 
         f_P : jnp.ndarray
-            shape (n_munis, n_age_groups)
+            shape (n_clusters, n_age_groups)
             fraction of total population in cross-protected state
 
         pi_d : jnp.ndarray
-            shape (n_munis, n_age_groups, 3)
+            shape (n_clusters, n_age_groups, 3)
             fraction of (muni,age) in degree of infection: [naive, mono, double]
 
         f_P2 : jnp.ndarray
-            shape (n_munis, n_age_groups)
+            shape (n_clusters, n_age_groups)
             fraction of the cross-protected population that is protected after a DENV-2 infection
 
         Returns
         -------
         P0 : jnp.ndarray
-            shape (n_munis, n_age_groups, 32)
+            shape (n_clusters, n_age_groups, 32)
         """
         # normalize pi_d over degree of infection 1 and 2
         pi_sum = pi_d[..., 1] + pi_d[..., 2] + 1e-12         # prevent division by zero
-        deg1_frac = pi_d[..., 1] / pi_sum                    # (n_munis, n_age_groups)
+        deg1_frac = pi_d[..., 1] / pi_sum                    # (n_clusters, n_age_groups)
         deg2_frac = pi_d[..., 2] / pi_sum                    
 
         # P states: 0 = P_1^∅, 1 = P_2^∅, 4 = P_2^1, 7 = P_1^2; all other states start empty
@@ -847,11 +873,11 @@ class DengueModel:
         ----------
 
         [from self] demographics : jnp.ndarray
-            shape (n_munis, n_age_groups)
+            shape (n_clusters, n_age_groups)
             population count
 
         I_estim: jnp.ndarray
-            shape: (n_munis,)
+            shape: (n_clusters,)
             initial fraction of population infected
             (assumed uniform over age groups)
         
@@ -860,18 +886,18 @@ class DengueModel:
             initial serotype distribution 
             
         pi_d : jnp.ndarray
-            shape (n_munis, n_age_groups, 3)
+            shape (n_clusters, n_age_groups, 3)
             fraction of (muni,age) in degree of infection: [naive, mono, double]
 
         Returns
         -------
         I0 : jnp.ndarray
-            shape (n_munis, n_age_groups, 32)
+            shape (n_clusters, n_age_groups, 32)
         """
 
         # divide the total dengue cases over the serotypes under the assumption they are heterologous infections
         I_estim_star = ((I_estim[:, None] * self.demographics)[:, :, None] * p0[:,None,:])[:, :, None, :] * jnp.stack([ pi_d[..., 0],  pi_d[..., 1],  pi_d[..., 2], jnp.zeros_like(pi_d[..., 0]), jnp.zeros_like(pi_d[..., 0])], axis=-1)[:, :, :, None]
-        # shape: n_munis, n_age_groups, n_prior_heterologous infections, n_serotypes
+        # shape: n_clusters, n_age_groups, n_prior_heterologous infections, n_serotypes
 
         z = jnp.zeros_like(I_estim_star[:, :, 0, 0])
         return jnp.stack([I_estim_star[:, :, 0, 0], I_estim_star[:, :, 0, 1], I_estim_star[:, :, 0, 2], I_estim_star[:, :, 0, 3], # naive

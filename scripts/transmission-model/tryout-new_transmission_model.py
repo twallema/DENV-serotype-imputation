@@ -1,24 +1,30 @@
+import os
+import pandas as pd
 import numpy as np
 import jax.numpy as jnp
 from datetime import datetime
-from DENV_transmission_model.jax_forward_sim_model import DengueModel
 import matplotlib.pyplot as plt
 
+from DENV_transmission_model.jax_forward_sim_model import DengueModel
+
+abs_dir = os.path.dirname(__file__)
+
+mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
+
 # settings
-municipalities = [2611606, 2927408] # Recife and Salvador
+muni_clusters = mapping.loc[((mapping['CD_RGINT'] == 2601) | (mapping['CD_RGINT'] == 2901)), ('CD_MUN', 'CD_RGINT')]
 age_groups = [(0, 1), (1, 6), (6, 12), (12, 18), (18, 25), (25,35), (35,55), (55,120)]
-n_munis = len(municipalities)
+n_munis = len(muni_clusters['CD_RGINT'].unique())
 n_age_groups = len(age_groups)
 n_serotypes = 4
 
 simulation_start = datetime(1998, 9, 1)
 
-intro_dates_DENV3 = [datetime(2007, 1, 1), datetime(2009, 1, 1)]
-intro_dates_DENV4 =[datetime(2010, 1, 1), datetime(2010, 1, 1)]
+intro_dates_DENV3 = [datetime(2000, 1, 1), datetime(2000, 1, 1)]
+intro_dates_DENV4 =[datetime(2007, 1, 1), datetime(2007, 1, 1)]
 
 # initialise the model
-model = DengueModel(age_groups, municipalities, simulation_start, intro_dates_DENV3, intro_dates_DENV4)
-
+model = DengueModel(age_groups, muni_clusters, simulation_start, intro_dates_DENV3, intro_dates_DENV4)
 n_months = len(model.months)
 
 # build initial conditions
@@ -53,17 +59,17 @@ p_hom = jnp.array([0.8, 0.8, 0.8, 0.8])
 p_hom_monthly = jnp.broadcast_to(p_hom, (n_months, n_munis, n_serotypes))
 
 # simulate model
-simout = model.sim(kappa, gamma, omega, beta_monthly[:12,...], p_hom_monthly[:12,...], S0, I0, P0, datetime(1999,9,1), stepsize)
+simout = model.sim(kappa, gamma, omega, beta_monthly, p_hom_monthly, S0, I0, P0, datetime(2026,12,31), stepsize)
 
 # wrap output in an xarray
 simout = model.simout_to_xarray(simout)
 
 # visualise output
 fig,ax = plt.subplots(nrows=4, ncols=1, sharex=True)
-ax[0].stackplot(simout.date, np.transpose(simout["S_expanded"].sum(dim=["age_group", "serotype", "infection_type"]).sel(CD_MUN=2611606).values))
-ax[1].plot(simout.date, simout["lambda_t"].sel(CD_MUN=2611606).sum(dim='serotype'))
-ax[2].plot(simout.date, simout["dI_obs"].sel(CD_MUN=2611606))
-ax[3].stackplot(simout.date, np.transpose(simout["p_true"].sel(CD_MUN=2611606).values), labels=[1,2,3,4])
+ax[0].stackplot(simout.date, np.transpose(simout["S_expanded"].sum(dim=["age_group", "serotype", "infection_type"]).sel(CD_RGINT=2601).values))
+ax[1].plot(simout.date, simout["lambda_t"].sel(CD_RGINT=2601).sum(dim='serotype'))
+ax[2].plot(simout.date, simout["dI_obs"].sel(CD_RGINT=2601))
+ax[3].stackplot(simout.date, np.transpose(simout["p_true"].sel(CD_RGINT=2601).values), labels=[1,2,3,4])
 ax[3].legend()
 plt.show()
 plt.close()
