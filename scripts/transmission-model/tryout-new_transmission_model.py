@@ -4,28 +4,31 @@ import numpy as np
 import jax.numpy as jnp
 from datetime import datetime
 import matplotlib.pyplot as plt
-
 from DENV_transmission_model.jax_forward_sim_model import DengueModel
 
 abs_dir = os.path.dirname(__file__)
 
-mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
 
 # settings
+## what cluster of municipalities to simulate
+mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
 muni_clusters = mapping.loc[((mapping['CD_RGINT'] == 2601) | (mapping['CD_RGINT'] == 2901)), ('CD_MUN', 'CD_RGINT')]
-age_groups = [(0, 1), (1, 6), (6, 12), (12, 18), (18, 25), (25,35), (35,55), (55,120)]
 n_munis = len(muni_clusters['CD_RGINT'].unique())
+## what age groups to simulate
+age_groups = [(0, 1), (1, 6), (6, 12), (12, 18), (18, 25), (25,35), (35,55), (55,120)]
 n_age_groups = len(age_groups)
 n_serotypes = 4
-
+## when to start the simulation
 simulation_start = datetime(1998, 9, 1)
-
+## when to introduce DENV 3 and DENV 4
 intro_dates_DENV3 = [datetime(2000, 1, 1), datetime(2000, 1, 1)]
 intro_dates_DENV4 =[datetime(2007, 1, 1), datetime(2007, 1, 1)]
+
 
 # initialise the model
 model = DengueModel(age_groups, muni_clusters, simulation_start, intro_dates_DENV3, intro_dates_DENV4)
 n_months = len(model.months)
+
 
 # build initial conditions
 ## parameters
@@ -39,6 +42,7 @@ pi_d = model.infection_history_from_foi(jnp.array([0.05, 0.05]))
 S0 = model.build_initial_susceptibles(f_P, pi_d, pi_mono2) # (n_munis, n_age_groups, 16)
 P0 = model.build_initial_crossprotection(f_P, pi_d, f_P2)
 I0 = model.build_initial_infected(I_estim, p0, pi_d)
+
 
 # define any remaining parameters
 ## simulation parameters
@@ -60,8 +64,6 @@ p_hom_monthly = jnp.broadcast_to(p_hom, (n_months, n_munis, n_serotypes))
 
 # simulate model
 simout = model.sim(kappa, gamma, omega, beta_monthly, p_hom_monthly, S0, I0, P0, datetime(2026,12,31), stepsize)
-
-# wrap output in an xarray
 simout = model.simout_to_xarray(simout)
 
 # visualise output
