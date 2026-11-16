@@ -6,18 +6,10 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from DENV_transmission_model.jax_forward_sim_model import DengueModel
 from DENV_transmission_model.numpyro_models import single_cluster_training
-from DENV_transmission_model.numpyro_utils import get_incidence_data
+from DENV_transmission_model.numpyro_utils import get_incidence_data, get_seroprevalence_data
 
 abs_dir = os.path.dirname(__file__)
 
-# load the fitting data
-## total incidence
-data_dir = os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/master')
-
-
-## data per serotype
-
-## seroprevalence
 
 
 # model settings
@@ -41,10 +33,16 @@ model = DengueModel(age_groups, muni_clusters, simulation_start, intro_dates_DEN
 n_months = len(model.months)
 
 
+# load the fitting data
+## total incidence
+data_dir = os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/DENV-1998_2026-month-mun-no_diagnostics.parquet')
+total_incidence, serotype_incidence = get_incidence_data(data_dir, muni_clusters)
+## seroprevalence
+data_dir = os.path.join(abs_dir, '../../data/interim/seroprevalence/seroprevalence.csv')
+seroprevalence = get_seroprevalence_data(data_dir, age_groups, muni_clusters)
+
+
 # load the numpyro model
-get_incidence_data(data_dir, age_groups)
-
-
 
 # pre-optimize the MAP
 
