@@ -42,6 +42,30 @@ data_dir = os.path.join(abs_dir, '../../data/interim/seroprevalence/seroprevalen
 seroprevalence = get_seroprevalence_data(data_dir, age_groups, muni_clusters)
 
 
+# visualise the seroprevalence data
+## one panel per survey year, aligned in a single row; experiments from the same year share a panel
+for cluster, seroprev_df in seroprevalence.items():
+    ## group the experiments per survey year
+    experiments_by_year = {}
+    for experiment in seroprev_df.columns:
+        year, study_id = experiment.split('_')
+        experiments_by_year.setdefault(year, []).append(experiment)
+    ## one panel per year
+    fig, axes = plt.subplots(nrows=1, ncols=len(experiments_by_year), squeeze=False, figsize=(8.3,11.7/3))
+    for ax, (year, experiments) in zip(axes[0], sorted(experiments_by_year.items())):
+        seroprev_df[experiments].plot.bar(ax=ax, legend=False)
+        ax.set_title(f"{year}")
+        ax.set_xlabel('age group (years)')
+        ax.set_ylabel('seroprevalence (%)')
+        ax.set_ylim(0, 100)
+        ax.tick_params(axis='x', rotation=45)
+    fig.tight_layout()
+    plt.show()
+    plt.close()
+
+print(seroprevalence)
+
+
 # load the numpyro model
 
 # pre-optimize the MAP

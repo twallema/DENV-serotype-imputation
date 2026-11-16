@@ -17,7 +17,9 @@ import pandas as pd
 import polars as pl
 import jax.numpy as jnp
 
+
 abs_dir = os.path.dirname(__file__)
+
 
 def get_incidence_data(data_dir, muni_clusters):
     """
@@ -54,27 +56,109 @@ def get_incidence_data(data_dir, muni_clusters):
 
     return total_incidence, serotype_incidence
 
+
 def get_seroprevalence_data(data_dir, age_groups, muni_clusters):
+    """
+    Load serosurvey results and convert them to the desired age groups.
+
+    Every serosurvey ("experiment") conducted in one or more municipalities of
+    a cluster is converted to the desired age groups by demographic weighting:
+    the reported age strata of the survey are combined into every desired age
+    group, weighting each stratum by the population in the overlap between the
+    study's age bracket and the desired age bracket. Population by year of age
+    is taken from the demography data of the year the survey was performed.
+    Seroprevalence is returned as a percentage.
+
+    Parameters
+    ----------
+    data_dir : str or path
+        Path to the seroprevalence data
+
+    age_groups : list of tuple
+        Desired age groups, as (low, high) pairs, e.g. [(0, 1), (1, 5)].
+
+    muni_clusters : pandas.DataFrame
+        Mapping of municipalities to clusters. Must contain the column
+        ``CD_MUN`` plus exactly one additional column holding the cluster
+        identifier.
+
+    Returns
+    -------
+    seroprevalence : dict
+        Maps the cluster identifier to a pandas.DataFrame indexed on
+        ``age_groups`` (labelled ``[{start}, {end})``), whose columns are the
+        experiments conducted in that cluster (named ``{study_id}_{year}``)
+        and whose values are the seroprevalence percentages.
+    """
+    
+    max_age = 80 # highest single year of age available in the demography data
 
     serodata = pd.read_csv(data_dir)
 
     serodata = serodata[serodata['age_strata'] == True]
 
-    # step 1: Identify what experiments happen in every cluster --> list containing a list for every cluster containing experiment names
+    cluster_col = [c for c in muni_clusters.columns if c != "CD_MUN"][0]
 
-    # Step 2: Identify what year the experiments happen in --> list containing a list for every cluster containing experiment names
+    # map every survey onto its cluster
+    serodata = serodata.merge(muni_clusters, on="CD_MUN", how="inner")
+
+    # parse the age brackets of every reported age stratum --> (age_low, age_high);
+    # missing bounds are interpreted as open-ended brackets (0-... or ...-80+)
+    def parse_bracket(row):
+        low, med, high = row["age_low"], row["age_med"], row["age_high"]
+        if pd.notna(low) and pd.notna(high):
+            return (low, high)
+        if pd.notna(low):
+            return (low, max_age)
+        if pd.notna(high):
+            return (0, high)
+        if pd.notna(med):
+            return (med, med)
+        return None
+
+    serodata["bracket"] = serodata.apply(parse_bracket, axis=1)
+    serodata = serodata[serodata["bracket"].notna() & serodata["seroprev_med"].notna()]
+
+    # the demography matrices share one column order: ascending cluster identifiers
+    clusters = sorted(muni_clusters[cluster_col].unique())
+
+    # labels for the desired age groups
+    labels = [f"[{start}, {end})" for start, end in age_groups]
 
     # loop over clusters and experiments
+    seroprevalence = {}
+    for cluster, cluster_data in serodata.groupby(cluster_col):
 
-        ## get raw data and year
+        experiments = {}
+        for (study_id, start_year), strata in cluster_data.groupby(["study_id", "start_year"]):
 
-        ## get demography
-    data_dir = os.path.join(abs_dir, '../../data/interim/demographics/population_mun-age_1998-2026.parquet')
-    demography = _get_demography_by_yearofage(data_dir, muni_clusters, 2000)    # this function works and has 2000 as a placeholder year
+            # demography (population by year of age) of the cluster in the survey year
+            demographics_path = os.path.join(abs_dir, '../../data/interim/demographics/population_mun-age_1998-2026.parquet')
+            demography = _get_demography_by_yearofage(demographics_path, muni_clusters, int(start_year))[:, clusters.index(cluster)]
 
-        ## retrieve the age groups used in the experiment
+            # demographically-weighted seroprevalence in every desired age group
+            weighted_seroprev = {}
+            for label, age_group in zip(labels, age_groups):
+                weights, values = [], []
+                for _, stratum in strata.iterrows():
+                    stratum_low, stratum_high = stratum["bracket"]
+                    a_low = max(int(stratum_low), age_group[0])
+                    a_high = min(int(stratum_high) + 1, age_group[1], max_age + 1)
+                    if a_high <= a_low:
+                        continue
+                    weights.append(float(demography[a_low:a_high].sum()))
+                    values.append(stratum["seroprev_med"])
+                if sum(weights) > 0:
+                    weighted_seroprev[label] = sum(w * p for w, p in zip(weights, values)) / sum(weights)
+                else:
+                    weighted_seroprev[label] = float('nan') # age group not covered by the experiment
 
-    pass
+            experiments[f"{int(start_year)}_{study_id}"] = pd.Series(weighted_seroprev)
+
+        # merge the experiments in this cluster into one dataframe indexed on the age_groups
+        seroprevalence[cluster] = pd.DataFrame(experiments)
+
+    return seroprevalence
 
 
 def _get_demography_by_yearofage(data_dir, muni_clusters, year):
