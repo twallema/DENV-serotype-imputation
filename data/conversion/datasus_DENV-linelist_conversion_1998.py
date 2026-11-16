@@ -229,7 +229,7 @@ df_merged = (
 # save output
 df_merged.write_parquet(
     "../interim/datasus_DENV-linelist/"
-    f"DENV-{start_year}_{end_year}-month-mun-age_group-no_diagnostics.parquet",
+    f"DENV-{start_year}_{end_year}-month-mun-no_diagnostics.parquet",
     compression="zstd",
 )
 
