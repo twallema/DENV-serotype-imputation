@@ -73,7 +73,7 @@ class DengueModel:
         self.death_rate = self._get_deaths(data_path, municipality_mapping, self.months, self.age_groups)
 
         # load in seeding and introduction masks
-        data_path = os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/DENV-1998_2026-month-mun-age_group-no_diagnostics.parquet')
+        data_path = os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/DENV-1998_2026-month-mun-no_diagnostics.parquet')
         self.seeding = self._get_seeding(data_path, municipality_mapping, self.months)
         self.introduction = self._make_introduction_mask(municipality_mapping, self.months, intro_dates_DENV3, intro_dates_DENV4)
         self.seeding *= self.introduction
