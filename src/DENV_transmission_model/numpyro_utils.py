@@ -21,7 +21,7 @@ import jax.numpy as jnp
 abs_dir = os.path.dirname(__file__)
 
 
-def get_incidence_data(data_dir, muni_clusters):
+def get_incidence_data(data_dir, muni_clusters, data_start):
     """
     Load municipality-level dengue incidence and aggregate it into clusters.
 
@@ -35,26 +35,39 @@ def get_incidence_data(data_dir, muni_clusters):
         ``CD_MUN`` plus exactly one additional column holding the cluster
         identifier.
 
+    data_start: datetime.datetime
+        When the data should start.
+        Equate to the transmission model simulation start
+
     Returns
     -------
+
+    data_dates: list containing np.datetime
+        shape: (n_time)
+        dates from data_start to the end of the available data
+
     total_incidence : jnp.ndarray
         shape: (n_time, n_clusters)
 
     serotype_incidence : jnp.ndarray
         shape: (n_time, n_clusters, 4)
     """
+
     cluster_col = [c for c in muni_clusters.columns if c != "CD_MUN"][0]
 
     inc = pd.read_parquet(data_dir)
+    inc = inc[inc['date'] >= data_start]
     inc = inc.merge(muni_clusters, on="CD_MUN", how="inner")
     inc = inc.groupby(["date", cluster_col], as_index=False)[
         ["DENV_total", "DENV_1", "DENV_2", "DENV_3", "DENV_4"]
     ].sum(min_count=1)
 
+    data_dates = pd.DatetimeIndex(inc['date']).to_pydatetime().tolist()
+
     total_incidence = jnp.array(inc.pivot(index="date", columns=cluster_col, values="DENV_total").to_numpy())
     serotype_incidence = jnp.array(inc.pivot(index="date", columns=cluster_col, values=["DENV_1", "DENV_2", "DENV_3", "DENV_4"]).to_numpy())
 
-    return total_incidence, serotype_incidence
+    return data_dates, total_incidence, serotype_incidence
 
 
 def get_seroprevalence_data(data_dir, age_groups, muni_clusters):

@@ -51,7 +51,7 @@ stepsize = 0.25
 gamma = 0.5
 omega = 18
 ## Probability of observing an infection
-kappa = jnp.ones([n_munis, n_age_groups, 4, n_serotypes]) # (cluster, age_group, infection_degree, serotype)
+kappa = jnp.ones([n_munis, n_age_groups, 4, n_serotypes, 2]) # (cluster, age_group, infection_degree, serotype, homol/heterol)
 ## time-varying transmission
 mu_beta = jnp.array([jnp.log(2.0), jnp.log(2.0)])
 A_beta = jnp.array([1, 1])

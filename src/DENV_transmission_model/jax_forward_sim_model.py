@@ -611,7 +611,7 @@ class DengueModel:
             gamma, omega,
             beta_monthly, p_hom_monthly,
             S0, I0, P0,
-            simulation_end_date, stepsize):
+            simulation_end_date, stepsize=0.25):
         
         """
         Simulates the age-structured dengue transmission model across spatial units
@@ -659,7 +659,7 @@ class DengueModel:
         N = S_t.sum(axis=(-2, -1)) + I_t.sum(axis=(-2, -1)) + P_t.sum(axis=(-2, -1)) # total population across disease state, age group
         I_per_sero = I_t.sum(axis=2) @ self.C # total infectious population by serotype
         lambda_t = beta_monthly[..., None] * I_per_sero / N[..., None] # force of infection
-        
+
         ## expand the S and I states
         ### reshape dI_het (time, cluster, age, I_state) --> (time, cluster, age_group, infection_degree, serotype, hom/het infection) 
         dI_expanded = jax.nn.softplus(jnp.stack([jnp.einsum("tcai,ids->tcads", dI_hom_t, self.O), jnp.einsum("tcai,ids->tcads", dI_het_t, self.O)], axis=-1))
@@ -669,9 +669,9 @@ class DengueModel:
         
         ## compute observations
         ### compute observed number of cases per serotype
-        dI_obs_sero = jnp.sum(dI_expanded * kappa[None,][...,None], axis=(-1, -3)) # (time, cluster, age_group, serotype)
-        dI_obs = jnp.sum(dI_expanded * kappa[None,][...,None], axis=(-1, -2, -3)) # (time, cluster, age_group)
-        
+        dI_obs_sero = jnp.sum(dI_expanded * kappa[None,], axis=(-1, -3)) # (time, cluster, age_group, serotype)
+        dI_obs = jnp.sum(dI_expanded * kappa[None,], axis=(-1, -2, -3)) # (time, cluster, age_group)
+
         ### compute observed serotyped proportions (time, cluster, serotype)
         p_obs = jnp.sum(dI_obs_sero, axis=-2) / jnp.sum(dI_obs_sero, axis=(-2,-1))[..., None]
 
@@ -767,7 +767,7 @@ class DengueModel:
 
         Returns
         -------
-        f_P : jnp.ndarray
+        pi_d : jnp.ndarray
             shape: (n_clusters, n_age_groups, 3)
             Probability of having 0, 1, or >=2 prior infections for each municipality and age group.
         """
