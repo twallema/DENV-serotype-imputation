@@ -21,7 +21,7 @@ import arviz
 
 
 abs_dir = os.path.dirname(__file__)
-
+output_folder = ''
 
 # model settings
 ## what cluster of municipalities to simulate
@@ -34,7 +34,7 @@ n_age_groups = len(age_groups)
 n_serotypes = 4
 ## when to start the simulation
 start_sim = datetime(1998, 9, 1)
-end_sim = datetime(2006, 1, 1)
+end_sim = datetime(2003, 1, 1)
 simulation_dates = pd.date_range(start=start_sim, end=end_sim, freq="ME").to_pydatetime().tolist()
 
 ## when to introduce DENV 3 and DENV 4
@@ -105,7 +105,7 @@ print('pre-optimizing MAP\n')
 print('(iter, score)', flush=True)
 
 # run optimiser
-map_params = find_map(single_cluster_training_model, model_kwargs, 500)
+map_params = find_map(single_cluster_training_model, model_kwargs, 1000)
 
 # TODO: parameters to a csv
 
@@ -139,6 +139,8 @@ ax[2].legend()
 plt.show()
 plt.close()
 
+# TODO: add number of susceptibles per serotype + number of heterologeous infections
+
 import sys
 sys.exit()
 
@@ -165,8 +167,8 @@ kernel = NUTS(
 
 mcmc = MCMC(
     kernel,
-    num_warmup=50,
-    num_samples=50,
+    num_warmup=100,
+    num_samples=100,
     num_chains=n_chains,
     chain_method="parallel",
     progress_bar=nuts_progress_bar,
@@ -191,5 +193,26 @@ print(f"..and finished sampling at: {end_dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
 print(f"total elapsed time: {elapsed_formatted}\n")
 print(f"there were {int(jnp.sum(mcmc.get_extra_fields()["diverging"]))} divergent transitions\n")
 
-
 print(mcmc.get_extra_fields()["potential_energy"])
+
+
+# Visualise traces
+# ~~~~~~~~~~~~~~~~
+
+# convert to arviz
+trace = arviz.from_numpyro(mcmc)
+
+# Generate traceplots
+variables2plot = ['pi_mono2_raw', 'f_P_raw', 'f_P2_raw', 'I_estim', 'foi_year', 'pi_d', 'f1_coeff', 'f2_coeff', 'f3_raw', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta',
+                  'kappa0_logit', 'omega', 'log_or_34', 'log_or_serotype', 'log_or_hom', 'alpha', 'phi', 'VIF']
+
+# Save original traces
+os.makedirs(os.path.join(output_folder, 'traces'), exist_ok=True)
+for var in variables2plot:
+    arviz.plot_trace_dist(trace, var_names=[var], compact=True, combined=True, kind='kde') 
+    plt.savefig(os.path.join(output_folder, f'traces/trace-{var}.pdf'))
+    plt.close()
+
+    
+# Visualise goodness-of-fit
+# ~~~~~~~~~~~~~~~~~~~~~~~~~
