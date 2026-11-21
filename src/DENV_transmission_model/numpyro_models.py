@@ -45,7 +45,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     pi_mono2_raw = numpyro.sample("pi_mono2_raw", dist.Beta(2, 2).expand([N,]))
     pi_mono2 = numpyro.deterministic("pi_mono2", jnp.broadcast_to(pi_mono2_raw[:, None], (N, M)))         
 
-    f_P_raw = numpyro.sample("f_P_raw", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.25), scale=1).expand([N,]), dist.transforms.SigmoidTransform()))
+    f_P_raw = numpyro.sample("f_P_raw", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.50), scale=1).expand([N,]), dist.transforms.SigmoidTransform()))
     f_P = numpyro.deterministic("f_P", jnp.broadcast_to(f_P_raw[:, None], (N, M)))
 
     f_P2_raw = numpyro.sample("f_P2_raw", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.50), scale=1).expand([N,]), dist.transforms.SigmoidTransform()))
@@ -53,7 +53,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     I_estim = numpyro.sample("I_estim", dist.HalfNormal(1e-4).expand([N,]))
 
-    foi_year = numpyro.sample("foi_year", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.05), scale=1/5).expand([N,]), dist.transforms.SigmoidTransform()))   # 5% +- 1%
+    foi_year = numpyro.sample("foi_year", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.05), scale=1/3).expand([N,]), dist.transforms.SigmoidTransform()))   # 5% +- 1%
 
     p0 = jnp.mean(transmission_model.seeding[:6,:,:], axis=0)   # first six months used to estimate initial serotype distribution
 
@@ -82,14 +82,14 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     ## seasonality
     ### Global pattern
-    mu_beta = numpyro.sample("mu_beta", dist.Normal(jnp.log(2.5), 1/3).expand([N,]))
+    mu_beta = numpyro.sample("mu_beta", dist.Normal(jnp.log(2.5), 1).expand([N,]))
     A_beta = numpyro.sample("A_beta", dist.HalfNormal(1).expand([N,]))
     phi_beta = numpyro.sample("phi_beta", dist.Normal((2 * jnp.pi * 3)/ 12, 1).expand([N,]))  # peaks in month 3 (march)
     data_months = jnp.arange(D, dtype=jnp.float32)
     season = A_beta[:, None] * jnp.cos(2.0 * jnp.pi * data_months[None, :] / 12 - phi_beta[:, None]) # Shape: (n_clusters, n_months)
     ### AR(1) deviations
-    rho_ar_beta = numpyro.sample("rho_ar_beta", dist.Beta(1, 3))     # persistence
-    sigma_ar_beta = numpyro.sample("sigma_ar_beta", dist.HalfNormal(1/10))
+    rho_ar_beta = numpyro.sample("rho_ar_beta", dist.Beta(1, 5))     # persistence
+    sigma_ar_beta = numpyro.sample("sigma_ar_beta", dist.HalfNormal(1/25))
     eps_raw = numpyro.sample("eps_raw", dist.Normal(0, 1).expand([D, N]))
     u0 = jnp.zeros((N,), dtype=jnp.float32)
     _, u_seq = jax.lax.scan(partial(ar1_step, rho_ar_beta, sigma_ar_beta), u0, eps_raw[1:])
@@ -102,7 +102,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     kappa0_logit = numpyro.sample("kappa0_logit", dist.Normal(jsp.special.logit(1/10), 1))                  # intercept
     is_34 = jnp.array([0, 0, 1, 1], dtype=jnp.float32)                                                      # indicator prim/sec versus tert/quart
     log_or_34 = numpyro.sample("log_or_34", dist.Normal(-3, 1/3))                                          # log-OR detecting prim/sec versus tert/quart
-    log_or_serotype = numpyro.sample("log_or_serotype", dist.Normal(0, 1/100).expand([n_serotypes - 1]))      # log-OR detecting serotypes (vs. baseline serotype)
+    log_or_serotype = numpyro.sample("log_or_serotype", dist.Normal(0, 1/10).expand([n_serotypes - 1]))      # log-OR detecting serotypes (vs. baseline serotype)
     log_or_serotype_full = jnp.concatenate([jnp.zeros((1,), dtype=log_or_serotype.dtype), log_or_serotype])
     is_hom = jnp.array([1, 0], dtype=jnp.float32)                                                           # indicator for homologous infection
     log_or_hom = numpyro.sample("log_or_hom", dist.Normal(-3, 1/3))                                        # TODO: check if applied right (to)
@@ -113,7 +113,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     # build clinical parameters
     gamma = 0.5
-    omega = numpyro.sample("omega", dist.LogNormal(3.6, 0.33))     
+    omega = numpyro.sample("omega", dist.LogNormal(3.2, 0.33))     
 
     # run transmission model
     simout = transmission_model.sim(kappa, gamma, omega, beta_monthly[:end_sim_data_index+1], p_hom_monthly[:end_sim_data_index+1], S0, I0, P0, simulation_dates[-1])
@@ -128,7 +128,8 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     # build observations
     ## observed cases
     alpha_inv = numpyro.sample("alpha_inv", dist.HalfNormal(1/10))
-    numpyro.sample("D_obs", dist.NegativeBinomial2(mean=jnp.sum(dI_obs, axis=-1), concentration=1/alpha_inv), obs=total_incidence[:end_sim_data_index+1])
+    alpha = numpyro.deterministic("alpha", 1/alpha_inv)
+    numpyro.sample("D_obs", dist.NegativeBinomial2(mean=jnp.sum(dI_obs, axis=-1), concentration=alpha), obs=total_incidence[:end_sim_data_index+1])
 
     ## serotyped cases
     #### overdispersion
@@ -137,7 +138,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     ### concentration
     alpha = phi * p_obs
     ### Variance inflation factor compared to multinomial
-    VIF = numpyro.deterministic("VIF", (total_incidence + phi) / (1.0 + phi))
+    numpyro.deterministic("VIF", (total_incidence + phi) / (1.0 + phi))
     ### Observed Dirichlet-Multinomial likelihood
     numpyro.sample("Y_obs", dist.DirichletMultinomial(total_count=jnp.sum(serotype_incidence[:end_sim_data_index+1], axis=-1), concentration=alpha), obs=serotype_incidence[:end_sim_data_index+1])
 
