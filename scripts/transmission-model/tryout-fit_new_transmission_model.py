@@ -26,7 +26,7 @@ abs_dir = os.path.dirname(__file__)
 # model settings
 ## what cluster of municipalities to simulate
 mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
-muni_clusters = mapping.loc[mapping['CD_RGINT'] == 2601, ('CD_MUN', 'CD_RGINT')]
+muni_clusters = mapping.loc[mapping['CD_RGINT'] == 2601, ('CD_MUN', 'CD_RGINT')]    # try Rio
 n_munis = len(muni_clusters['CD_RGINT'].unique())
 ## what age groups to simulate
 age_groups = [(0, 1), (1, 6), (6, 12), (12, 18), (18, 25), (25,35), (35,55), (55,120)]
@@ -34,12 +34,12 @@ n_age_groups = len(age_groups)
 n_serotypes = 4
 ## when to start the simulation
 start_sim = datetime(1998, 9, 1)
-end_sim = datetime(2004, 1, 1)
+end_sim = datetime(2006, 1, 1)
 simulation_dates = pd.date_range(start=start_sim, end=end_sim, freq="ME").to_pydatetime().tolist()
 
 ## when to introduce DENV 3 and DENV 4
-intro_dates_DENV3 = [datetime(1999, 2, 1),]
-intro_dates_DENV4 =[datetime(2008, 1, 1),]
+intro_dates_DENV3 = [datetime(1999, 3, 1),]
+intro_dates_DENV4 =[datetime(2004, 1, 1),]
 
 
 # Initialise the transmission model
@@ -105,21 +105,37 @@ print('pre-optimizing MAP\n')
 print('(iter, score)', flush=True)
 
 # run optimiser
-map_params = find_map(single_cluster_training_model, model_kwargs, 100)
+map_params = find_map(single_cluster_training_model, model_kwargs, 500)
+
+# TODO: parameters to a csv
 
 # visualise the result
 end_sim_data_index = calculate_simend_data_index(simulation_dates, data_dates)
 
-fig,ax=plt.subplots(nrows=4, figsize=(8.3, 11.7/2*3))
+## likelihood
+serotype_incidence_rel = serotype_incidence / jnp.sum(serotype_incidence, axis=-1)[:, None]
+fig,ax=plt.subplots(nrows=6, figsize=(8.3, 11.7/3*2))
 ax[0].plot(data_dates[:end_sim_data_index], total_incidence[:end_sim_data_index], marker='o', markerfacecolor=None, markersize=2, color='black')
 ax[0].plot(simulation_dates, jnp.squeeze(jnp.sum(map_params['dI_obs'], axis=-1)), color='red')
-ax[1].stackplot(simulation_dates, jnp.transpose(jnp.squeeze(map_params['p_true'])), labels=['DENV1', 'DENV2', 'DENV3', 'DENV4'])
-ax[1].legend()
-ax[2].plot(data_dates[:end_sim_data_index], jnp.squeeze(map_params['beta_monthly'])[:end_sim_data_index], color='black')
-ax[2].set_ylabel(r'$\beta(t)$')
-ax[3].plot(data_dates[:end_sim_data_index], jnp.squeeze(map_params['p_hom_monthly'])[:end_sim_data_index], label=['DENV1', 'DENV2', 'DENV3', 'DENV4'])
-ax[3].set_ylabel(r'$p_{hom,i}(t)$')
-ax[3].legend()
+ax[0].set_ylabel("DENV inc. (-)")
+ax[1].plot(data_dates[:end_sim_data_index], jnp.sum(serotype_incidence[:end_sim_data_index], axis=-1), marker='o', markerfacecolor=None, markersize=2, color='black')
+ax[1].set_ylabel("Serotyped (-)")
+for i in range(4):
+    ax[i+2].plot(data_dates[:end_sim_data_index], serotype_incidence_rel[:end_sim_data_index, i], marker='o', markerfacecolor=None, markersize=2, color='black')
+    ax[i+2].plot(simulation_dates, jnp.squeeze(map_params['p_true'])[:, i], color='red')
+    ax[i+2].set_ylabel(f"DENV {i+1} (%)")
+plt.show()
+plt.close()
+
+## latent states
+fig,ax=plt.subplots(nrows=3, figsize=(8.3, 11.7/3*2))
+ax[0].stackplot(simulation_dates, jnp.transpose(jnp.squeeze(map_params['p_true'])), labels=['DENV1', 'DENV2', 'DENV3', 'DENV4'])
+ax[0].legend()
+ax[1].plot(data_dates[:end_sim_data_index], jnp.squeeze(map_params['beta_monthly'])[:end_sim_data_index], color='black')
+ax[1].set_ylabel(r'$\beta(t)$')
+ax[2].plot(data_dates[:end_sim_data_index], jnp.squeeze(map_params['p_hom_monthly'])[:end_sim_data_index], label=['DENV1', 'DENV2', 'DENV3', 'DENV4'])
+ax[2].set_ylabel(r'$p_{hom,i}(t)$')
+ax[2].legend()
 plt.show()
 plt.close()
 

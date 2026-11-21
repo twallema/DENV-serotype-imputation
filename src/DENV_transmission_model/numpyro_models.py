@@ -42,38 +42,38 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     # build initial conditions
     ## parameters
-    pi_mono2_raw = numpyro.sample("pi_mono2_raw", dist.Beta(2, 3).expand([N,]))
+    pi_mono2_raw = numpyro.sample("pi_mono2_raw", dist.Beta(2, 2).expand([N,]))
     pi_mono2 = numpyro.deterministic("pi_mono2", jnp.broadcast_to(pi_mono2_raw[:, None], (N, M)))         
 
-    f_P_raw = numpyro.sample("f_P_raw", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.25), scale=1/3).expand([N,]), dist.transforms.SigmoidTransform()))
+    f_P_raw = numpyro.sample("f_P_raw", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.25), scale=1).expand([N,]), dist.transforms.SigmoidTransform()))
     f_P = numpyro.deterministic("f_P", jnp.broadcast_to(f_P_raw[:, None], (N, M)))
 
-    f_P2_raw = numpyro.sample("f_P2_raw", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.33), scale=1).expand([N,]), dist.transforms.SigmoidTransform()))
+    f_P2_raw = numpyro.sample("f_P2_raw", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.50), scale=1).expand([N,]), dist.transforms.SigmoidTransform()))
     f_P2 = numpyro.deterministic("f_P2", jnp.broadcast_to(f_P2_raw[:, None], (N, M)))
 
     I_estim = numpyro.sample("I_estim", dist.HalfNormal(1e-4).expand([N,]))
 
     foi_year = numpyro.sample("foi_year", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.05), scale=1/5).expand([N,]), dist.transforms.SigmoidTransform()))   # 5% +- 1%
 
-    p0 = jnp.mean(transmission_model.seeding[:12,:,:], axis=0)
+    p0 = jnp.mean(transmission_model.seeding[:6,:,:], axis=0)   # first six months used to estimate initial serotype distribution
 
     ## build
-    pi_d = transmission_model.infection_history_from_foi(foi_year)
+    pi_d = numpyro.deterministic("pi_d", transmission_model.infection_history_from_foi(foi_year))
     S0 = transmission_model.build_initial_susceptibles(f_P, pi_d, pi_mono2) # (n_munis, n_age_groups, 16)
     P0 = transmission_model.build_initial_crossprotection(f_P, pi_d, f_P2)
     I0 = transmission_model.build_initial_infected(I_estim, p0, pi_d)
 
     # build time-dependent parameters
     ## homologeous reinfection probability
-    spline_basis = jnp.asarray(dmatrix(f"bs(x, df={int(D/24)-1}, degree=3, include_intercept=False)", {"x": range(D)}, return_type="dataframe").to_numpy())
+    spline_basis = jnp.asarray(dmatrix(f"bs(x, df={int(D/12)-1}, degree=3, include_intercept=False)", {"x": range(D)}, return_type="dataframe").to_numpy())
 
-    f1_coeff = numpyro.sample("f1_coeff", dist.Normal(0, 1).expand([spline_basis.shape[1], N]))
+    f1_coeff = numpyro.sample("f1_coeff", dist.Normal(0, 1).expand([spline_basis.shape[1], N]))     # TODO: RW(2) smoothness prior + force intercept at 50%?
     f1 = numpyro.deterministic("f1", jax.nn.sigmoid(spline_basis @ f1_coeff))
 
     f2_coeff = numpyro.sample("f2_coeff", dist.Normal(0, 1).expand([spline_basis.shape[1], N]))
     f2 = numpyro.deterministic("f2", jax.nn.sigmoid(spline_basis @ f2_coeff))
           
-    f3_raw = numpyro.sample("f3_raw", dist.Beta(1, 5))
+    f3_raw = numpyro.sample("f3_raw", dist.Beta(1, 3))
     f3 = numpyro.deterministic("f3", jnp.broadcast_to(f3_raw, (D,N)))
 
     f4 = jnp.zeros((D,N), dtype=f1.dtype)
@@ -82,9 +82,9 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     ## seasonality
     ### Global pattern
-    mu_beta = numpyro.sample("mu_beta", dist.Normal(jnp.log(2.5), 1/10).expand([N,]))
+    mu_beta = numpyro.sample("mu_beta", dist.Normal(jnp.log(2.5), 1/3).expand([N,]))
     A_beta = numpyro.sample("A_beta", dist.HalfNormal(1).expand([N,]))
-    phi_beta = numpyro.sample("phi_beta", dist.Normal((2 * jnp.pi * 6)/ 2, 1).expand([N,]))  # peaks in month 6 (june)
+    phi_beta = numpyro.sample("phi_beta", dist.Normal((2 * jnp.pi * 3)/ 12, 1).expand([N,]))  # peaks in month 3 (march)
     data_months = jnp.arange(D, dtype=jnp.float32)
     season = A_beta[:, None] * jnp.cos(2.0 * jnp.pi * data_months[None, :] / 12 - phi_beta[:, None]) # Shape: (n_clusters, n_months)
     ### AR(1) deviations
@@ -101,11 +101,11 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     # Reported fraction (cluster x age_group x degree x serotype x homologous indicator)
     kappa0_logit = numpyro.sample("kappa0_logit", dist.Normal(jsp.special.logit(1/10), 1))                  # intercept
     is_34 = jnp.array([0, 0, 1, 1], dtype=jnp.float32)                                                      # indicator prim/sec versus tert/quart
-    log_or_34 = numpyro.sample("log_or_34", dist.Normal(-3, 1/10))                                          # log-OR detecting prim/sec versus tert/quart
-    log_or_serotype = numpyro.sample("log_or_serotype", dist.Normal(0, 1/3).expand([n_serotypes - 1]))      # log-OR detecting serotypes (vs. baseline serotype)
+    log_or_34 = numpyro.sample("log_or_34", dist.Normal(-3, 1/3))                                          # log-OR detecting prim/sec versus tert/quart
+    log_or_serotype = numpyro.sample("log_or_serotype", dist.Normal(0, 1/100).expand([n_serotypes - 1]))      # log-OR detecting serotypes (vs. baseline serotype)
     log_or_serotype_full = jnp.concatenate([jnp.zeros((1,), dtype=log_or_serotype.dtype), log_or_serotype])
     is_hom = jnp.array([1, 0], dtype=jnp.float32)                                                           # indicator for homologous infection
-    log_or_hom = numpyro.sample("log_or_hom", dist.Normal(-3, 1/10))
+    log_or_hom = numpyro.sample("log_or_hom", dist.Normal(-3, 1/3))                                        # TODO: check if applied right (to)
     # Shape: (degree x serotype x homologous indicator)
     logit_kappa = kappa0_logit + log_or_34 * is_34[:, None, None] + log_or_serotype_full[None, :, None] + log_or_hom * is_hom[None, None, :]
     # Broadcast logit_kappa over the clusters and age groups
@@ -113,7 +113,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     # build clinical parameters
     gamma = 0.5
-    omega = numpyro.sample("omega", dist.LogNormal(3.2, 0.2))     
+    omega = numpyro.sample("omega", dist.LogNormal(3.6, 0.33))     
 
     # run transmission model
     simout = transmission_model.sim(kappa, gamma, omega, beta_monthly[:end_sim_data_index+1], p_hom_monthly[:end_sim_data_index+1], S0, I0, P0, simulation_dates[-1])

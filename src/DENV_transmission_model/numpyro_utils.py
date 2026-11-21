@@ -22,7 +22,7 @@ import jax
 import jax.numpy as jnp
 import optax
 from numpyro.infer.util import initialize_model
-from numpyro.infer import init_to_median, init_to_value
+from numpyro.infer import init_to_median, init_to_uniform, init_to_value
 
 abs_dir = os.path.dirname(__file__)
 
@@ -279,7 +279,7 @@ def find_map(model, model_kwargs, n_preoptim=1000, lr=1e-2, map_params=None):
     # Initialise Adams optimizer
     # --------------------------------------------------
 
-    optimizer = optax.adam(lr)
+    optimizer = optax.adamw(lr)
     opt_state = optimizer.init(z)
 
     # --------------------------------------------------
