@@ -13,13 +13,23 @@ Licensed under CC BY-NC-SA 4.0
 ##################
 
 import os
+import sys
+import time
 import pandas as pd
 import polars as pl
-import jax.numpy as jnp
 
+import jax
+import jax.numpy as jnp
+import optax
+from numpyro.infer.util import initialize_model
+from numpyro.infer import init_to_median, init_to_value
 
 abs_dir = os.path.dirname(__file__)
 
+
+##################
+## Getting data ##
+##################
 
 def get_incidence_data(data_dir, muni_clusters, data_start):
     """
@@ -213,3 +223,105 @@ def _get_demography_by_yearofage(data_dir, muni_clusters, year):
     demo = demo.groupby(by=[cluster_col, 'age'])['population'].sum().reset_index()
 
     return jnp.array(demo.pivot(index="age", columns=cluster_col, values="population").to_numpy()) # (= jnp array of shape (81, n_clusters), containing population by year of age from 0 to 80 for all clusters)
+
+
+#####################
+## Finding the MAP ##
+#####################
+
+def find_map(model, model_kwargs, n_preoptim=1000, lr=1e-2, map_params=None):
+    """
+    Find the MAP estimate of a NumPyro model using Adam optimization.
+
+    Parameters
+    ----------
+    model : callable
+        NumPyro model.
+
+    model_kwargs : dict
+        Keyword arguments passed to `training_model`.
+
+    n_preoptim : int
+        Number of Adam optimization steps.
+
+    lr : float
+        Adam learning rate.
+
+    Returns
+    -------
+    map_params : dict
+        MAP estimate in the constrained parameter space used by the NumPyro model.
+    """
+
+    # --------------------------------------------------
+    # Initialize model in unconstrained space
+    # --------------------------------------------------
+
+    rng_key = jax.random.PRNGKey(int(time.time()))
+
+    if map_params:
+        init_strategy=init_to_value(values=map_params)
+    else:
+        init_strategy=init_to_median()
+
+    init_params_info, potential_fn, postprocess_fn, _ = (
+        initialize_model(
+            rng_key,
+            model,
+            model_kwargs=model_kwargs,
+            init_strategy=init_strategy
+        )
+    )
+
+    z = init_params_info.z
+
+    # --------------------------------------------------
+    # Initialise Adams optimizer
+    # --------------------------------------------------
+
+    optimizer = optax.adam(lr)
+    opt_state = optimizer.init(z)
+
+    # --------------------------------------------------
+    # Define ptimization step
+    # --------------------------------------------------
+
+    @jax.jit
+    def step(z, opt_state):
+
+        potential_energy, grads = jax.value_and_grad(potential_fn)(z)
+
+        updates, opt_state = optimizer.update(
+            grads,
+            opt_state,
+            z,
+        )
+
+        z = optax.apply_updates(
+            z,
+            updates,
+        )
+
+        return z, opt_state, potential_energy
+
+    # --------------------------------------------------
+    # Optimize and print progress
+    # --------------------------------------------------
+
+    for i in range(n_preoptim+1):
+
+        z, opt_state, pe = step(z, opt_state)
+
+        if i % 100 == 0:
+            print(i, float(pe))
+            sys.stdout.flush()
+
+    # --------------------------------------------------
+    # Transform back to constrained space
+    # --------------------------------------------------
+
+    map_params = postprocess_fn(z)
+
+    return map_params
+
+# TODO: sequential optimiser

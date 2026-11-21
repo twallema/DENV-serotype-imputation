@@ -121,6 +121,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     # save simulation output
     lambda_t = numpyro.deterministic("lambda_t", jnp.sum(lambda_t, axis=-1)) 
+    dI_obs = numpyro.deterministic("dI_obs", dI_obs)
     p_obs = numpyro.deterministic("p_obs", p_obs)
     p_true = numpyro.deterministic("p_true", p_true)
 
