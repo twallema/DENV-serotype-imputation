@@ -105,7 +105,7 @@ print('pre-optimizing MAP\n')
 print('(iter, score)', flush=True)
 
 # run optimiser
-map_params = find_map(single_cluster_training_model, model_kwargs, 1500)
+map_params = find_map(single_cluster_training_model, model_kwargs, 2500)
 
 # TODO: parameters to a csv
 
@@ -141,8 +141,6 @@ plt.close()
 
 # TODO: add number of susceptibles per serotype + number of heterologeous infections
 
-import sys
-sys.exit()
 
 # Sample numpyro model
 # ~~~~~~~~~~~~~~~~~~~~
@@ -200,7 +198,10 @@ print(mcmc.get_extra_fields()["potential_energy"])
 # ~~~~~~~~~~~~~~~~
 
 # convert to arviz
-trace = arviz.from_numpyro(mcmc)
+trace = arviz.from_numpyro(mcmc)    # TODO: add coords and dims
+
+# save traces to a netcdf
+trace.to_netcdf(os.path.join(output_folder, "trace.nc"))
 
 # Generate traceplots
 variables2plot = ['pi_mono2_raw', 'f_P_raw', 'f_P2_raw', 'I_estim', 'foi_year', 'pi_d', 'f1_coeff', 'f2_coeff', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta',
@@ -216,3 +217,5 @@ for var in variables2plot:
     
 # Visualise goodness-of-fit
 # ~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# TODO

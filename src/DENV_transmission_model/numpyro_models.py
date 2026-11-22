@@ -112,7 +112,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     # build clinical parameters
     gamma = 0.5
-    omega = numpyro.sample("omega", dist.LogNormal(3.15, 0.5))     
+    omega = numpyro.sample("omega", dist.LogNormal(3.2, 0.33))     
 
     # run transmission model
     simout = transmission_model.sim(kappa, gamma, omega, beta_monthly[:end_sim_data_index+1], p_hom_monthly[:end_sim_data_index+1], S0, I0, P0, simulation_dates[-1])
