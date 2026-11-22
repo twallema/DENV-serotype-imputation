@@ -25,9 +25,9 @@ output_folder = ''
 
 # model settings
 ## what cluster of municipalities to simulate
-RGINT = 2601
+CD_RGINT = 2601
 mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
-muni_clusters = mapping.loc[mapping['CD_RGINT'] == RGINT, ('CD_MUN', 'CD_RGINT')]    # TODO: switch to clustering
+muni_clusters = mapping.loc[mapping['CD_RGINT'] == CD_RGINT, ('CD_MUN', 'CD_RGINT')]    # TODO: switch to clustering
 n_munis = len(muni_clusters['CD_RGINT'].unique())
 ## what age groups to simulate
 age_groups = [(0, 1), (1, 6), (6, 12), (12, 18), (18, 25), (25,35), (35,55), (55,120)]
@@ -36,7 +36,7 @@ n_age_groups = len(age_groups)
 n_serotypes = 4
 ## when to start the simulation
 start_sim = datetime(1998, 9, 1)
-end_sim = datetime(2004, 1, 1)
+end_sim = datetime(2006, 1, 1)
 simulation_dates = pd.date_range(start=start_sim, end=end_sim, freq="ME").to_pydatetime().tolist()
 
 ## when to introduce DENV 3 and DENV 4
@@ -88,7 +88,6 @@ for cluster, seroprev_df in seroprevalence.items():
         ax.set_ylim(0, 100)
         ax.tick_params(axis='x', rotation=45)
     fig.tight_layout()
-    plt.show()
     plt.close()
 
 
@@ -108,7 +107,7 @@ print('pre-optimizing MAP\n')
 print('(iter, score)', flush=True)
 
 # run optimiser
-map_params = find_map(single_cluster_training_model, model_kwargs, 1000)
+map_params = find_map(single_cluster_training_model, model_kwargs, 2000)
 
 # TODO: parameters to a csv?
 
@@ -168,11 +167,18 @@ plt.show()
 plt.close()
 
 ## Seroprevalence data versus simulation
-
-# TODO
+### TODO: automate fit --> check if there are experiments
+### TODO: add a likelihood to the model for sero-experiments
+fig,ax=plt.subplots()
+seroprevalence[CD_RGINT]['2005_BR008'].plot.bar(ax=ax, legend=False)
+seroprevalence[CD_RGINT]['2005_BR115'].plot.bar(ax=ax, legend=False)
+ax.plot(age_groups_labels, jnp.squeeze(map_params['seropositive_rel'])[-1], marker = 'x', color='red')
+plt.show()
+plt.close()
 
 import sys
 sys.exit()
+
 
 # Sample numpyro model
 # ~~~~~~~~~~~~~~~~~~~~
@@ -231,7 +237,7 @@ print(mcmc.get_extra_fields()["potential_energy"])
 
 # define coordinates
 coords = {
-    'cluster': [RGINT,],
+    'cluster': [CD_RGINT,],
     'age_group': age_groups_labels,
     'data_date': data_dates,
     'simulation_date': simulation_dates,
