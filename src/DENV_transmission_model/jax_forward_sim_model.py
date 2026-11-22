@@ -441,8 +441,8 @@ class DengueModel:
         # --- Infectious ---------------------------------------------------------------
         f_per_I = p_hom_t @ L                                                      # (n_I,)
         lambda_per_I = lambda_t @   L                                              # (n_I,)
-        dI_het_dt = lambda_per_I[None, :] * (S_t @   K_het)                        # (n_age_groups, n_I)
         dI_hom_dt = lambda_per_I[None, :] * f_per_I[None, :] * (S_t @ K_hom)       # (n_age_groups, n_I)
+        dI_het_dt = lambda_per_I[None, :] * (S_t @   K_het)                        # (n_age_groups, n_I)
         dI_dt = (- deaths_t[:, None] * I_t
                 - (1 / gamma) * I_t
                 + dI_het_dt + dI_hom_dt
@@ -549,8 +549,8 @@ class DengueModel:
             0: S_t (n_months, n_age_groups, 16)
             1: I_t (n_months, n_age_groups, 32)
             2: P_t (n_months, n_age_groups, 32)
-            3: C_het_t (n_months, n_age_groups, 32) --> cumulative of dI_het_t
-            4: C_hom_t (n_months, n_age_groups, 32) --> cumulative of dI_hom_t
+            3: C_hom_t (n_months, n_age_groups, 32) --> cumulative of dI_het_t
+            4: C_het_t (n_months, n_age_groups, 32) --> cumulative of dI_hom_t
         """
 
         # Create diffrax term
@@ -588,8 +588,8 @@ class DengueModel:
             0: S_t (n_months, n_clusters, n_age_groups, 16)
             1: I_t (n_months, n_clusters, n_age_groups, 32)
             2: P_t (n_months, n_clusters, n_age_groups, 32)
-            3: C_het_t (n_months, n_clusters, n_age_groups, 32)
-            4: C_hom_t (n_months, n_clusters, n_age_groups, 32)
+            3: C_hom_t (n_months, n_clusters, n_age_groups, 32)
+            4: C_het_t (n_months, n_clusters, n_age_groups, 32)
         """
 
         # define where to find spatial axis
@@ -665,7 +665,7 @@ class DengueModel:
         dI_expanded = jax.nn.softplus(jnp.stack([jnp.einsum("tcai,ids->tcads", dI_hom_t, self.O), jnp.einsum("tcai,ids->tcads", dI_het_t, self.O)], axis=-1))
         
         ### reshape S into susceptibility slots per (time, cluster, age_group, infection_degree, serotype, hom/het infection)
-        S_expanded = jnp.stack([jnp.einsum("tcai,ids->tcads", S_t, self.R_hom), jnp.einsum("tcai,ids,tcs->tcads", S_t, self.R_het, p_hom_monthly)], axis=-1)
+        S_expanded = jnp.stack([jnp.einsum("tcai,ids,tcs->tcads", S_t, self.R_hom, p_hom_monthly), jnp.einsum("tcai,ids->tcads", S_t, self.R_het)], axis=-1)
         
         ## compute observations
         ### compute observed number of cases per serotype

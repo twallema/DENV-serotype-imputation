@@ -125,17 +125,17 @@ for i in range(4):
     ax[i+2].plot(simulation_dates, jnp.squeeze(map_params['p_true'])[:, i], color='red')
     ax[i+2].set_ylabel(f"DENV {i+1} (%)", fontsize=8)
 ax[i+3].stackplot(simulation_dates, 100*jnp.transpose(jnp.squeeze(map_params['p_true'])), labels=['DENV1', 'DENV2', 'DENV3', 'DENV4'])
-ax[i+3].legend(fontsize=8, loc=1, framealpha=1)
-ax[i+3].set_ylabel("Serotypes (%)")
+ax[i+3].legend(fontsize=6, loc=1, framealpha=1)
+ax[i+3].set_ylabel("Serotypes (%)", fontsize=8)
 plt.show()
 plt.close()
 
 ## latent states
 fig,ax=plt.subplots(nrows=5, figsize=(8.3, 11.7/3*2))
 ### Transmission
-ax[0].plot(data_dates[:end_sim_data_index], jnp.squeeze(map_params['beta_monthly_season'])[:end_sim_data_index], color='blue', linestyle= '-.', label='seasonal')
-ax[0].plot(data_dates[:end_sim_data_index], jnp.squeeze(map_params['beta_monthly_shock'])[:end_sim_data_index], color='red', linestyle = '-.', label='shock')
-ax[0].plot(data_dates[:end_sim_data_index], jnp.squeeze(map_params['beta_monthly'])[:end_sim_data_index], color='black', label='total')
+ax[0].plot(data_dates[:end_sim_data_index], jnp.squeeze(map_params['beta_monthly_season'])[:end_sim_data_index], color='black', label='seasonal', linewidth=1)
+ax[0].plot(data_dates[:end_sim_data_index], jnp.squeeze(map_params['beta_monthly_shock'])[:end_sim_data_index], color='black', linestyle = '-.', label='shock', linewidth=1)
+ax[0].plot(data_dates[:end_sim_data_index], jnp.squeeze(map_params['beta_monthly'])[:end_sim_data_index], color='red', label='total', linewidth=2)
 ax[0].set_ylabel(r'$\beta(t)$', fontsize=8)
 ax[0].legend(fontsize=8, loc=1, framealpha=1)
 ### Homologous reinfection
