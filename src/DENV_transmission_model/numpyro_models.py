@@ -87,7 +87,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     data_months = jnp.arange(D, dtype=jnp.float32)
     season = A_beta[:, None] * jnp.cos(2.0 * jnp.pi * data_months[None, :] / 12 - phi_beta[:, None]) # Shape: (n_clusters, n_months)
     ### AR(1) deviations
-    rho_ar_beta = numpyro.sample("rho_ar_beta", dist.Beta(1, 5))     # persistence
+    rho_ar_beta = 0.5
     sigma_ar_beta = numpyro.sample("sigma_ar_beta", dist.HalfNormal(1/100))
     eps_raw = numpyro.sample("eps_raw", dist.Normal(0, 1).expand([D, N]))
     u0 = jnp.zeros((N,), dtype=jnp.float32)
@@ -96,6 +96,9 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     ### Combine
     log_beta_monthly = mu_beta[None, :] + season.T + u
     beta_monthly = numpyro.deterministic("beta_monthly", jnp.exp(log_beta_monthly))
+    ### Save parts for diagnosis
+    numpyro.deterministic("beta_monthly_season", jnp.exp(mu_beta[None, :] + season.T))
+    numpyro.deterministic("beta_monthly_shock", jnp.exp(u))
 
     # Reported fraction (cluster x age_group x degree x serotype x homologous indicator)
     kappa0_logit = numpyro.sample("kappa0_logit", dist.Normal(jsp.special.logit(1/10), 1))                  # intercept
@@ -116,13 +119,14 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     # run transmission model
     simout = transmission_model.sim(kappa, gamma, omega, beta_monthly[:end_sim_data_index+1], p_hom_monthly[:end_sim_data_index+1], S0, I0, P0, simulation_dates[-1])
-    _, _, _, _, _, _, _, dI_obs, p_obs, p_true, lambda_t = simout
+    _, _, _, _, _, _, S_expanded, dI_obs, p_obs, p_true, lambda_t = simout
 
     # save simulation output
     lambda_t = numpyro.deterministic("lambda_t", jnp.sum(lambda_t, axis=-1)) 
     dI_obs = numpyro.deterministic("dI_obs", dI_obs)
     p_obs = numpyro.deterministic("p_obs", p_obs)
     p_true = numpyro.deterministic("p_true", p_true)
+    S_expanded = numpyro.deterministic("S_expanded", S_expanded)
 
     # build observations
     ## observed cases (Poisson)

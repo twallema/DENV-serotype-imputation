@@ -105,7 +105,7 @@ print('pre-optimizing MAP\n')
 print('(iter, score)', flush=True)
 
 # run optimiser
-map_params = find_map(single_cluster_training_model, model_kwargs, 2500)
+map_params = find_map(single_cluster_training_model, model_kwargs, 1000)
 
 # TODO: parameters to a csv
 
@@ -114,33 +114,53 @@ end_sim_data_index = calculate_simend_data_index(simulation_dates, data_dates)
 
 ## likelihood
 serotype_incidence_rel = serotype_incidence / jnp.sum(serotype_incidence, axis=-1)[:, None]
-fig,ax=plt.subplots(nrows=6, figsize=(8.3, 11.7/3*2))
+fig,ax=plt.subplots(nrows=7, figsize=(8.3, 11.7/3*2))
 ax[0].plot(data_dates[:end_sim_data_index], total_incidence[:end_sim_data_index], marker='o', markerfacecolor=None, markersize=2, color='black')
 ax[0].plot(simulation_dates, jnp.squeeze(jnp.sum(map_params['dI_obs'], axis=-1)), color='red')
-ax[0].set_ylabel("DENV inc. (-)")
+ax[0].set_ylabel("DENV inc. (-)", fontsize=8)
 ax[1].plot(data_dates[:end_sim_data_index], jnp.sum(serotype_incidence[:end_sim_data_index], axis=-1), marker='o', markerfacecolor=None, markersize=2, color='black')
-ax[1].set_ylabel("Serotyped (-)")
+ax[1].set_ylabel("Serotyped (-)", fontsize=8)
 for i in range(4):
     ax[i+2].plot(data_dates[:end_sim_data_index], serotype_incidence_rel[:end_sim_data_index, i], marker='o', markerfacecolor=None, markersize=2, color='black')
     ax[i+2].plot(simulation_dates, jnp.squeeze(map_params['p_true'])[:, i], color='red')
-    ax[i+2].set_ylabel(f"DENV {i+1} (%)")
+    ax[i+2].set_ylabel(f"DENV {i+1} (%)", fontsize=8)
+ax[i+3].stackplot(simulation_dates, 100*jnp.transpose(jnp.squeeze(map_params['p_true'])), labels=['DENV1', 'DENV2', 'DENV3', 'DENV4'])
+ax[i+3].legend(fontsize=8, loc=1, framealpha=1)
+ax[i+3].set_ylabel("Serotypes (%)")
 plt.show()
 plt.close()
 
 ## latent states
-fig,ax=plt.subplots(nrows=3, figsize=(8.3, 11.7/3*2))
-ax[0].stackplot(simulation_dates, jnp.transpose(jnp.squeeze(map_params['p_true'])), labels=['DENV1', 'DENV2', 'DENV3', 'DENV4'])
-ax[0].legend()
-ax[1].plot(data_dates[:end_sim_data_index], jnp.squeeze(map_params['beta_monthly'])[:end_sim_data_index], color='black')
-ax[1].set_ylabel(r'$\beta(t)$')
-ax[2].plot(data_dates[:end_sim_data_index], jnp.squeeze(map_params['p_hom_monthly'])[:end_sim_data_index], label=['DENV1', 'DENV2', 'DENV3', 'DENV4'])
-ax[2].set_ylabel(r'$p_{hom,i}(t)$')
-ax[2].legend()
+fig,ax=plt.subplots(nrows=5, figsize=(8.3, 11.7/3*2))
+### Transmission
+ax[0].plot(data_dates[:end_sim_data_index], jnp.squeeze(map_params['beta_monthly_season'])[:end_sim_data_index], color='blue', linestyle= '-.', label='seasonal')
+ax[0].plot(data_dates[:end_sim_data_index], jnp.squeeze(map_params['beta_monthly_shock'])[:end_sim_data_index], color='red', linestyle = '-.', label='shock')
+ax[0].plot(data_dates[:end_sim_data_index], jnp.squeeze(map_params['beta_monthly'])[:end_sim_data_index], color='black', label='total')
+ax[0].set_ylabel(r'$\beta(t)$', fontsize=8)
+ax[0].legend(fontsize=8, loc=1, framealpha=1)
+### Homologous reinfection
+ax[1].plot(data_dates[:end_sim_data_index], jnp.squeeze(map_params['p_hom_monthly'])[:end_sim_data_index], label=['DENV1', 'DENV2', 'DENV3', 'DENV4'])
+ax[1].set_ylabel(r'$p_{hom,i}(t)$', fontsize=8)
+ax[1].legend(fontsize=8, loc=1, framealpha=1)
+### Susceptibility slots per serotype
+ax[2].plot(simulation_dates, jnp.squeeze(jnp.sum(map_params['S_expanded'], axis=(2, 3, 5)))[:, 0], color='black', label='DENV1')
+ax[2].plot(simulation_dates, jnp.squeeze(jnp.sum(map_params['S_expanded'], axis=(2, 3, 5)))[:, 1], color='red', label='DENV2')
+ax[2].plot(simulation_dates, jnp.squeeze(jnp.sum(map_params['S_expanded'], axis=(2, 3, 5)))[:, 2], color='green', label='DENV3')
+ax[2].plot(simulation_dates, jnp.squeeze(jnp.sum(map_params['S_expanded'], axis=(2, 3, 5)))[:, 3], color='blue', label='DENV4')
+ax[2].plot(simulation_dates, jnp.squeeze(jnp.sum(map_params['S_expanded'], axis=(2, 3)))[:, 0, 0], color='black', label='DENV1', linestyle='--')
+ax[2].plot(simulation_dates, jnp.squeeze(jnp.sum(map_params['S_expanded'], axis=(2, 3)))[:, 1, 0], color='red', label='DENV2', linestyle='--')
+ax[2].plot(simulation_dates, jnp.squeeze(jnp.sum(map_params['S_expanded'], axis=(2, 3)))[:, 2, 0], color='green', label='DENV3', linestyle='--')
+ax[2].plot(simulation_dates, jnp.squeeze(jnp.sum(map_params['S_expanded'], axis=(2, 3)))[:, 3, 0], color='blue', label='DENV4', linestyle='--')
+ax[2].set_ylabel('Susceptibility slots (-)', fontsize=8)
+### Susceptibles by number of previous heterologous infections
+ax[3].stackplot(simulation_dates, jnp.transpose(jnp.squeeze(jnp.sum(map_params['S_expanded'], axis=(2, 4, 5)))), labels=['0', '1', '2', '3', '4'])
+ax[3].legend(fontsize=8, loc=1, framealpha=1)
+ax[3].set_ylabel('Susceptibles (-)', fontsize=8)
+### FOI
+ax[4].plot(simulation_dates, jnp.squeeze(map_params['lambda_t'])*100, color='black')
+ax[4].set_ylabel('FOI (%)', fontsize=8)
 plt.show()
 plt.close()
-
-# TODO: add number of susceptibles per serotype + number of heterologeous infections
-
 
 # Sample numpyro model
 # ~~~~~~~~~~~~~~~~~~~~
@@ -204,7 +224,7 @@ trace = arviz.from_numpyro(mcmc)    # TODO: add coords and dims
 trace.to_netcdf(os.path.join(output_folder, "trace.nc"))
 
 # Generate traceplots
-variables2plot = ['pi_mono2_raw', 'f_P_raw', 'f_P2_raw', 'I_estim', 'foi_year', 'pi_d', 'f1_coeff', 'f2_coeff', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta',
+variables2plot = ['pi_mono2_raw', 'f_P_raw', 'f_P2_raw', 'I_estim', 'foi_year', 'pi_d', 'f1_coeff', 'f2_coeff', 'mu_beta', 'A_beta', 'phi_beta', 'sigma_ar_beta',
                   'kappa0_logit', 'omega', 'log_or_34', 'log_or_serotype', 'log_or_hom', 'phi']
 
 # Save original traces
