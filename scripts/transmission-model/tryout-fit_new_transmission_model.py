@@ -25,11 +25,13 @@ output_folder = ''
 
 # model settings
 ## what cluster of municipalities to simulate
+RGINT = 2601
 mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
-muni_clusters = mapping.loc[mapping['CD_RGINT'] == 2601, ('CD_MUN', 'CD_RGINT')]    # TODO: switch to clustering
+muni_clusters = mapping.loc[mapping['CD_RGINT'] == RGINT, ('CD_MUN', 'CD_RGINT')]    # TODO: switch to clustering
 n_munis = len(muni_clusters['CD_RGINT'].unique())
 ## what age groups to simulate
 age_groups = [(0, 1), (1, 6), (6, 12), (12, 18), (18, 25), (25,35), (35,55), (55,120)]
+age_groups_labels = [f"[{start}, {end})" for start, end in age_groups]
 n_age_groups = len(age_groups)
 n_serotypes = 4
 ## when to start the simulation
@@ -58,7 +60,7 @@ data_dates, total_incidence, serotype_incidence = get_incidence_data(data_dir, m
 serotype_incidence = jnp.nan_to_num(serotype_incidence, nan=0.0)    # dirichletMultinomial doesn't work with NA
 ## seroprevalence
 data_dir = os.path.join(abs_dir, '../../data/interim/seroprevalence/seroprevalence.csv')
-seroprevalence = get_seroprevalence_data(data_dir, age_groups, muni_clusters)
+seroprevalence = get_seroprevalence_data(data_dir, age_groups, muni_clusters)   # TODO: add an end year
 
 # visualise the serotyped fractions
 ## used to set introduction dates of DENV3 and DENV4
@@ -86,6 +88,7 @@ for cluster, seroprev_df in seroprevalence.items():
         ax.set_ylim(0, 100)
         ax.tick_params(axis='x', rotation=45)
     fig.tight_layout()
+    plt.show()
     plt.close()
 
 
@@ -107,7 +110,7 @@ print('(iter, score)', flush=True)
 # run optimiser
 map_params = find_map(single_cluster_training_model, model_kwargs, 1000)
 
-# TODO: parameters to a csv
+# TODO: parameters to a csv?
 
 # visualise the result
 end_sim_data_index = calculate_simend_data_index(simulation_dates, data_dates)
@@ -164,6 +167,12 @@ ax[4].set_ylabel('FOI (%)', fontsize=8)
 plt.show()
 plt.close()
 
+## Seroprevalence data versus simulation
+
+# TODO
+
+import sys
+sys.exit()
 
 # Sample numpyro model
 # ~~~~~~~~~~~~~~~~~~~~
@@ -188,8 +197,8 @@ kernel = NUTS(
 
 mcmc = MCMC(
     kernel,
-    num_warmup=25,
-    num_samples=25,
+    num_warmup=2,
+    num_samples=2,
     num_chains=n_chains,
     chain_method="parallel",
     progress_bar=nuts_progress_bar,
@@ -220,8 +229,26 @@ print(mcmc.get_extra_fields()["potential_energy"])
 # Visualise traces
 # ~~~~~~~~~~~~~~~~
 
+# define coordinates
+coords = {
+    'cluster': [RGINT,],
+    'age_group': age_groups_labels,
+    'data_date': data_dates,
+    'simulation_date': simulation_dates,
+    'serotype': [1, 2, 3, 4],
+    'n_prior_het_infections_pi_d': [0, 1, 2],
+    'n_prior_het_infections': [0, 1, 2, 3, 4],
+    'current_het_infection': [1, 2, 3, 4],
+    'infection_type': ['hom', 'het']
+}
+
 # convert to arviz
-trace = arviz.from_numpyro(mcmc)    # TODO: add coords and dims
+trace = arviz.from_numpyro(mcmc, coords=coords, dims=single_cluster_training_model_RV_dims)
+
+print(trace)
+
+import sys
+sys.exit()
 
 # save traces to a netcdf
 trace.to_netcdf(os.path.join(output_folder, "trace.nc"))

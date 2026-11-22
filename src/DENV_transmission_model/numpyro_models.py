@@ -27,8 +27,25 @@ import matplotlib.pyplot as plt
 ####################
 
 single_cluster_training_model_RV_dims = {
-    # ascertainment
-    "log_rho_state_raw": ["state"],
+    'pi_d': ['cluster', 'age_group', 'prev_heterological_infections_pi_d'],
+    'f1': ['data_date', 'cluster'],
+    'f2': ['data_date', 'cluster'],
+    'f3': ['data_date', 'cluster'],
+    'f4': ['data_date', 'cluster'],
+    'p_hom_monthly': ['data_date', 'cluster', 'serotype'],
+    'eps_raw': ['data_date', 'cluster'],
+    'beta_monthly': ['data_date', 'cluster'],
+    'beta_monthly_season': ['data_date', 'cluster'],
+    'beta_monthly_shock': ['data_date', 'cluster'],
+    'log_or_serotype': ['serotype'],
+    'kappa': ['cluster', 'age_group', 'current_het_infection', 'serotype', 'infection_type'],
+    'lambda_t': ['simulation_date', 'cluster'],
+    'dI_obs': ['simulation_date', 'cluster', 'age_group'],
+    'p_true': ['simulation_date', 'cluster', 'serotype'],
+    'p_obs': ['simulation_date', 'cluster', 'serotype'],
+    'S_expanded': ['simulation_date', 'cluster', 'age_group', 'n_prior_het_infections', 'serotype', 'infection_type'],
+    'D_obs': ['simulation_date', 'cluster'],
+    'Y_obs': ['simulation_date', 'serotype']
 }
 
 
@@ -101,15 +118,15 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     numpyro.deterministic("beta_monthly_shock", jnp.exp(u))
 
     # Reported fraction (cluster x age_group x degree x serotype x homologous indicator)
-    kappa0_logit = numpyro.sample("kappa0_logit", dist.Normal(jsp.special.logit(1/10), 1))                  # intercept
-    is_34 = jnp.array([0, 0, 1, 1], dtype=jnp.float32)                                                      # indicator prim/sec versus tert/quart
-    log_or_34 = numpyro.sample("log_or_34", dist.Normal(-3, 1/3))                                          # log-OR detecting prim/sec versus tert/quart
-    log_or_serotype = numpyro.sample("log_or_serotype", dist.Normal(0, 1/10).expand([n_serotypes - 1]))      # log-OR detecting serotypes (vs. baseline serotype)
-    log_or_serotype_full = jnp.concatenate([jnp.zeros((1,), dtype=log_or_serotype.dtype), log_or_serotype])
+    kappa0_logit = numpyro.sample("kappa0_logit", dist.Normal(jsp.special.logit(1/10), 1))                          # intercept
+    is_34 = jnp.array([0, 0, 1, 1], dtype=jnp.float32)                                                              # indicator prim/sec versus tert/quart
+    log_or_34 = numpyro.sample("log_or_34", dist.Normal(-3, 1/3))                                                   # log-OR detecting prim/sec versus tert/quart
+    log_or_serotype_raw = numpyro.sample("log_or_serotype_raw", dist.Normal(0, 1/10).expand([n_serotypes - 1]))     # log-OR detecting serotypes (vs. baseline serotype)
+    log_or_serotype = numpyro.deterministic("log_or_serotype", jnp.concatenate([jnp.zeros((1,), dtype=log_or_serotype_raw.dtype), log_or_serotype_raw]))
     is_hom = jnp.array([1, 0], dtype=jnp.float32)                                                           # indicator for homologous infection
     log_or_hom = numpyro.sample("log_or_hom", dist.Normal(-3, 1/3))                                        # TODO: check if applied right (to)
     # Shape: (degree x serotype x homologous indicator)
-    logit_kappa = kappa0_logit + log_or_34 * is_34[:, None, None] + log_or_serotype_full[None, :, None] + log_or_hom * is_hom[None, None, :]
+    logit_kappa = kappa0_logit + log_or_34 * is_34[:, None, None] + log_or_serotype[None, :, None] + log_or_hom * is_hom[None, None, :]
     # Broadcast logit_kappa over the clusters and age groups
     kappa = numpyro.deterministic("kappa", jax.nn.sigmoid(jnp.broadcast_to(logit_kappa[None, None, :, :, :], (N, M, 4, n_serotypes, 2))))
 
