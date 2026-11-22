@@ -26,7 +26,7 @@ output_folder = ''
 # model settings
 ## what cluster of municipalities to simulate
 mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
-muni_clusters = mapping.loc[mapping['CD_RGINT'] == 2601, ('CD_MUN', 'CD_RGINT')]    # try Rio
+muni_clusters = mapping.loc[mapping['CD_RGINT'] == 2601, ('CD_MUN', 'CD_RGINT')]    # TODO: switch to clustering
 n_munis = len(muni_clusters['CD_RGINT'].unique())
 ## what age groups to simulate
 age_groups = [(0, 1), (1, 6), (6, 12), (12, 18), (18, 25), (25,35), (35,55), (55,120)]
@@ -34,12 +34,12 @@ n_age_groups = len(age_groups)
 n_serotypes = 4
 ## when to start the simulation
 start_sim = datetime(1998, 9, 1)
-end_sim = datetime(2003, 1, 1)
+end_sim = datetime(2004, 1, 1)
 simulation_dates = pd.date_range(start=start_sim, end=end_sim, freq="ME").to_pydatetime().tolist()
 
 ## when to introduce DENV 3 and DENV 4
 intro_dates_DENV3 = [datetime(1999, 3, 1),]
-intro_dates_DENV4 =[datetime(2004, 1, 1),]
+intro_dates_DENV4 =[datetime(2008, 1, 1),]
 
 
 # Initialise the transmission model
@@ -105,7 +105,7 @@ print('pre-optimizing MAP\n')
 print('(iter, score)', flush=True)
 
 # run optimiser
-map_params = find_map(single_cluster_training_model, model_kwargs, 1000)
+map_params = find_map(single_cluster_training_model, model_kwargs, 1500)
 
 # TODO: parameters to a csv
 
@@ -167,8 +167,8 @@ kernel = NUTS(
 
 mcmc = MCMC(
     kernel,
-    num_warmup=100,
-    num_samples=100,
+    num_warmup=250,
+    num_samples=250,
     num_chains=n_chains,
     chain_method="parallel",
     progress_bar=nuts_progress_bar,
@@ -203,8 +203,8 @@ print(mcmc.get_extra_fields()["potential_energy"])
 trace = arviz.from_numpyro(mcmc)
 
 # Generate traceplots
-variables2plot = ['pi_mono2_raw', 'f_P_raw', 'f_P2_raw', 'I_estim', 'foi_year', 'pi_d', 'f1_coeff', 'f2_coeff', 'f3_raw', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta',
-                  'kappa0_logit', 'omega', 'log_or_34', 'log_or_serotype', 'log_or_hom', 'alpha', 'phi', 'VIF']
+variables2plot = ['pi_mono2_raw', 'f_P_raw', 'f_P2_raw', 'I_estim', 'foi_year', 'pi_d', 'f1_coeff', 'f2_coeff', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta',
+                  'kappa0_logit', 'omega', 'log_or_34', 'log_or_serotype', 'log_or_hom', 'phi', 'VIF']
 
 # Save original traces
 os.makedirs(os.path.join(output_folder, 'traces'), exist_ok=True)

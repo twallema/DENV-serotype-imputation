@@ -53,7 +53,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     I_estim = numpyro.sample("I_estim", dist.HalfNormal(1e-4).expand([N,]))
 
-    foi_year = numpyro.sample("foi_year", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.05), scale=1/3).expand([N,]), dist.transforms.SigmoidTransform()))   # 5% +- 1%
+    foi_year = numpyro.sample("foi_year", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.05), scale=1/3).expand([N,]), dist.transforms.SigmoidTransform()))   # 5% +- 2%
 
     p0 = jnp.mean(transmission_model.seeding[:6,:,:], axis=0)   # first six months used to estimate initial serotype distribution
 
@@ -65,7 +65,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     # build time-dependent parameters
     ## homologeous reinfection probability
-    spline_basis = jnp.asarray(dmatrix(f"bs(x, df={int(D/12)-1}, degree=3, include_intercept=False)", {"x": range(D)}, return_type="dataframe").to_numpy())
+    spline_basis = jnp.asarray(dmatrix(f"bs(x, df={int(D/6)-1}, degree=3, include_intercept=False)", {"x": range(D)}, return_type="dataframe").to_numpy())
 
     f1_coeff = numpyro.sample("f1_coeff", dist.Normal(0, 1).expand([spline_basis.shape[1], N]))     # TODO: RW(2) smoothness prior + force intercept at 50%?
     f1 = numpyro.deterministic("f1", jax.nn.sigmoid(spline_basis @ f1_coeff))
@@ -73,8 +73,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     f2_coeff = numpyro.sample("f2_coeff", dist.Normal(0, 1).expand([spline_basis.shape[1], N]))
     f2 = numpyro.deterministic("f2", jax.nn.sigmoid(spline_basis @ f2_coeff))
           
-    f3_raw = numpyro.sample("f3_raw", dist.Beta(1, 3))
-    f3 = numpyro.deterministic("f3", jnp.broadcast_to(f3_raw, (D,N)))
+    f3 = jnp.zeros((D,N), dtype=f1.dtype)
 
     f4 = jnp.zeros((D,N), dtype=f1.dtype)
 
@@ -89,7 +88,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     season = A_beta[:, None] * jnp.cos(2.0 * jnp.pi * data_months[None, :] / 12 - phi_beta[:, None]) # Shape: (n_clusters, n_months)
     ### AR(1) deviations
     rho_ar_beta = numpyro.sample("rho_ar_beta", dist.Beta(1, 5))     # persistence
-    sigma_ar_beta = numpyro.sample("sigma_ar_beta", dist.HalfNormal(1/25))
+    sigma_ar_beta = numpyro.sample("sigma_ar_beta", dist.HalfNormal(1/100))
     eps_raw = numpyro.sample("eps_raw", dist.Normal(0, 1).expand([D, N]))
     u0 = jnp.zeros((N,), dtype=jnp.float32)
     _, u_seq = jax.lax.scan(partial(ar1_step, rho_ar_beta, sigma_ar_beta), u0, eps_raw[1:])
@@ -113,7 +112,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     # build clinical parameters
     gamma = 0.5
-    omega = numpyro.sample("omega", dist.LogNormal(3.2, 0.33))     
+    omega = numpyro.sample("omega", dist.LogNormal(3.15, 0.5))     
 
     # run transmission model
     simout = transmission_model.sim(kappa, gamma, omega, beta_monthly[:end_sim_data_index+1], p_hom_monthly[:end_sim_data_index+1], S0, I0, P0, simulation_dates[-1])
@@ -126,19 +125,17 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     p_true = numpyro.deterministic("p_true", p_true)
 
     # build observations
-    ## observed cases
-    alpha_inv = numpyro.sample("alpha_inv", dist.HalfNormal(1/10))
-    alpha = numpyro.deterministic("alpha", 1/alpha_inv)
-    numpyro.sample("D_obs", dist.NegativeBinomial2(mean=jnp.sum(dI_obs, axis=-1), concentration=alpha), obs=total_incidence[:end_sim_data_index+1])
+    ## observed cases (Poisson)
+    numpyro.sample("D_obs", dist.Poisson(rate=jnp.sum(dI_obs, axis=-1)), obs=total_incidence[:end_sim_data_index+1])
 
     ## serotyped cases
     #### overdispersion
-    inv_phi = numpyro.sample("inv_phi", dist.HalfNormal(1/3))
+    inv_phi = numpyro.sample("inv_phi", dist.HalfNormal(1/10))
     phi = numpyro.deterministic("phi", 1/inv_phi)
     ### concentration
     alpha = phi * p_obs
     ### Variance inflation factor compared to multinomial
-    numpyro.deterministic("VIF", (total_incidence + phi) / (1.0 + phi))
+    numpyro.deterministic("VIF", (jnp.sum(serotype_incidence[:end_sim_data_index+1], axis=-1) + phi) / (1.0 + phi))
     ### Observed Dirichlet-Multinomial likelihood
     numpyro.sample("Y_obs", dist.DirichletMultinomial(total_count=jnp.sum(serotype_incidence[:end_sim_data_index+1], axis=-1), concentration=alpha), obs=serotype_incidence[:end_sim_data_index+1])
 
