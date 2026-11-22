@@ -134,8 +134,6 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     phi = numpyro.deterministic("phi", 1/inv_phi)
     ### concentration
     alpha = phi * p_obs
-    ### Variance inflation factor compared to multinomial
-    numpyro.deterministic("VIF", (jnp.sum(serotype_incidence[:end_sim_data_index+1], axis=-1) + phi) / (1.0 + phi))
     ### Observed Dirichlet-Multinomial likelihood
     numpyro.sample("Y_obs", dist.DirichletMultinomial(total_count=jnp.sum(serotype_incidence[:end_sim_data_index+1], axis=-1), concentration=alpha), obs=serotype_incidence[:end_sim_data_index+1])
 

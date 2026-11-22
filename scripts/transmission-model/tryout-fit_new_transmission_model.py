@@ -165,8 +165,8 @@ kernel = NUTS(
 
 mcmc = MCMC(
     kernel,
-    num_warmup=250,
-    num_samples=250,
+    num_warmup=25,
+    num_samples=25,
     num_chains=n_chains,
     chain_method="parallel",
     progress_bar=nuts_progress_bar,
@@ -205,7 +205,7 @@ trace.to_netcdf(os.path.join(output_folder, "trace.nc"))
 
 # Generate traceplots
 variables2plot = ['pi_mono2_raw', 'f_P_raw', 'f_P2_raw', 'I_estim', 'foi_year', 'pi_d', 'f1_coeff', 'f2_coeff', 'mu_beta', 'A_beta', 'phi_beta', 'rho_ar_beta', 'sigma_ar_beta',
-                  'kappa0_logit', 'omega', 'log_or_34', 'log_or_serotype', 'log_or_hom', 'phi', 'VIF']
+                  'kappa0_logit', 'omega', 'log_or_34', 'log_or_serotype', 'log_or_hom', 'phi']
 
 # Save original traces
 os.makedirs(os.path.join(output_folder, 'traces'), exist_ok=True)
