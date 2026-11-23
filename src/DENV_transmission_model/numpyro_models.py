@@ -84,12 +84,13 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     # build time-dependent parameters
     ## homologeous reinfection probability
-    spline_basis = jnp.asarray(dmatrix(f"bs(x, df={int(D/6)-1}, degree=3, include_intercept=False)", {"x": range(D)}, return_type="dataframe").to_numpy())
+    spline_basis = jnp.asarray(dmatrix(f"bs(x, df={int(D/3)-1}, degree=3, include_intercept=False)", {"x": range(D)}, return_type="dataframe").to_numpy())
 
-    f1_coeff = numpyro.sample("f1_coeff", dist.Normal(0, 1).expand([spline_basis.shape[1], N]))     # TODO: RW(2) smoothness prior + force intercept at 50%?
+    baseline = 0
+    f1_coeff = numpyro.sample("f1_coeff", dist.Normal(baseline, 1).expand([spline_basis.shape[1], N]))     # TODO: RW(2) smoothness prior + force intercept at 50%?
     f1 = numpyro.deterministic("f1", jax.nn.sigmoid(spline_basis @ f1_coeff))
-
-    f2_coeff = numpyro.sample("f2_coeff", dist.Normal(0, 1).expand([spline_basis.shape[1], N]))
+    
+    f2_coeff = numpyro.sample("f2_coeff", dist.Normal(baseline, 1).expand([spline_basis.shape[1], N]))
     f2 = numpyro.deterministic("f2", jax.nn.sigmoid(spline_basis @ f2_coeff))
           
     f3 = jnp.zeros((D,N), dtype=f1.dtype)
@@ -161,8 +162,8 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     alpha = phi * p_obs
     ### Observed Dirichlet-Multinomial likelihood
     total_count = jnp.sum(serotype_incidence[:end_sim_data_index+1], axis=-1)
-    #with numpyro.handlers.scale(scale=1/total_count.size):
-    numpyro.sample("Y_obs", dist.DirichletMultinomial(total_count=total_count, concentration=alpha), obs=serotype_incidence[:end_sim_data_index+1])
+    with numpyro.handlers.scale(scale=1):
+        numpyro.sample("Y_obs", dist.DirichletMultinomial(total_count=total_count, concentration=alpha), obs=serotype_incidence[:end_sim_data_index+1])
 
     ## seroprevalence
     obs = (seroprevalence / 100.0)[:end_sim_data_index+1]

@@ -39,13 +39,14 @@ n_age_groups = len(age_groups)
 n_serotypes = 4
 ## when to start the simulation
 start_sim = datetime(1998, 9, 1)    
-end_sim = datetime(2009, 12, 1)
+end_sim = datetime(2003, 1, 1)
 simulation_dates = pd.date_range(start=start_sim, end=end_sim, freq="ME").to_pydatetime().tolist()
 
 ## when to introduce DENV 3 and DENV 4
-intro_dates_DENV3 = [datetime(2000, 6, 1),] # Rio: 2001, March; Recife: 1999, March
+intro_dates_DENV3 = [datetime(2001, 2, 1),] # Rio: 2001, February; Recife: 1999, March
 intro_dates_DENV4 =[datetime(2011, 1, 1),]  # Rio: 2011, January; Recife: 2006, January
 
+# https://pmc.ncbi.nlm.nih.gov/articles/PMC3730691/
 
 # Initialise the transmission model
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
