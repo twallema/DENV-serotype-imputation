@@ -44,7 +44,7 @@ simulation_dates = pd.date_range(start=start_sim, end=end_sim, freq="ME").to_pyd
 
 ## when to introduce DENV 3 and DENV 4
 intro_dates_DENV3 = [datetime(2000, 6, 1),] # Rio: 2001, March; Recife: 1999, March
-intro_dates_DENV4 =[datetime(2012, 1, 1),]  # Rio: 2012, January; Recife: 2006, January
+intro_dates_DENV4 =[datetime(2011, 1, 1),]  # Rio: 2011, January; Recife: 2006, January
 
 
 # Initialise the transmission model
@@ -113,7 +113,7 @@ print('pre-optimizing MAP\n')
 print('(iter, score)', flush=True)
 
 # run optimiser
-map_params = find_map(single_cluster_training_model, model_kwargs, 10)
+map_params = find_map(single_cluster_training_model, model_kwargs, 1000)
 
 print(map_params['phi'])
 print(map_params['f_P_raw'])
@@ -183,16 +183,19 @@ valid_mask = jnp.any(~jnp.isnan(jnp.squeeze(seroprevalence_array[:end_sim_data_i
 indices = jnp.nonzero(valid_mask)[0]
 ### Initialise figure with correct ncols
 if len(indices) > 0:
-    fig,axes = plt.subplots(ncols = len(indices), squeeze=False)
+    fig,axes = plt.subplots(ncols = len(indices), squeeze=False, sharey=True)
     ### Pull results and visualise
     axes = axes.ravel()
     for idx, ax in zip(indices, axes):
         data = jnp.squeeze(seroprevalence_array[:end_sim_data_index+1])[idx]
         model = jnp.squeeze(map_params['seroprev_model'][:end_sim_data_index+1])[idx]
-        ax.bar(age_groups_labels, model, color='black')
+        ax.bar(age_groups_labels, data, color='black')
         ax.plot(age_groups_labels, model, marker = 'x', color='red')
+        ax.set_title(simulation_dates[idx].strftime('%Y-%m-%d'))
+        ax.tick_params(axis='x', rotation=30)
+        ax.set_xlabel('Age group')    
     axes[0].set_ylabel('Seroprevalence (%)')
-    axes[0].tick_params(axis='x', rotation=30)
+    plt.tight_layout()
     plt.show()
     plt.close()
 
