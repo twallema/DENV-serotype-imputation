@@ -110,7 +110,7 @@ def run_single_maxp(
         geography_df,
         w,
         attrs_name=covariate_names,
-        threshold_name="N_typed_yearly_median",
+        threshold_name="N_typed_yearly_mean",
         threshold=threshold,
         top_n=2,
         policy="multiple",
@@ -190,6 +190,8 @@ def main():
     n_draw = 25
     n_tune = 75
 
+    covariate_combination = [True, False, True, False, True, False, True]   # set to None
+
     # parse arguments
     # >>>>>>>>>>>>>>>
 
@@ -248,10 +250,10 @@ def main():
     grid_covariates = ["indexP_DTW", "temperature_DTW", "humidity_DTW", "precipitation_DTW", "fraction_urban_land", "denv_100k_cumulative", "human_development_index"]
 
     # if using median
-    threshold_values = [60,] # CD_RGINT: 27.5, 40, 55, 90 results in 25, 20, 15, 10 clusters --> Peak log likelihood at 15 clusters --> Makes sense because there are only 14 regions of high quality sampling -->  Set clusters to 14 (= 60)
+    #threshold_values = [60,] # CD_RGINT: 27.5, 40, 55, 90 results in 25, 20, 15, 10 clusters --> Peak log likelihood at 15 clusters --> Makes sense because there are only 14 regions of high quality sampling -->  Set clusters to 14 (= 60)
 
     # if using mean
-    # threshold_values = [180,] # CD_RGINT: 180 = 14 clusters
+    threshold_values = [180,] # CD_RGINT: 180 = 14 clusters
 
     # Generate combinations of grid_covariates (True/False) AND thresholds
     covariate_combinations = list(
@@ -279,7 +281,13 @@ def main():
     design_matrix["log_likelihood"] = np.nan
     design_matrix["n_clusters"] = np.nan
 
+    # Run a specific covariate combination
+    if covariate_combination:
+        matching_idx = design_matrix.index[design_matrix.iloc[:, : len(covariate_combination)].eq(covariate_combination).all(axis=1)]
+        design_matrix = design_matrix.loc[matching_idx]
+
     print(f"\nNumber of covariate combinations: {len(covariate_combinations)}")
+    print(f"\nRunning only covariate combination: {covariate_combination}")
     print(f"Number of thresholds: {len(threshold_values)}")
     print(f"Total number of runs: {len(design_matrix)}\n")
 
@@ -700,12 +708,12 @@ def main():
     # sum cases by season
     yearly_sum = denv.groupby([f"{region}","season"])['N_typed'].sum().reset_index()
     # take mean across seasons
-    yearly_sum_median = yearly_sum.groupby(f"{region}")["N_typed"].median() # array for clustering
-    yearly_sum_median.rename("N_typed_yearly_median", inplace=True)
-    yearly_sum_median = yearly_sum_median.sort_values()
+    yearly_sum_mean = yearly_sum.groupby(f"{region}")["N_typed"].mean() # array for clustering
+    yearly_sum_mean.rename("N_typed_yearly_mean", inplace=True)
+    yearly_sum_mean = yearly_sum_mean.sort_values()
     # merge them to the geography dataframe
     geography = geography.merge(
-        yearly_sum_median, 
+        yearly_sum_mean, 
         on=f"{region}",
         how="left"
     )
@@ -1162,52 +1170,56 @@ def main():
         ## Compute within-sample validation metrics ##
         ##############################################
 
-        # df with inferred serotype probability per left out municipality
-        df_p = pd.DataFrame(
-            index=pd.MultiIndex.from_product([dates, validation_labels_muni], names=["date", "CD_MUN"]),
-            columns=['p_1', 'p_2', 'p_3', 'p_4', 'phi']
-            ).reset_index()
+        if validation_n >= 1:
 
-        muncipality_cluster_map = clusters[clusters['CD_MUN'].isin(validation_labels_muni)]
+            # df with inferred serotype probability per left out municipality
+            df_p = pd.DataFrame(
+                index=pd.MultiIndex.from_product([dates, validation_labels_muni], names=["date", "CD_MUN"]),
+                columns=['p_1', 'p_2', 'p_3', 'p_4', 'phi']
+                ).reset_index()
 
-        for CD_MUN_id in df_p['CD_MUN'].unique():
-            cluster_id = muncipality_cluster_map.loc[muncipality_cluster_map['CD_MUN'] == CD_MUN_id, 'cluster'].values[0]
-            df_p.loc[df_p['CD_MUN'] == CD_MUN_id, ('p_1', 'p_2', 'p_3', 'p_4')] = np.squeeze(trace.posterior['p'].median(dim=['chain', 'draw']).sel({"cluster": cluster_id}).values)
-            df_p.loc[df_p['CD_MUN'] == CD_MUN_id, 'phi'] = trace['posterior']['phi'].mean(dim=['chain','draw']).sel({"cluster": cluster_id}).values
-        df_p[['a_1', 'a_2', 'a_3', 'a_4']] = df_p[['p_1', 'p_2', 'p_3', 'p_4']].values * df_p[['phi']].values
+            muncipality_cluster_map = clusters[clusters['CD_MUN'].isin(validation_labels_muni)]
 
-        # dataframe with the data per left out municipality
-        cases = (
-            pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet")
-            # get the left out data
-            .filter(pl.col("CD_MUN").is_in(validation_labels_muni))
-            # count serotyping effort
-            .with_columns(
-                N_typed=(
-                    pl.when(pl.sum_horizontal("^DENV_[1-4]$") == 0)
-                    .then(None)
-                    .otherwise(pl.sum_horizontal("^DENV_[1-4]$"))
+            for CD_MUN_id in df_p['CD_MUN'].unique():
+                cluster_id = muncipality_cluster_map.loc[muncipality_cluster_map['CD_MUN'] == CD_MUN_id, 'cluster'].values[0]
+                df_p.loc[df_p['CD_MUN'] == CD_MUN_id, ('p_1', 'p_2', 'p_3', 'p_4')] = np.squeeze(trace.posterior['p'].median(dim=['chain', 'draw']).sel({"cluster": cluster_id}).values)
+                df_p.loc[df_p['CD_MUN'] == CD_MUN_id, 'phi'] = trace['posterior']['phi'].mean(dim=['chain','draw']).sel({"cluster": cluster_id}).values
+            df_p[['a_1', 'a_2', 'a_3', 'a_4']] = df_p[['p_1', 'p_2', 'p_3', 'p_4']].values * df_p[['phi']].values
+
+            # dataframe with the data per left out municipality
+            cases = (
+                pl.scan_parquet("../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-no_diagnostics.parquet")
+                # get the left out data
+                .filter(pl.col("CD_MUN").is_in(validation_labels_muni))
+                # count serotyping effort
+                .with_columns(
+                    N_typed=(
+                        pl.when(pl.sum_horizontal("^DENV_[1-4]$") == 0)
+                        .then(None)
+                        .otherwise(pl.sum_horizontal("^DENV_[1-4]$"))
+                    )
                 )
-            )
-            .sort(["date", "CD_MUN"])
-            .collect()
-        ).to_pandas()
+                .sort(["date", "CD_MUN"])
+                .collect()
+            ).to_pandas()
 
-        # Only evaluate log-likelihood when data are valid
-        mask = ~cases[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].isna().all(axis=1)
-        cases = cases.dropna(subset=['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4'], how='all')
-        cases = cases.fillna(0)
-        df_p = df_p.loc[mask]
+            # Only evaluate log-likelihood when data are valid
+            mask = ~cases[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].isna().all(axis=1)
+            cases = cases.dropna(subset=['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4'], how='all')
+            cases = cases.fillna(0)
+            df_p = df_p.loc[mask]
 
-        # Compute log likelihood
-        from scipy.stats import dirichlet_multinomial
-        x = cases[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].values
-        n = np.sum(x, axis=1)
-        alpha = df_p[['a_1', 'a_2', 'a_3', 'a_4']].apply(pd.to_numeric)
-        logp = dirichlet_multinomial.logpmf(x=x, alpha=alpha, n=n)
+            # Compute log likelihood
+            from scipy.stats import dirichlet_multinomial
+            x = cases[['DENV_1', 'DENV_2', 'DENV_3', 'DENV_4']].values
+            n = np.sum(x, axis=1)
+            alpha = df_p[['a_1', 'a_2', 'a_3', 'a_4']].apply(pd.to_numeric)
+            logp = dirichlet_multinomial.logpmf(x=x, alpha=alpha, n=n)
+
+            # Save logp only if available
+            design_matrix.loc[index, 'log_likelihood'] = sum(logp)
 
         # Save result
-        design_matrix.loc[index, 'log_likelihood'] = sum(logp)
         design_matrix.loc[index, 'n_clusters'] = n_clusters
         os.makedirs(os.path.join(output_folder, f'../results'), exist_ok=True)
         design_matrix.to_csv(os.path.join(output_folder, f'../results/repeat_{repeat_id}.csv'), index=False)
