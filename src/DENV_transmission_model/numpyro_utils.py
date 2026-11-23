@@ -47,7 +47,7 @@ def get_incidence_data(data_dir, muni_clusters, data_start):
 
     data_start: datetime.datetime
         When the data should start.
-        Equate to the transmission model simulation start
+        Must be the transmission model simulation start
 
     Returns
     -------
@@ -80,7 +80,7 @@ def get_incidence_data(data_dir, muni_clusters, data_start):
     return data_dates, total_incidence, serotype_incidence
 
 
-def get_seroprevalence_data(data_dir, age_groups, muni_clusters):
+def get_seroprevalence_data(data_dir, age_groups, muni_clusters, data_dates):
     """
     Load serosurvey results and convert them to the desired age groups.
 
@@ -105,13 +105,20 @@ def get_seroprevalence_data(data_dir, age_groups, muni_clusters):
         ``CD_MUN`` plus exactly one additional column holding the cluster
         identifier.
 
+    data_dates : list containing datetime
+        dates for which incidence data is available
+        Output of `get_incidence_data()`
+
     Returns
     -------
-    seroprevalence : dict
+    seroprevalence_pandas : dict
         Maps the cluster identifier to a pandas.DataFrame indexed on
         ``age_groups`` (labelled ``[{start}, {end})``), whose columns are the
-        experiments conducted in that cluster (named ``{study_id}_{year}``)
+        experiments conducted in that cluster (named ``{year}_{study_id}``)
         and whose values are the seroprevalence percentages.
+    
+    seroprevalence_array: jnp.ndarray
+        shape: (n_dates, n_clusters, n_age_groups)
     """
     
     max_age = 80 # highest single year of age available in the demography data
@@ -149,12 +156,25 @@ def get_seroprevalence_data(data_dir, age_groups, muni_clusters):
     labels = [f"[{start}, {end})" for start, end in age_groups]
 
     # loop over clusters and experiments
-    seroprevalence = {}
+    jnp_output = []
+    seroprevalence_pandas = {}
     for cluster, cluster_data in serodata.groupby(cluster_col):
 
         experiments = {}
-        for (study_id, start_year), strata in cluster_data.groupby(["study_id", "start_year"]):
 
+        # pre-initialise result
+        res = jnp.full((len(data_dates), len(age_groups)), jnp.nan)
+
+        for (study_id, start_year, end_year), strata in cluster_data.groupby(["study_id", "start_year", "end_year"]):
+
+            # compute average date of experiment
+            start = pd.Timestamp(year=start_year, month=1, day=1)
+            end = pd.Timestamp(year=end_year,  month=12, day=31)
+            average_date = ((start + (end - start) / 2 + pd.offsets.MonthEnd(0)).normalize()).to_pydatetime()
+
+            # compute position of experiment date in incidence timeseries
+            dt_idx = data_dates.index(average_date)
+   
             # demography (population by year of age) of the cluster in the survey year
             demographics_path = os.path.join(abs_dir, '../../data/interim/demographics/population_mun-age_1998-2026.parquet')
             demography = _get_demography_by_yearofage(demographics_path, muni_clusters, int(start_year))[:, clusters.index(cluster)]
@@ -176,12 +196,18 @@ def get_seroprevalence_data(data_dir, age_groups, muni_clusters):
                 else:
                     weighted_seroprev[label] = float('nan') # age group not covered by the experiment
 
-            experiments[f"{int(start_year)}_{study_id}"] = pd.Series(weighted_seroprev)
+            experiments[f"{average_date.strftime('%Y-%m-%d')}_{study_id}"] = pd.Series(weighted_seroprev)
+            res = res.at[dt_idx, :].set(list(weighted_seroprev.values()))
 
+        jnp_output.append(res)
+    
         # merge the experiments in this cluster into one dataframe indexed on the age_groups
-        seroprevalence[cluster] = pd.DataFrame(experiments)
+        seroprevalence_pandas[cluster] = pd.DataFrame(experiments)
 
-    return seroprevalence
+    # stack the jnp output per cluster (dates, age_groups) --> (dates, clusters, age_groups)
+    seroprevalence_array = jnp.stack(jnp_output, axis=1)
+
+    return seroprevalence_pandas, seroprevalence_array
 
 
 def _get_demography_by_yearofage(data_dir, muni_clusters, year):

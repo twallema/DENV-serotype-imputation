@@ -60,7 +60,8 @@ data_dates, total_incidence, serotype_incidence = get_incidence_data(data_dir, m
 serotype_incidence = jnp.nan_to_num(serotype_incidence, nan=0.0)    # dirichletMultinomial doesn't work with NA
 ## seroprevalence
 data_dir = os.path.join(abs_dir, '../../data/interim/seroprevalence/seroprevalence.csv')
-seroprevalence = get_seroprevalence_data(data_dir, age_groups, muni_clusters)   # TODO: add an end year
+seroprevalence_pandas, seroprevalence_array = \
+    get_seroprevalence_data(data_dir, age_groups, muni_clusters, data_dates)
 
 # visualise the serotyped fractions
 ## used to set introduction dates of DENV3 and DENV4
@@ -72,7 +73,7 @@ plt.close()
 
 # visualise the seroprevalence data
 ## one panel per survey year, aligned in a single row; experiments from the same year share a panel
-for cluster, seroprev_df in seroprevalence.items():
+for cluster, seroprev_df in seroprevalence_pandas.items():
     ## group the experiments per survey year
     experiments_by_year = {}
     for experiment in seroprev_df.columns:
@@ -100,6 +101,7 @@ model_kwargs = dict(
     simulation_dates=simulation_dates,
     total_incidence=total_incidence,
     serotype_incidence=serotype_incidence,
+    seroprevalence=seroprevalence_array,
     data_dates=data_dates
 )
 
@@ -107,7 +109,7 @@ print('pre-optimizing MAP\n')
 print('(iter, score)', flush=True)
 
 # run optimiser
-map_params = find_map(single_cluster_training_model, model_kwargs, 2000)
+map_params = find_map(single_cluster_training_model, model_kwargs, 1000)
 
 # TODO: parameters to a csv?
 
@@ -168,11 +170,10 @@ plt.close()
 
 ## Seroprevalence data versus simulation
 ### TODO: automate fit --> check if there are experiments
-### TODO: add a likelihood to the model for sero-experiments
 fig,ax=plt.subplots()
-seroprevalence[CD_RGINT]['2005_BR008'].plot.bar(ax=ax, legend=False)
-seroprevalence[CD_RGINT]['2005_BR115'].plot.bar(ax=ax, legend=False)
-ax.plot(age_groups_labels, jnp.squeeze(map_params['seropositive_rel'])[-1], marker = 'x', color='red')
+seroprevalence_pandas[CD_RGINT]['2005-12-31_BR008'].plot.bar(ax=ax, legend=False)
+seroprevalence_pandas[CD_RGINT]['2005-12-31_BR115'].plot.bar(ax=ax, legend=False)
+ax.plot(age_groups_labels, jnp.squeeze(map_params['seroprev_model'])[-1], marker = 'x', color='red')
 plt.show()
 plt.close()
 

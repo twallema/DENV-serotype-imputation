@@ -43,14 +43,15 @@ single_cluster_training_model_RV_dims = {
     'dI_obs': ['simulation_date', 'cluster', 'age_group'],
     'p_true': ['simulation_date', 'cluster', 'serotype'],
     'p_obs': ['simulation_date', 'cluster', 'serotype'],
-    'seropositive_rel': ['simulation_date', 'cluster', 'age_group'],
+    'seroprev_model': ['simulation_date', 'cluster', 'age_group'],
     'S_expanded': ['simulation_date', 'cluster', 'age_group', 'n_prior_het_infections', 'serotype', 'infection_type'],
     'D_obs': ['simulation_date', 'cluster'],
-    'Y_obs': ['simulation_date', 'serotype']
+    'Y_obs': ['simulation_date', 'serotype'],
+    'seroprev_obs' : ['simulation_date', 'cluster', 'age_group']
 }
 
 
-def single_cluster_training_model(transmission_model, simulation_dates, total_incidence, serotype_incidence, data_dates):
+def single_cluster_training_model(transmission_model, simulation_dates, total_incidence, serotype_incidence, seroprevalence, data_dates):
 
     n_serotypes = 4
     N, M = 1, len(transmission_model.age_groups)
@@ -145,7 +146,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     p_obs = numpyro.deterministic("p_obs", p_obs)
     p_true = numpyro.deterministic("p_true", p_true)
     S_expanded = numpyro.deterministic("S_expanded", S_expanded)
-    numpyro.deterministic("seropositive_rel", 100 - 100 * S_t[..., 0] / (jnp.sum(S_t, axis=-1) + jnp.sum(I_t, axis=-1) + jnp.sum(P_t, axis=-1)))
+    seroprev_model = numpyro.deterministic("seroprev_model", 100 - 100 * S_t[..., 0] / (jnp.sum(S_t, axis=-1) + jnp.sum(I_t, axis=-1) + jnp.sum(P_t, axis=-1)))
 
     # build observations
     ## observed cases (Poisson)
@@ -159,6 +160,12 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     alpha = phi * p_obs
     ### Observed Dirichlet-Multinomial likelihood
     numpyro.sample("Y_obs", dist.DirichletMultinomial(total_count=jnp.sum(serotype_incidence[:end_sim_data_index+1], axis=-1), concentration=alpha), obs=serotype_incidence[:end_sim_data_index+1])
+
+    ## seroprevalence
+    obs = (seroprevalence / 100.0)[:end_sim_data_index+1]
+    mask = ~jnp.isnan(obs)  # no nans allowed in likelihood
+    obs = jnp.where(mask, obs, 0.5)
+    numpyro.sample("seroprev_obs", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(seroprev_model/100)[:end_sim_data_index+1], scale=0.10), dist.transforms.SigmoidTransform()).mask(mask), obs=obs)
 
     pass
 
