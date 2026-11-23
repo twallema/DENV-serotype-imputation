@@ -190,7 +190,9 @@ def main():
     n_draw = 25
     n_tune = 75
 
-    covariate_combination = [True, False, True, False, True, False, True]   # set to None
+    covariate_combination = [True, True, False, True, False, True, False]   # set to None
+
+    metric = 'median'
 
     # parse arguments
     # >>>>>>>>>>>>>>>
@@ -249,11 +251,10 @@ def main():
 
     grid_covariates = ["indexP_DTW", "temperature_DTW", "humidity_DTW", "precipitation_DTW", "fraction_urban_land", "denv_100k_cumulative", "human_development_index"]
 
-    # if using median
-    #threshold_values = [60,] # CD_RGINT: 27.5, 40, 55, 90 results in 25, 20, 15, 10 clusters --> Peak log likelihood at 15 clusters --> Makes sense because there are only 14 regions of high quality sampling -->  Set clusters to 14 (= 60)
-
-    # if using mean
-    threshold_values = [180,] # CD_RGINT: 180 = 14 clusters
+    if metric == 'median':
+        threshold_values = [60,] # CD_RGINT: 27.5, 40, 55, 90 results in 25, 20, 15, 10 clusters --> Peak log likelihood at 15 clusters --> Makes sense because there are only 14 regions of high quality sampling -->  Set clusters to 14 (= 60)
+    elif metric == 'mean':
+        threshold_values = [180,] # CD_RGINT: 180 = 14 clusters
 
     # Generate combinations of grid_covariates (True/False) AND thresholds
     covariate_combinations = list(
@@ -708,7 +709,10 @@ def main():
     # sum cases by season
     yearly_sum = denv.groupby([f"{region}","season"])['N_typed'].sum().reset_index()
     # take mean across seasons
-    yearly_sum_mean = yearly_sum.groupby(f"{region}")["N_typed"].mean() # array for clustering
+    if metric == 'mean':
+        yearly_sum_mean = yearly_sum.groupby(f"{region}")["N_typed"].mean()
+    elif metric == 'median':
+        yearly_sum_mean = yearly_sum.groupby(f"{region}")["N_typed"].median()
     yearly_sum_mean.rename("N_typed_yearly_mean", inplace=True)
     yearly_sum_mean = yearly_sum_mean.sort_values()
     # merge them to the geography dataframe
