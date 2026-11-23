@@ -109,7 +109,9 @@ print('pre-optimizing MAP\n')
 print('(iter, score)', flush=True)
 
 # run optimiser
-map_params = find_map(single_cluster_training_model, model_kwargs, 100)
+map_params = find_map(single_cluster_training_model, model_kwargs, 1000)
+
+print(map_params['phi'])
 
 # TODO: parameters to a csv?
 
@@ -125,7 +127,7 @@ ax[0].set_ylabel("DENV inc. (-)", fontsize=8)
 ax[1].plot(data_dates[:end_sim_data_index], jnp.sum(serotype_incidence[:end_sim_data_index], axis=-1), marker='o', markerfacecolor=None, markersize=2, color='black')
 ax[1].set_ylabel("Serotyped (-)", fontsize=8)
 for i in range(4):
-    ax[i+2].plot(data_dates[:end_sim_data_index], serotype_incidence_rel[:end_sim_data_index, i], marker='o', markerfacecolor=None, markersize=2, color='black')
+    ax[i+2].plot(data_dates[:end_sim_data_index], serotype_incidence_rel[:end_sim_data_index, 0, i], marker='o', markerfacecolor=None, markersize=2, color='black')
     ax[i+2].plot(simulation_dates, jnp.squeeze(map_params['p_true'])[:, i], color='red')
     ax[i+2].set_ylabel(f"DENV {i+1} (%)", fontsize=8)
 ax[i+3].stackplot(simulation_dates, 100*jnp.transpose(jnp.squeeze(map_params['p_true'])), colors=['black', 'red', 'green', 'blue'], labels=['DENV1', 'DENV2', 'DENV3', 'DENV4'])
@@ -170,6 +172,10 @@ plt.close()
 
 ## Seroprevalence data versus simulation
 ### TODO: automate fit --> check if there are experiments
+#### Find timesteps that are not nan
+#### Initialise figure with correct ncols
+#### Pull modeled results
+#### Plot
 fig,ax=plt.subplots()
 seroprevalence_pandas[CD_RGINT]['2005-12-31_BR008'].plot.bar(ax=ax, legend=False)
 seroprevalence_pandas[CD_RGINT]['2005-12-31_BR115'].plot.bar(ax=ax, legend=False)
@@ -229,6 +235,27 @@ print(f"there were {int(jnp.sum(mcmc.get_extra_fields()["diverging"]))} divergen
 
 print(mcmc.get_extra_fields()["potential_energy"])
 
+# compute the likelihood of the last sample per likelihood site
+from numpyro.infer import log_likelihood
+posterior_samples = mcmc.get_samples()
+ll_dict = log_likelihood(single_cluster_training_model, posterior_samples, **model_kwargs)
+
+print(serotype_incidence[:end_sim_data_index+1].shape)
+print(ll_dict['Y_obs'].shape)
+
+print(total_incidence[:end_sim_data_index+1].shape)
+print(ll_dict['D_obs'].shape)
+
+
+print(ll_dict['seroprev_obs'].shape)
+
+
+print(f"Y_obs: {jnp.sum(ll_dict['Y_obs'][-1, ...])}")
+print(f"D_obs:  {jnp.sum(ll_dict['D_obs'][-1, ...])}")
+print(f"seroprev_obs: {jnp.sum(ll_dict['seroprev_obs'][-1, ...])}")
+
+import sys
+sys.exit()
 
 # Visualise traces
 # ~~~~~~~~~~~~~~~~
@@ -248,11 +275,6 @@ coords = {
 
 # convert to arviz
 trace = arviz.from_numpyro(mcmc, coords=coords, dims=single_cluster_training_model_RV_dims)
-
-print(trace)
-
-import sys
-sys.exit()
 
 # save traces to a netcdf
 trace.to_netcdf(os.path.join(output_folder, "trace.nc"))

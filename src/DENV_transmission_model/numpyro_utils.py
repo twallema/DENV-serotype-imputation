@@ -63,6 +63,8 @@ def get_incidence_data(data_dir, muni_clusters, data_start):
         shape: (n_time, n_clusters, 4)
     """
 
+    serotypes = ["DENV_1", "DENV_2", "DENV_3", "DENV_4"]
+
     cluster_col = [c for c in muni_clusters.columns if c != "CD_MUN"][0]
 
     inc = pd.read_parquet(data_dir)
@@ -74,8 +76,17 @@ def get_incidence_data(data_dir, muni_clusters, data_start):
 
     data_dates = pd.DatetimeIndex(inc['date']).to_pydatetime().tolist()
 
-    total_incidence = jnp.array(inc.pivot(index="date", columns=cluster_col, values="DENV_total").to_numpy())
-    serotype_incidence = jnp.array(inc.pivot(index="date", columns=cluster_col, values=["DENV_1", "DENV_2", "DENV_3", "DENV_4"]).to_numpy())
+    # 1. Pivot total_incidence -> (n_time, n_clusters)
+    piv_total = inc.pivot(index="date", columns=cluster_col, values="DENV_total")
+    clusters = piv_total.columns  # extract cluster ordering
+    total_incidence = jnp.array(piv_total.to_numpy())
+
+    # 2. Pivot serotype_incidence -> reorder columns to (cluster, serotype) -> reshape to (n_time, n_clusters, 4)
+    piv_sero = inc.pivot(index="date", columns=cluster_col, values=serotypes)
+    piv_sero = piv_sero.swaplevel(axis=1).reindex(
+        columns=pd.MultiIndex.from_product([clusters, serotypes])
+    )
+    serotype_incidence = jnp.array(piv_sero.to_numpy()).reshape(len(data_dates), len(clusters), len(serotypes))
 
     return data_dates, total_incidence, serotype_incidence
 

@@ -46,7 +46,7 @@ single_cluster_training_model_RV_dims = {
     'seroprev_model': ['simulation_date', 'cluster', 'age_group'],
     'S_expanded': ['simulation_date', 'cluster', 'age_group', 'n_prior_het_infections', 'serotype', 'infection_type'],
     'D_obs': ['simulation_date', 'cluster'],
-    'Y_obs': ['simulation_date', 'serotype'],
+    'Y_obs': ['simulation_date', 'cluster', 'serotype'],
     'seroprev_obs' : ['simulation_date', 'cluster', 'age_group']
 }
 
@@ -150,22 +150,26 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     # build observations
     ## observed cases (Poisson)
+    #with numpyro.handlers.scale(scale=1/total_incidence[:end_sim_data_index+1].size):
     numpyro.sample("D_obs", dist.Poisson(rate=jnp.sum(dI_obs, axis=-1)), obs=total_incidence[:end_sim_data_index+1])
 
     ## serotyped cases
     #### overdispersion
-    inv_phi = numpyro.sample("inv_phi", dist.HalfNormal(1/10))
+    inv_phi = numpyro.sample("inv_phi", dist.HalfNormal(1/100))
     phi = numpyro.deterministic("phi", 1/inv_phi)
     ### concentration
     alpha = phi * p_obs
     ### Observed Dirichlet-Multinomial likelihood
-    numpyro.sample("Y_obs", dist.DirichletMultinomial(total_count=jnp.sum(serotype_incidence[:end_sim_data_index+1], axis=-1), concentration=alpha), obs=serotype_incidence[:end_sim_data_index+1])
+    total_count = jnp.sum(serotype_incidence[:end_sim_data_index+1], axis=-1)
+    #with numpyro.handlers.scale(scale=1/total_count.size):
+    numpyro.sample("Y_obs", dist.DirichletMultinomial(total_count=total_count, concentration=alpha), obs=serotype_incidence[:end_sim_data_index+1])
 
     ## seroprevalence
     obs = (seroprevalence / 100.0)[:end_sim_data_index+1]
     mask = ~jnp.isnan(obs)  # no nans allowed in likelihood
     obs = jnp.where(mask, obs, 0.5)
-    numpyro.sample("seroprev_obs", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(seroprev_model/100)[:end_sim_data_index+1], scale=0.20), dist.transforms.SigmoidTransform()).mask(mask), obs=obs)
+    with numpyro.handlers.scale(scale=10):
+        numpyro.sample("seroprev_obs", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(seroprev_model/100)[:end_sim_data_index+1], scale=0.10), dist.transforms.SigmoidTransform()).mask(mask), obs=obs)
 
     pass
 

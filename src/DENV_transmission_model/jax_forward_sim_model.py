@@ -756,6 +756,8 @@ class DengueModel:
         Compute age- and municipality-specific infection-history probabilities
         from a constant force of infection per municipality.
 
+        # TODO: assume dengue only introduced in 1980s
+        
         Parameters
         ----------
         foi_year : jnp.ndarray
