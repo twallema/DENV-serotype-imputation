@@ -165,7 +165,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     obs = (seroprevalence / 100.0)[:end_sim_data_index+1]
     mask = ~jnp.isnan(obs)  # no nans allowed in likelihood
     obs = jnp.where(mask, obs, 0.5)
-    numpyro.sample("seroprev_obs", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(seroprev_model/100)[:end_sim_data_index+1], scale=0.10), dist.transforms.SigmoidTransform()).mask(mask), obs=obs)
+    numpyro.sample("seroprev_obs", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(seroprev_model/100)[:end_sim_data_index+1], scale=0.20), dist.transforms.SigmoidTransform()).mask(mask), obs=obs)
 
     pass
 

@@ -109,7 +109,7 @@ print('pre-optimizing MAP\n')
 print('(iter, score)', flush=True)
 
 # run optimiser
-map_params = find_map(single_cluster_training_model, model_kwargs, 1000)
+map_params = find_map(single_cluster_training_model, model_kwargs, 100)
 
 # TODO: parameters to a csv?
 
@@ -176,9 +176,6 @@ seroprevalence_pandas[CD_RGINT]['2005-12-31_BR115'].plot.bar(ax=ax, legend=False
 ax.plot(age_groups_labels, jnp.squeeze(map_params['seroprev_model'])[-1], marker = 'x', color='red')
 plt.show()
 plt.close()
-
-import sys
-sys.exit()
 
 
 # Sample numpyro model
