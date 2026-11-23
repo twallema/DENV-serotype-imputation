@@ -183,32 +183,35 @@ def get_seroprevalence_data(data_dir, age_groups, muni_clusters, data_dates):
             end = pd.Timestamp(year=end_year,  month=12, day=31)
             average_date = ((start + (end - start) / 2 + pd.offsets.MonthEnd(0)).normalize()).to_pydatetime()
 
-            # compute position of experiment date in incidence timeseries
-            dt_idx = data_dates.index(average_date)
-   
-            # demography (population by year of age) of the cluster in the survey year
-            demographics_path = os.path.join(abs_dir, '../../data/interim/demographics/population_mun-age_1998-2026.parquet')
-            demography = _get_demography_by_yearofage(demographics_path, muni_clusters, int(start_year))[:, clusters.index(cluster)]
+            # only run if within data_dates
+            if average_date in data_dates:
+                
+                # compute position of experiment date in incidence timeseries
+                dt_idx = data_dates.index(average_date)
+    
+                # demography (population by year of age) of the cluster in the survey year
+                demographics_path = os.path.join(abs_dir, '../../data/interim/demographics/population_mun-age_1998-2026.parquet')
+                demography = _get_demography_by_yearofage(demographics_path, muni_clusters, int(start_year))[:, clusters.index(cluster)]
 
-            # demographically-weighted seroprevalence in every desired age group
-            weighted_seroprev = {}
-            for label, age_group in zip(labels, age_groups):
-                weights, values = [], []
-                for _, stratum in strata.iterrows():
-                    stratum_low, stratum_high = stratum["bracket"]
-                    a_low = max(int(stratum_low), age_group[0])
-                    a_high = min(int(stratum_high) + 1, age_group[1], max_age + 1)
-                    if a_high <= a_low:
-                        continue
-                    weights.append(float(demography[a_low:a_high].sum()))
-                    values.append(stratum["seroprev_med"])
-                if sum(weights) > 0:
-                    weighted_seroprev[label] = sum(w * p for w, p in zip(weights, values)) / sum(weights)
-                else:
-                    weighted_seroprev[label] = float('nan') # age group not covered by the experiment
+                # demographically-weighted seroprevalence in every desired age group
+                weighted_seroprev = {}
+                for label, age_group in zip(labels, age_groups):
+                    weights, values = [], []
+                    for _, stratum in strata.iterrows():
+                        stratum_low, stratum_high = stratum["bracket"]
+                        a_low = max(int(stratum_low), age_group[0])
+                        a_high = min(int(stratum_high) + 1, age_group[1], max_age + 1)
+                        if a_high <= a_low:
+                            continue
+                        weights.append(float(demography[a_low:a_high].sum()))
+                        values.append(stratum["seroprev_med"])
+                    if sum(weights) > 0:
+                        weighted_seroprev[label] = sum(w * p for w, p in zip(weights, values)) / sum(weights)
+                    else:
+                        weighted_seroprev[label] = float('nan') # age group not covered by the experiment
 
-            experiments[f"{average_date.strftime('%Y-%m-%d')}_{study_id}"] = pd.Series(weighted_seroprev)
-            res = res.at[dt_idx, :].set(list(weighted_seroprev.values()))
+                experiments[f"{average_date.strftime('%Y-%m-%d')}_{study_id}"] = pd.Series(weighted_seroprev)
+                res = res.at[dt_idx, :].set(list(weighted_seroprev.values()))
 
         jnp_output.append(res)
     
