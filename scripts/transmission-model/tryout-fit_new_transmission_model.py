@@ -1,4 +1,4 @@
-n_chains = 4
+n_chains = 1
 nuts_progress_bar = True
 find_new_map = False
 output_folder = ''
@@ -119,7 +119,7 @@ print('pre-optimizing MAP\n')
 print('(iter, score)', flush=True)
 
 # run optimiser
-map_params = find_map(single_cluster_training_model, model_kwargs, 1000, map_params=map_params)
+map_params = find_map(single_cluster_training_model, model_kwargs, 100, map_params=map_params)
 
 # Save dictionary to a file
 if find_new_map:
@@ -150,6 +150,29 @@ ax[i+3].legend(fontsize=6, loc=1, framealpha=1)
 ax[i+3].set_ylabel("Serotypes (%)", fontsize=8)
 plt.show()
 plt.close()
+
+## Seroprevalence data versus simulation
+### Find timesteps that are not nan
+valid_mask = jnp.any(~jnp.isnan(jnp.squeeze(seroprevalence_array[:end_sim_data_index+1])), axis=1)
+indices = jnp.nonzero(valid_mask)[0]
+### Initialise figure with correct ncols
+if len(indices) > 0:
+    fig,axes = plt.subplots(ncols = len(indices), squeeze=False, sharey=True)
+    ### Pull results and visualise
+    axes = axes.ravel()
+    for idx, ax in zip(indices, axes):
+        data = 100*jnp.squeeze(seroprevalence_array[:end_sim_data_index+1])[idx]
+        model = 100*jnp.squeeze(map_params['seroprev_model'][:end_sim_data_index+1])[idx]
+        ax.bar(age_groups_labels, data, color='black')
+        ax.plot(age_groups_labels, model, marker = 'x', color='red')
+        ax.set_ylim([0,100])
+        ax.set_title(simulation_dates[idx].strftime('%Y-%m-%d'))
+        ax.tick_params(axis='x', rotation=30)
+        ax.set_xlabel('Age group')    
+    axes[0].set_ylabel('Seroprevalence (%)')
+    plt.tight_layout()
+    plt.show()
+    plt.close()
 
 ## latent states
 fig,ax=plt.subplots(nrows=5, figsize=(8.3, 11.7/3*2))
@@ -185,29 +208,6 @@ ax[4].set_ylabel('FOI (%)', fontsize=8)
 plt.show()
 plt.close()
 
-## Seroprevalence data versus simulation
-### Find timesteps that are not nan
-valid_mask = jnp.any(~jnp.isnan(jnp.squeeze(seroprevalence_array[:end_sim_data_index+1])), axis=1)
-indices = jnp.nonzero(valid_mask)[0]
-### Initialise figure with correct ncols
-if len(indices) > 0:
-    fig,axes = plt.subplots(ncols = len(indices), squeeze=False, sharey=True)
-    ### Pull results and visualise
-    axes = axes.ravel()
-    for idx, ax in zip(indices, axes):
-        data = jnp.squeeze(seroprevalence_array[:end_sim_data_index+1])[idx]
-        model = jnp.squeeze(map_params['seroprev_model'][:end_sim_data_index+1])[idx]
-        ax.bar(age_groups_labels, data, color='black')
-        ax.plot(age_groups_labels, model, marker = 'x', color='red')
-        ax.set_ylim([0,100])
-        ax.set_title(simulation_dates[idx].strftime('%Y-%m-%d'))
-        ax.tick_params(axis='x', rotation=30)
-        ax.set_xlabel('Age group')    
-    axes[0].set_ylabel('Seroprevalence (%)')
-    plt.tight_layout()
-    plt.show()
-    plt.close()
-
 
 # Sample numpyro model
 # ~~~~~~~~~~~~~~~~~~~~
@@ -232,8 +232,8 @@ kernel = NUTS(
 
 mcmc = MCMC(
     kernel,
-    num_warmup=25,
-    num_samples=25,
+    num_warmup=5,
+    num_samples=5,
     num_chains=n_chains,
     chain_method="parallel",
     progress_bar=nuts_progress_bar,
@@ -324,16 +324,15 @@ posterior_predictive = arviz.from_numpyro(mcmc, posterior_predictive=posterior_p
 posterior_predictive.to_netcdf(os.path.join(output_folder, "posterior_predictive.nc"))
 
 
-
 # Visualise goodness-of-fit
 # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 trace = arviz.from_netcdf('trace.nc')
 pp = arviz.from_netcdf('posterior_predictive.nc')
 
+## likelihood of D_obs and Y_obs
 for clstr in pp.posterior_predictive['D_obs'].cluster:
 
-    ## likelihood
     D_obs = trace.observed_data['D_obs'].sel({'cluster': clstr})
     Y_obs = trace.observed_data['Y_obs'].sel({'cluster': clstr})
     Y_obs_rel = 100 * Y_obs / Y_obs.sum(dim='serotype')
@@ -360,5 +359,88 @@ for clstr in pp.posterior_predictive['D_obs'].cluster:
     plt.close()
 
 
+## seroprevalence
+for clstr in pp.posterior_predictive['D_obs'].cluster:
 
-# TODO
+    age_groups_labels = trace.observed_data['seroprev_obs'].age_group
+
+    ### Find timesteps that are not nan
+    valid_mask = jnp.any(~jnp.isnan(trace.observed_data['seroprev_obs'].sel({'cluster': clstr}).values), axis=1)
+    indices = jnp.nonzero(valid_mask)[0]
+
+    ### Initialise figure with correct ncols
+    if len(indices) > 0:
+        fig,axes = plt.subplots(ncols = len(indices), squeeze=False, sharey=True)
+        ### Pull results and visualise
+        axes = axes.ravel()
+        for idx, ax in zip(indices, axes):
+            data = 100*trace.observed_data['seroprev_obs'].sel({'cluster': clstr}).values[idx]
+            model = 100*pp.posterior_predictive['seroprev_obs'].sel({'cluster': clstr}).mean(dim=['chain', 'draw']).values[idx]
+            model_low = 100*pp.posterior_predictive['seroprev_obs'].sel({'cluster': clstr}).quantile(dim=['chain', 'draw'], q=0.025).values[idx]
+            model_high = 100*pp.posterior_predictive['seroprev_obs'].sel({'cluster': clstr}).quantile(dim=['chain', 'draw'], q=0.975).values[idx]
+            yerr = [model - model_low, model_high - model]
+            ax.bar(age_groups_labels, data, color='black')
+            ax.errorbar(age_groups_labels, model, yerr=yerr, fmt='o', color='red', capsize=4, elinewidth=1.5, linestyle='none')
+            ax.plot(age_groups_labels, model, color='red')
+            ax.set_ylim([0,100])
+            ax.set_title(simulation_dates[idx].strftime('%Y-%m-%d'))
+            ax.tick_params(axis='x', rotation=30)
+            ax.set_xlabel('Age group')    
+        axes[0].set_ylabel('Seroprevalence (%)')
+        plt.tight_layout()
+        plt.show()
+        plt.close()
+
+
+## latent states
+for clstr in pp.posterior_predictive['D_obs'].cluster:
+
+    data_dates = pp.posterior_predictive['beta_monthly'].data_date
+    simulation_dates = trace.observed_data['D_obs'].simulation_date
+    end_sim_data_index = calculate_simend_data_index(simulation_dates.values.tolist(), data_dates.values.tolist())
+
+    fig,ax=plt.subplots(nrows=5, figsize=(8.3, 11.7/3*2))
+
+    ### Transmission
+    ax[0].plot(simulation_dates, pp.posterior_predictive['beta_monthly'].sel({'cluster': clstr}).mean(dim=['draw', 'chain'])[:end_sim_data_index+1], color='black')
+    ax[0].fill_between(simulation_dates,
+                       pp.posterior_predictive['beta_monthly'].sel({'cluster': clstr}).quantile(dim=['draw', 'chain'], q=0.025)[:end_sim_data_index+1],
+                        pp.posterior_predictive['beta_monthly'].sel({'cluster': clstr}).quantile(dim=['draw', 'chain'], q=0.975)[:end_sim_data_index+1],
+                        color='black', alpha=0.3)
+    
+    ### Homologous reinfection
+    from cycler import cycler
+    ax[1].set_prop_cycle(cycler('color', ['black', 'red', 'green', 'blue']))
+    ax[1].plot(simulation_dates, 100*pp.posterior_predictive['p_hom_monthly'].sel({'cluster': clstr}).mean(dim=['draw', 'chain'])[:end_sim_data_index+1], label=['DENV1', 'DENV2', 'DENV3', 'DENV4'])
+    for i in range(4):    
+        ax[1].fill_between(simulation_dates,
+                        pp.posterior_predictive['p_hom_monthly'].sel({'cluster': clstr}).quantile(dim=['draw', 'chain'], q=0.025)[:end_sim_data_index+1, i],
+                            pp.posterior_predictive['p_hom_monthly'].sel({'cluster': clstr}).quantile(dim=['draw', 'chain'], q=0.975)[:end_sim_data_index+1, i],
+                            color='red', alpha=0.3)
+        ax[1].set_ylabel(r'$p_{hom,i}(t)$ (%)', fontsize=8)
+        ax[1].legend(fontsize=8, loc=1, framealpha=1)
+
+    ### Susceptibility slots per serotype
+    ax[2].plot(simulation_dates, pp.posterior_predictive['S_expanded'].sel({'cluster': clstr, 'serotype': 1}).mean(dim=['chain', 'draw']).sum(dim=['age_group', 'n_prior_het_infections', 'infection_type']), color='black', label='DENV1')
+    ax[2].plot(simulation_dates, pp.posterior_predictive['S_expanded'].sel({'cluster': clstr, 'serotype': 2}).mean(dim=['chain', 'draw']).sum(dim=['age_group', 'n_prior_het_infections', 'infection_type']), color='red', label='DENV2')
+    ax[2].plot(simulation_dates, pp.posterior_predictive['S_expanded'].sel({'cluster': clstr, 'serotype': 3}).mean(dim=['chain', 'draw']).sum(dim=['age_group', 'n_prior_het_infections', 'infection_type']), color='green', label='DENV3')
+    ax[2].plot(simulation_dates, pp.posterior_predictive['S_expanded'].sel({'cluster': clstr, 'serotype': 4}).mean(dim=['chain', 'draw']).sum(dim=['age_group', 'n_prior_het_infections', 'infection_type']), color='blue', label='DENV4')
+    ax[2].plot(simulation_dates, pp.posterior_predictive['S_expanded'].sel({'cluster': clstr, 'serotype': 1, 'infection_type': 'hom'}).mean(dim=['chain', 'draw']).sum(dim=['age_group', 'n_prior_het_infections']), color='black', label='DENV1', linestyle='--')
+    ax[2].plot(simulation_dates, pp.posterior_predictive['S_expanded'].sel({'cluster': clstr, 'serotype': 2, 'infection_type': 'hom'}).mean(dim=['chain', 'draw']).sum(dim=['age_group', 'n_prior_het_infections']), color='red', label='DENV2', linestyle='--')
+    ax[2].set_ylabel('Susceptibility slots (-)', fontsize=8)
+
+    ### Susceptibles by number of previous heterologous infections
+    ax[3].stackplot(simulation_dates, jnp.transpose(pp.posterior_predictive['S_expanded'].sel({'cluster': clstr}).mean(dim=['chain', 'draw']).sum(dim=['age_group', 'serotype', 'infection_type']).values), colors=['black', 'red', 'orange', 'yellow', 'green'], labels=['0', '1', '2', '3', '4'])
+    ax[3].legend(fontsize=8, loc=1, framealpha=1)
+    ax[3].set_ylabel('Susceptibles (-)', fontsize=8)
+
+    ### FOI
+    ax[4].plot(simulation_dates, 100*pp.posterior_predictive['lambda_t'].sel({'cluster': clstr}).mean(dim=['draw', 'chain']), color='black')
+    ax[4].fill_between(simulation_dates,
+                       100*pp.posterior_predictive['lambda_t'].sel({'cluster': clstr}).quantile(dim=['draw', 'chain'], q=0.025),
+                       100*pp.posterior_predictive['lambda_t'].sel({'cluster': clstr}).quantile(dim=['draw', 'chain'], q=0.975),
+                       color='black', alpha=0.3)
+    ax[4].set_ylabel('FOI (%)', fontsize=8)
+
+    plt.show()
+    plt.close()

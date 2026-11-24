@@ -31,9 +31,10 @@ abs_dir = os.path.dirname(__file__)
 ## Getting data ##
 ##################
 
+
 def get_incidence_data(data_dir, muni_clusters, data_start):
     """
-    Load municipality-level dengue incidence and aggregate it into clusters.
+    Load municipality-level dengue incidence per month and aggregate it into clusters.
 
     Parameters
     ----------
@@ -126,7 +127,7 @@ def get_seroprevalence_data(data_dir, age_groups, muni_clusters, data_dates):
         Maps the cluster identifier to a pandas.DataFrame indexed on
         ``age_groups`` (labelled ``[{start}, {end})``), whose columns are the
         experiments conducted in that cluster (named ``{year}_{study_id}``)
-        and whose values are the seroprevalence percentages.
+        and whose values are the seroprevalence fractions.
     
     seroprevalence_array: jnp.ndarray
         shape: (n_dates, n_clusters, n_age_groups)
@@ -185,7 +186,7 @@ def get_seroprevalence_data(data_dir, age_groups, muni_clusters, data_dates):
 
             # only run if within data_dates
             if average_date in data_dates:
-                
+
                 # compute position of experiment date in incidence timeseries
                 dt_idx = data_dates.index(average_date)
     
@@ -206,7 +207,7 @@ def get_seroprevalence_data(data_dir, age_groups, muni_clusters, data_dates):
                         weights.append(float(demography[a_low:a_high].sum()))
                         values.append(stratum["seroprev_med"])
                     if sum(weights) > 0:
-                        weighted_seroprev[label] = sum(w * p for w, p in zip(weights, values)) / sum(weights)
+                        weighted_seroprev[label] = (sum(w * p for w, p in zip(weights, values)) / sum(weights)) / 100
                     else:
                         weighted_seroprev[label] = float('nan') # age group not covered by the experiment
 

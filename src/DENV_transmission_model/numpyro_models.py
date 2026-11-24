@@ -147,12 +147,12 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     p_obs = numpyro.deterministic("p_obs", p_obs)
     p_true = numpyro.deterministic("p_true", p_true)
     S_expanded = numpyro.deterministic("S_expanded", S_expanded)
-    seroprev_model = numpyro.deterministic("seroprev_model", 100 - 100 * S_t[..., 0] / (jnp.sum(S_t, axis=-1) + jnp.sum(I_t, axis=-1) + jnp.sum(P_t, axis=-1)))
+    seroprev_model = numpyro.deterministic("seroprev_model", 1 - S_t[..., 0] / (jnp.sum(S_t, axis=-1) + jnp.sum(I_t, axis=-1) + jnp.sum(P_t, axis=-1)))
 
     # build observations
     ## observed cases (Poisson)
     numpyro.sample("D_obs", dist.Poisson(rate=jnp.sum(dI_obs, axis=-1)), obs=total_incidence[:end_sim_data_index+1] if posterior_predictive is None else None)
-    #numpyro.sample("D_obs", dist.NegativeBinomial2(mean=jnp.sum(dI_obs, axis=-1), concentration=10000), obs=total_incidence[:end_sim_data_index + 1])
+    #numpyro.sample("D_obs", dist.NegativeBinomial2(mean=jnp.sum(dI_obs, axis=-1), concentration=1000), obs=total_incidence[:end_sim_data_index + 1] if posterior_predictive is None else None)
 
     ## serotyped cases
     #### overdispersion
@@ -166,12 +166,11 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
         numpyro.sample("Y_obs", dist.DirichletMultinomial(total_count=total_count, concentration=alpha, total_count_max=posterior_predictive), obs=serotype_incidence[:end_sim_data_index+1] if posterior_predictive is None else None)
 
     ## seroprevalence
-    obs = (seroprevalence / 100.0)[:end_sim_data_index+1]
+    obs = seroprevalence[:end_sim_data_index+1]
     mask = ~jnp.isnan(obs)  # no nans allowed in likelihood
-    obs = jnp.where(mask, obs, 0.5)
     with numpyro.handlers.scale(scale=10):
         numpyro.sample("seroprev_obs",
-                       dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(seroprev_model/100)[:end_sim_data_index+1], scale=0.10), dist.transforms.SigmoidTransform()).mask(mask),
+                       dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(seroprev_model)[:end_sim_data_index+1], scale=0.20), dist.transforms.SigmoidTransform()).mask(mask),
                          obs=obs if posterior_predictive is None else None)
 
     pass
