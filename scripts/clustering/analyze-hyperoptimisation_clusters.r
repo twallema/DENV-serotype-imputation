@@ -13,7 +13,7 @@ if(!require(rstudioapi)) install.packages("rstudioapi")
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 
 # Load the data
-path <- file.path(getwd(), '../../data/interim/clustering_pipeline/CD_RGINT_v4/median/data')
+path <- file.path(getwd(), '../../data/interim/clustering_pipeline/CD_RGINT_v4/mean/merge_data_12')
 
 file_list <- list.files(
   path = path, 
@@ -26,7 +26,7 @@ df <- map_dfr(file_list, read_csv)
 df$n_clusters[df$n_clusters != 14] <- 14
 
 # Take out indexP
-# df <- df[!df$indexP_DTW,]
+df <- df[!df$indexP_DTW,]
 
 # Add configurations
 df$configuration <- interaction(
@@ -697,7 +697,7 @@ df$human_development_index <- factor(df$human_development_index)
 
 # fit linear mixed effects model (additive)
 model <- lmer(
-  log_likelihood ~ indexP_DTW + temperature_DTW + humidity_DTW + precipitation_DTW + fraction_urban_land + denv_100k_cumulative + human_development_index
+  log_likelihood ~ temperature_DTW + humidity_DTW + precipitation_DTW + fraction_urban_land + denv_100k_cumulative + human_development_index
   + (1 | repeat_id),
   data = df
 )
@@ -722,7 +722,7 @@ qqline(residuals(model))
 ###############################
 
 max_model <- lmer(
-  log_likelihood ~ (indexP_DTW + temperature_DTW + humidity_DTW  + precipitation_DTW + 
+  log_likelihood ~ (temperature_DTW + humidity_DTW  + precipitation_DTW + 
                       fraction_urban_land + denv_100k_cumulative + human_development_index)^3 
   + (1 | repeat_id),
   data = df

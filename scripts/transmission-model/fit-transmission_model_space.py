@@ -464,7 +464,29 @@ def build_initial_susceptibles(demo, f_P, pi_d, pi_mono2):
 
 
 def build_initial_crossprotection(demo, f_P, pi_d, f_P2):
-    """ See `build_initial_susceptibles` """
+    """
+    Construct initial cross-protected state for 1999 (only DENV-1 and DENV-2)
+
+    Parameters
+    ----------
+    demo : np.ndarray
+        shape (n_clusters,)
+
+    f_P: np.ndarray
+        shape (n_clusters,)
+        fraction of total population in cross-protected state
+
+    pi_d : TensorVariable
+        shape (3,)
+        dirichlet over degree of infection: [naive, mono, double]
+
+    fP_2 : np.ndarray
+        shape (n_clusters,)
+        fraction of population in cross-protection there after a DENV-2 infection
+    
+    P0 : np.ndarray
+
+    """
 
     # normalize pi_degree for degree of infection 1 and 2
     pi_sum = pi_d[1] + pi_d[2] + 1e-12  # prevent division by zero
@@ -485,16 +507,15 @@ def build_initial_infected(demo, DENV_total, p0, pi_d):
     Parameters
     ----------
 
+    demo : np.ndarray
+        shape (n_clusters,)
+
     DENV_total: np.ndarray
         shape: (n_clusters,)
     
     p0: np.ndarray
         shape: (n_clusters, n_serotypes)
 
-    kappa : TensorVariable
-        shape (n_clusters, n_infection_degrees, n_serotypes, hom_het)
-        fraction of infections observed
-        
     pi_d : TensorVariable
         shape (3,)
         dirichlet over degree of infection: [naive, mono, double]

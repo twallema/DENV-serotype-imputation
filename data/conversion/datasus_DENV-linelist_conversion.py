@@ -720,8 +720,8 @@ df.write_parquet(
 
 print(f"\n\t\tDataframe with age groups..")
 
-breaks = [1, 5, 10, 15, 20, 25, 35, 45, 65]
-labels = ["[00-01(", "[01-05(", "[05-10(", "[10-15", "[15-20(", "[20-25(", "[25-35(", "[35-45", "[45-65(", "[65-100("]
+breaks = [1, 6, 12, 18, 25, 35, 45, 65]
+labels = ["[00-01(", "[01-06(", "[06-12(", "[12-18", "[18-25(", "[25-35(", "[35-45", "[45-65(", "[65-120("]
 
 input_dir = Path("../interim/datasus_DENV-linelist/tmp/month")
 output_dir = Path("../interim/datasus_DENV-linelist/tmp/month_age_groups")
