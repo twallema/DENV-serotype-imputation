@@ -1,5 +1,8 @@
-n_chains = 4
+n_chains = 1
 nuts_progress_bar = True
+find_new_map = True
+output_folder = ''
+
 
 import os
 import time
@@ -21,7 +24,7 @@ import arviz
 
 
 abs_dir = os.path.dirname(__file__)
-output_folder = ''
+
 
 # model settings
 ## what cluster of municipalities to simulate
@@ -46,7 +49,13 @@ simulation_dates = pd.date_range(start=start_sim, end=end_sim, freq="ME").to_pyd
 intro_dates_DENV3 = [datetime(2000, 7, 1),] # Rio: 2001, February; Recife: 1999, March
 intro_dates_DENV4 =[datetime(2011, 1, 1),]  # Rio: 2011, January; Recife: 2006, January
 
-# https://pmc.ncbi.nlm.nih.gov/articles/PMC3730691/
+# get a previously obtained MAP estimate
+if not find_new_map:
+    with jnp.load(os.path.join(output_folder, "map_estimate.npz")) as archive:
+        map_params = {key: jnp.asarray(archive[key]) for key in archive.files}
+else:
+    map_params = None
+
 
 # Initialise the transmission model
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -114,14 +123,16 @@ print('pre-optimizing MAP\n')
 print('(iter, score)', flush=True)
 
 # run optimiser
-map_params = find_map(single_cluster_training_model, model_kwargs, 1500)
+map_params = find_map(single_cluster_training_model, model_kwargs, 1500, map_params=map_params)
+
+# Save dictionary to a file
+if find_new_map:
+    jnp.savez(os.path.join(output_folder, "map_estimate.npz"), **map_params)
 
 print(map_params['phi'])
 print(map_params['f_P_raw'])
 print(map_params['f_P2_raw'])
 print(map_params['foi_year'])
-
-# TODO: parameters to a csv?
 
 # visualise the result
 end_sim_data_index = calculate_simend_data_index(simulation_dates, data_dates)
@@ -192,6 +203,7 @@ if len(indices) > 0:
         model = jnp.squeeze(map_params['seroprev_model'][:end_sim_data_index+1])[idx]
         ax.bar(age_groups_labels, data, color='black')
         ax.plot(age_groups_labels, model, marker = 'x', color='red')
+        ax.set_ylim([0,100])
         ax.set_title(simulation_dates[idx].strftime('%Y-%m-%d'))
         ax.tick_params(axis='x', rotation=30)
         ax.set_xlabel('Age group')    
@@ -224,8 +236,8 @@ kernel = NUTS(
 
 mcmc = MCMC(
     kernel,
-    num_warmup=500,
-    num_samples=500,
+    num_warmup=100,
+    num_samples=100,
     num_chains=n_chains,
     chain_method="parallel",
     progress_bar=nuts_progress_bar,
