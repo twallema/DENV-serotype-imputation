@@ -337,7 +337,7 @@ for clstr in pp.posterior_predictive['D_obs'].cluster:
     Y_obs = trace.observed_data['Y_obs'].sel({'cluster': clstr})
     Y_obs_rel = 100 * Y_obs / Y_obs.sum(dim='serotype')
     D_sim = pp.posterior_predictive['D_obs'].sel({'cluster': clstr})
-    p_obs = 100 * pp.posterior_predictive['p_obs'].sel({'cluster': clstr})
+    p_true = 100 * pp.posterior_predictive['p_true'].sel({'cluster': clstr})
 
     fig,ax=plt.subplots(nrows=7, figsize=(8.3, 11.7/3*2))
     ax[0].plot(D_sim.simulation_date, D_obs, marker='o', markerfacecolor=None, markersize=2, color='black')
@@ -349,10 +349,10 @@ for clstr in pp.posterior_predictive['D_obs'].cluster:
     ax[1].set_ylabel("Serotyped (-)", fontsize=8)
     for i in range(1,5):
         ax[i+1].plot(Y_obs_rel.simulation_date, Y_obs_rel.sel({'serotype': i}), marker='o', markerfacecolor=None, markersize=2, color='black')
-        ax[i+1].plot(p_obs.simulation_date, p_obs.sel({'serotype': i}).mean(dim=['chain', 'draw']), color='red')
-        ax[i+1].fill_between(p_obs.simulation_date, p_obs.sel({'serotype': i}).quantile(dim=['chain', 'draw'], q=0.025), p_obs.sel({'serotype': i}).quantile(dim=['chain', 'draw'], q=0.975), color='red', alpha=0.30)
+        ax[i+1].plot(p_true.simulation_date, p_true.sel({'serotype': i}).mean(dim=['chain', 'draw']), color='red')
+        ax[i+1].fill_between(p_true.simulation_date, p_true.sel({'serotype': i}).quantile(dim=['chain', 'draw'], q=0.025), p_true.sel({'serotype': i}).quantile(dim=['chain', 'draw'], q=0.975), color='red', alpha=0.30)
         ax[i+1].set_ylabel(f"DENV {i} (%)", fontsize=8)
-    ax[i+2].stackplot(p_obs.simulation_date, jnp.transpose(p_obs.mean(dim=['chain', 'draw']).values), colors=['black', 'red', 'green', 'blue'], labels=['DENV1', 'DENV2', 'DENV3', 'DENV4'])
+    ax[i+2].stackplot(p_true.simulation_date, jnp.transpose(p_true.mean(dim=['chain', 'draw']).values), colors=['black', 'red', 'green', 'blue'], labels=['DENV1', 'DENV2', 'DENV3', 'DENV4'])
     ax[i+2].legend(fontsize=6, loc=1, framealpha=1)
     ax[i+2].set_ylabel("Serotypes (%)", fontsize=8)
     plt.show()
