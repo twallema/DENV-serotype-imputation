@@ -1,6 +1,6 @@
 n_chains = 1
 nuts_progress_bar = True
-find_new_map = True
+find_new_map = False
 output_folder = ''
 
 
@@ -31,10 +31,6 @@ abs_dir = os.path.dirname(__file__)
 cluster = 3301
 mapping = pd.read_csv(os.path.join(abs_dir, f'../../data/interim/spatial_units_mapping.csv'))
 muni_clusters = mapping.loc[mapping['CD_RGINT'] == cluster, ('CD_MUN', 'CD_RGINT')]    # TODO: switch to clustering
-## using an actual clustering
-#cluster = 8
-#muni_clusters = pd.read_csv('clusters.csv')
-#muni_clusters = muni_clusters[muni_clusters['cluster'] == cluster]
 ## what age groups to simulate
 age_groups = [(0, 1), (1, 6), (6, 12), (12, 18), (18, 25), (25,35), (35,55), (55,120)]
 age_groups_labels = [f"[{start}, {end})" for start, end in age_groups]
@@ -42,7 +38,7 @@ n_age_groups = len(age_groups)
 n_serotypes = 4
 ## when to start the simulation
 start_sim = datetime(1998, 9, 1)    
-end_sim = datetime(2009, 1, 1)
+end_sim = datetime(2025, 1, 1)
 simulation_dates = pd.date_range(start=start_sim, end=end_sim, freq="ME").to_pydatetime().tolist()
 
 ## when to introduce DENV 3 and DENV 4
@@ -123,7 +119,7 @@ print('pre-optimizing MAP\n')
 print('(iter, score)', flush=True)
 
 # run optimiser
-map_params = find_map(single_cluster_training_model, model_kwargs, 1500, map_params=map_params)
+map_params = find_map(single_cluster_training_model, model_kwargs, 5000, map_params=map_params)
 
 # Save dictionary to a file
 if find_new_map:
@@ -236,8 +232,8 @@ kernel = NUTS(
 
 mcmc = MCMC(
     kernel,
-    num_warmup=100,
-    num_samples=100,
+    num_warmup=2,
+    num_samples=2,
     num_chains=n_chains,
     chain_method="parallel",
     progress_bar=nuts_progress_bar,
@@ -283,6 +279,8 @@ print(f"Y_obs: {jnp.sum(ll_dict['Y_obs'][-1, ...])}")
 print(f"D_obs:  {jnp.sum(ll_dict['D_obs'][-1, ...])}")
 print(f"seroprev_obs: {jnp.sum(ll_dict['seroprev_obs'][-1, ...])}")
 
+import sys
+sys.exit()
 
 # Visualise traces
 # ~~~~~~~~~~~~~~~~
@@ -320,5 +318,9 @@ for var in variables2plot:
     
 # Visualise goodness-of-fit
 # ~~~~~~~~~~~~~~~~~~~~~~~~~
+
+trace = arviz.from_netcdf('trace.nc')   # load a calibrated model in
+
+
 
 # TODO
