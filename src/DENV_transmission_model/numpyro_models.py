@@ -64,7 +64,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     pi_mono2_raw = numpyro.sample("pi_mono2_raw", dist.Beta(2, 2).expand([N,]))
     pi_mono2 = numpyro.deterministic("pi_mono2", jnp.broadcast_to(pi_mono2_raw[:, None], (N, M)))         
 
-    f_P_raw = numpyro.sample("f_P_raw", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.50), scale=1).expand([N,]), dist.transforms.SigmoidTransform()))
+    f_P_raw = numpyro.sample("f_P_raw", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.25), scale=1).expand([N,]), dist.transforms.SigmoidTransform()))
     f_P = numpyro.deterministic("f_P", jnp.broadcast_to(f_P_raw[:, None], (N, M)))
 
     f_P2_raw = numpyro.sample("f_P2_raw", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.50), scale=1).expand([N,]), dist.transforms.SigmoidTransform()))
@@ -72,12 +72,12 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     I_estim = numpyro.sample("I_estim", dist.HalfNormal(1e-4).expand([N,]))
 
-    foi_year = numpyro.sample("foi_year", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.05), scale=1/3).expand([N,]), dist.transforms.SigmoidTransform()))   # 5% +- 2%
+    foi_year = numpyro.sample("foi_year", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.05), scale=1/3).expand([N,]), dist.transforms.SigmoidTransform()))   # 95% CI: 3% - 9%
 
     p0 = jnp.mean(transmission_model.seeding[:6,:,:], axis=0)   # first six months used to estimate initial serotype distribution
 
     ## build
-    pi_d = numpyro.deterministic("pi_d", transmission_model.infection_history_from_foi(foi_year))
+    pi_d = numpyro.deterministic("pi_d", transmission_model.infection_history_from_foi(foi_year, simulation_dates[0]))
     S0 = transmission_model.build_initial_susceptibles(f_P, pi_d, pi_mono2) # (n_munis, n_age_groups, 16)
     P0 = transmission_model.build_initial_crossprotection(f_P, pi_d, f_P2)
     I0 = transmission_model.build_initial_infected(I_estim, p0, pi_d)
@@ -153,6 +153,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     ## observed cases (Poisson)
     #with numpyro.handlers.scale(scale=1/total_incidence[:end_sim_data_index+1].size):
     numpyro.sample("D_obs", dist.Poisson(rate=jnp.sum(dI_obs, axis=-1)), obs=total_incidence[:end_sim_data_index+1])
+    #numpyro.sample("D_obs", dist.NegativeBinomial2(mean=jnp.sum(dI_obs, axis=-1), concentration=10000), obs=total_incidence[:end_sim_data_index + 1])
 
     ## serotyped cases
     #### overdispersion

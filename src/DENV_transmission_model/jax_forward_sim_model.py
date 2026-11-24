@@ -751,12 +751,12 @@ class DengueModel:
     ## Initial state helper functions ##
     ####################################
 
-    def infection_history_from_foi(self, foi_year):
+    def infection_history_from_foi(self, foi_year, simulation_start):
         """
         Compute age- and municipality-specific infection-history probabilities
         from a constant force of infection per municipality.
 
-        # TODO: assume dengue only introduced in 1980s
+        Assumes dengue was introduced in 1986
         
         Parameters
         ----------
@@ -767,6 +767,11 @@ class DengueModel:
         [self] age_groups : list[tuple]
             Age intervals as (lower_age, upper_age), e.g. [(0, 1), (1, 6), (6, 12), ...]
 
+        simulation_start: datetime.datetime
+            startdate of simulation
+            used to infer time between DENV introduction (1986) and simulation start
+            https://wwwnc.cdc.gov/eid/article/11/1/03-1091_article
+
         Returns
         -------
         pi_d : jnp.ndarray
@@ -776,8 +781,10 @@ class DengueModel:
         
         midpoint_age = jnp.array([(lo + hi) / 2 for lo, hi in self.age_groups])
 
-        foi = foi_year[:, None]     # foi: (n_clusters, 1)
-        age = midpoint_age[None, :] # age: (1, n_age_groups)
+        foi = foi_year[:, None]
+        age = midpoint_age[None, :] 
+        max_exposure_years = jnp.round((simulation_start - datetime(1986,1,1)) / timedelta(days=365.2425), 0)   
+        age = jnp.minimum(age, max_exposure_years)  # assumes dengue exposure starts in 1986
 
         # Poisson survival process given FOI
         cumulative_foi = foi * age
