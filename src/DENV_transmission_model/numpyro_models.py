@@ -51,7 +51,7 @@ single_cluster_training_model_RV_dims = {
 }
 
 
-def single_cluster_training_model(transmission_model, simulation_dates, total_incidence, serotype_incidence, seroprevalence, data_dates):
+def single_cluster_training_model(transmission_model, simulation_dates, total_incidence, serotype_incidence, seroprevalence, data_dates, posterior_predictive=None):
 
     n_serotypes = 4
     N, M = 1, len(transmission_model.age_groups)
@@ -151,8 +151,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     # build observations
     ## observed cases (Poisson)
-    #with numpyro.handlers.scale(scale=1/total_incidence[:end_sim_data_index+1].size):
-    numpyro.sample("D_obs", dist.Poisson(rate=jnp.sum(dI_obs, axis=-1)), obs=total_incidence[:end_sim_data_index+1])
+    numpyro.sample("D_obs", dist.Poisson(rate=jnp.sum(dI_obs, axis=-1)), obs=total_incidence[:end_sim_data_index+1] if posterior_predictive is None else None)
     #numpyro.sample("D_obs", dist.NegativeBinomial2(mean=jnp.sum(dI_obs, axis=-1), concentration=10000), obs=total_incidence[:end_sim_data_index + 1])
 
     ## serotyped cases
@@ -164,14 +163,16 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     ### Observed Dirichlet-Multinomial likelihood
     total_count = jnp.sum(serotype_incidence[:end_sim_data_index+1], axis=-1)
     with numpyro.handlers.scale(scale=1000):
-        numpyro.sample("Y_obs", dist.DirichletMultinomial(total_count=total_count, concentration=alpha), obs=serotype_incidence[:end_sim_data_index+1])
+        numpyro.sample("Y_obs", dist.DirichletMultinomial(total_count=total_count, concentration=alpha, total_count_max=posterior_predictive), obs=serotype_incidence[:end_sim_data_index+1] if posterior_predictive is None else None)
 
     ## seroprevalence
     obs = (seroprevalence / 100.0)[:end_sim_data_index+1]
     mask = ~jnp.isnan(obs)  # no nans allowed in likelihood
     obs = jnp.where(mask, obs, 0.5)
     with numpyro.handlers.scale(scale=10):
-        numpyro.sample("seroprev_obs", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(seroprev_model/100)[:end_sim_data_index+1], scale=0.10), dist.transforms.SigmoidTransform()).mask(mask), obs=obs)
+        numpyro.sample("seroprev_obs",
+                       dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(seroprev_model/100)[:end_sim_data_index+1], scale=0.10), dist.transforms.SigmoidTransform()).mask(mask),
+                         obs=obs if posterior_predictive is None else None)
 
     pass
 

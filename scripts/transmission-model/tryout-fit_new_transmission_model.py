@@ -1,4 +1,4 @@
-n_chains = 1
+n_chains = 4
 nuts_progress_bar = True
 find_new_map = False
 output_folder = ''
@@ -19,7 +19,7 @@ import jax.numpy as jnp
 jax.config.update("jax_enable_x64", True)
 import numpyro
 numpyro.set_host_device_count(n_chains)
-from numpyro.infer import NUTS, MCMC, init_to_value, init_to_median
+from numpyro.infer import NUTS, MCMC, Predictive, init_to_value
 import arviz
 
 
@@ -38,7 +38,7 @@ n_age_groups = len(age_groups)
 n_serotypes = 4
 ## when to start the simulation
 start_sim = datetime(1998, 9, 1)    
-end_sim = datetime(2025, 1, 1)
+end_sim = datetime(2009, 1, 1)
 simulation_dates = pd.date_range(start=start_sim, end=end_sim, freq="ME").to_pydatetime().tolist()
 
 ## when to introduce DENV 3 and DENV 4
@@ -119,7 +119,7 @@ print('pre-optimizing MAP\n')
 print('(iter, score)', flush=True)
 
 # run optimiser
-map_params = find_map(single_cluster_training_model, model_kwargs, 5000, map_params=map_params)
+map_params = find_map(single_cluster_training_model, model_kwargs, 1000, map_params=map_params)
 
 # Save dictionary to a file
 if find_new_map:
@@ -232,8 +232,8 @@ kernel = NUTS(
 
 mcmc = MCMC(
     kernel,
-    num_warmup=2,
-    num_samples=2,
+    num_warmup=25,
+    num_samples=25,
     num_chains=n_chains,
     chain_method="parallel",
     progress_bar=nuts_progress_bar,
@@ -258,29 +258,16 @@ print(f"..and finished sampling at: {end_dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
 print(f"total elapsed time: {elapsed_formatted}\n")
 print(f"there were {int(jnp.sum(mcmc.get_extra_fields()["diverging"]))} divergent transitions\n")
 
-print(mcmc.get_extra_fields()["potential_energy"])
-
 # compute the likelihood of the last sample per likelihood site
 from numpyro.infer import log_likelihood
 posterior_samples = mcmc.get_samples()
 ll_dict = log_likelihood(single_cluster_training_model, posterior_samples, **model_kwargs)
 
-print(serotype_incidence[:end_sim_data_index+1].shape)
-print(ll_dict['Y_obs'].shape)
-
-print(total_incidence[:end_sim_data_index+1].shape)
-print(ll_dict['D_obs'].shape)
-
-
-print(ll_dict['seroprev_obs'].shape)
-
-
+print("Untempered likelihood of last sample per likelihood site:")
 print(f"Y_obs: {jnp.sum(ll_dict['Y_obs'][-1, ...])}")
 print(f"D_obs:  {jnp.sum(ll_dict['D_obs'][-1, ...])}")
-print(f"seroprev_obs: {jnp.sum(ll_dict['seroprev_obs'][-1, ...])}")
+print(f"seroprev_obs: {jnp.sum(ll_dict['seroprev_obs'][-1, ...])}\n")
 
-import sys
-sys.exit()
 
 # Visualise traces
 # ~~~~~~~~~~~~~~~~
@@ -315,11 +302,62 @@ for var in variables2plot:
     plt.savefig(os.path.join(output_folder, f'traces/trace-{var}.pdf'))
     plt.close()
 
-    
+
+# Sample posterior predictive
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+print('\nsampling posterior predictive\n')
+
+predictive = Predictive(
+    single_cluster_training_model,
+    posterior_samples=mcmc.get_samples(),
+    )
+
+model_kwargs.update({'posterior_predictive': int(jnp.max(jnp.sum(serotype_incidence[:end_sim_data_index+1], axis=-1)))})    # maximum counts in DirichletMultinomial needs to come from outside the numpyro model; quircky
+
+posterior_predictive = predictive(rng_predict, **model_kwargs)
+
+# convert to arviz
+posterior_predictive = arviz.from_numpyro(mcmc, posterior_predictive=posterior_predictive, coords=coords, dims=single_cluster_training_model_RV_dims)
+
+# save posterior predictive
+posterior_predictive.to_netcdf(os.path.join(output_folder, "posterior_predictive.nc"))
+
+
+
 # Visualise goodness-of-fit
 # ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-trace = arviz.from_netcdf('trace.nc')   # load a calibrated model in
+trace = arviz.from_netcdf('trace.nc')
+pp = arviz.from_netcdf('posterior_predictive.nc')
+
+for clstr in pp.posterior_predictive['D_obs'].cluster:
+
+    ## likelihood
+    D_obs = trace.observed_data['D_obs'].sel({'cluster': clstr})
+    Y_obs = trace.observed_data['Y_obs'].sel({'cluster': clstr})
+    Y_obs_rel = 100 * Y_obs / Y_obs.sum(dim='serotype')
+    D_sim = pp.posterior_predictive['D_obs'].sel({'cluster': clstr})
+    p_obs = 100 * pp.posterior_predictive['p_obs'].sel({'cluster': clstr})
+
+    fig,ax=plt.subplots(nrows=7, figsize=(8.3, 11.7/3*2))
+    ax[0].plot(D_sim.simulation_date, D_obs, marker='o', markerfacecolor=None, markersize=2, color='black')
+    ax[0].plot(D_sim.simulation_date, D_sim.mean(dim=['chain', 'draw']), color='red')
+    ax[0].fill_between(D_sim.simulation_date, D_sim.quantile(dim=['chain', 'draw'], q=0.025),  D_sim.quantile(dim=['chain', 'draw'], q=0.975), color='red', alpha=0.3)
+    ax[0].set_ylabel("DENV inc. (-)", fontsize=8)
+
+    ax[1].plot(Y_obs.simulation_date, Y_obs.sum(dim='serotype'), marker='o', markerfacecolor=None, markersize=2, color='black')
+    ax[1].set_ylabel("Serotyped (-)", fontsize=8)
+    for i in range(1,5):
+        ax[i+1].plot(Y_obs_rel.simulation_date, Y_obs_rel.sel({'serotype': i}), marker='o', markerfacecolor=None, markersize=2, color='black')
+        ax[i+1].plot(p_obs.simulation_date, p_obs.sel({'serotype': i}).mean(dim=['chain', 'draw']), color='red')
+        ax[i+1].fill_between(p_obs.simulation_date, p_obs.sel({'serotype': i}).quantile(dim=['chain', 'draw'], q=0.025), p_obs.sel({'serotype': i}).quantile(dim=['chain', 'draw'], q=0.975), color='red', alpha=0.30)
+        ax[i+1].set_ylabel(f"DENV {i} (%)", fontsize=8)
+    ax[i+2].stackplot(p_obs.simulation_date, jnp.transpose(p_obs.mean(dim=['chain', 'draw']).values), colors=['black', 'red', 'green', 'blue'], labels=['DENV1', 'DENV2', 'DENV3', 'DENV4'])
+    ax[i+2].legend(fontsize=6, loc=1, framealpha=1)
+    ax[i+2].set_ylabel("Serotypes (%)", fontsize=8)
+    plt.show()
+    plt.close()
 
 
 
