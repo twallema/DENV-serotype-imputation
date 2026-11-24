@@ -1,4 +1,4 @@
-n_chains = 1
+n_chains = 4
 nuts_progress_bar = True
 
 import os
@@ -39,11 +39,11 @@ n_age_groups = len(age_groups)
 n_serotypes = 4
 ## when to start the simulation
 start_sim = datetime(1998, 9, 1)    
-end_sim = datetime(2003, 1, 1)
+end_sim = datetime(2009, 1, 1)
 simulation_dates = pd.date_range(start=start_sim, end=end_sim, freq="ME").to_pydatetime().tolist()
 
 ## when to introduce DENV 3 and DENV 4
-intro_dates_DENV3 = [datetime(2001, 2, 1),] # Rio: 2001, February; Recife: 1999, March
+intro_dates_DENV3 = [datetime(2000, 7, 1),] # Rio: 2001, February; Recife: 1999, March
 intro_dates_DENV4 =[datetime(2011, 1, 1),]  # Rio: 2011, January; Recife: 2006, January
 
 # https://pmc.ncbi.nlm.nih.gov/articles/PMC3730691/
@@ -114,7 +114,7 @@ print('pre-optimizing MAP\n')
 print('(iter, score)', flush=True)
 
 # run optimiser
-map_params = find_map(single_cluster_training_model, model_kwargs, 1000)
+map_params = find_map(single_cluster_training_model, model_kwargs, 1500)
 
 print(map_params['phi'])
 print(map_params['f_P_raw'])
@@ -224,8 +224,8 @@ kernel = NUTS(
 
 mcmc = MCMC(
     kernel,
-    num_warmup=2,
-    num_samples=2,
+    num_warmup=500,
+    num_samples=500,
     num_chains=n_chains,
     chain_method="parallel",
     progress_bar=nuts_progress_bar,
@@ -271,15 +271,13 @@ print(f"Y_obs: {jnp.sum(ll_dict['Y_obs'][-1, ...])}")
 print(f"D_obs:  {jnp.sum(ll_dict['D_obs'][-1, ...])}")
 print(f"seroprev_obs: {jnp.sum(ll_dict['seroprev_obs'][-1, ...])}")
 
-import sys
-sys.exit()
 
 # Visualise traces
 # ~~~~~~~~~~~~~~~~
 
 # define coordinates
 coords = {
-    'cluster': [CD_RGINT,],
+    'cluster': [cluster,],
     'age_group': age_groups_labels,
     'data_date': data_dates,
     'simulation_date': simulation_dates,

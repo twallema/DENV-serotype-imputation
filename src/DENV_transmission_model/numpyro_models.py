@@ -162,7 +162,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     alpha = phi * p_obs
     ### Observed Dirichlet-Multinomial likelihood
     total_count = jnp.sum(serotype_incidence[:end_sim_data_index+1], axis=-1)
-    with numpyro.handlers.scale(scale=1):
+    with numpyro.handlers.scale(scale=1000):
         numpyro.sample("Y_obs", dist.DirichletMultinomial(total_count=total_count, concentration=alpha), obs=serotype_incidence[:end_sim_data_index+1])
 
     ## seroprevalence
