@@ -1,6 +1,6 @@
 n_chains = 1
 nuts_progress_bar = True
-find_new_map = False
+find_new_map = True
 output_folder = ''
 
 
@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 from DENV_transmission_model.jax_forward_sim_model import DengueModel
 from DENV_transmission_model.numpyro_models import single_cluster_training_model, single_cluster_training_model_RV_dims, calculate_simend_data_index
-from DENV_transmission_model.numpyro_utils import get_incidence_data, get_seroprevalence_data, find_map
+from DENV_transmission_model.numpyro_utils import get_incidence_data, get_mean_case_age, get_seroprevalence_data, find_map
 
 # jax and numpyro
 import jax
@@ -68,6 +68,9 @@ data_dir = os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/DENV-
 data_dates, total_incidence, serotype_incidence = get_incidence_data(data_dir, muni_clusters, start_sim)
 serotype_incidence = jnp.nan_to_num(serotype_incidence, nan=0.0)    # dirichletMultinomial --> ignores all zero rows in likelihood
 total_incidence = jnp.nan_to_num(total_incidence, nan=1.0)          # fix missing values at start in Rio
+## mean case age per year
+data_dir = os.path.join(abs_dir, '../../data/interim/datasus_DENV-linelist/DENV-1999_2026-month-mun-age_group.parquet')
+_, mean_case_age_year, total_incidence_year = get_mean_case_age(data_dir, muni_clusters, start_sim, age_groups)
 ## seroprevalence
 data_dir = os.path.join(abs_dir, '../../data/interim/seroprevalence/seroprevalence.csv')
 seroprevalence_pandas, seroprevalence_array = \

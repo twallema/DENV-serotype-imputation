@@ -31,6 +31,89 @@ abs_dir = os.path.dirname(__file__)
 ## Getting data ##
 ##################
 
+def get_mean_case_age(data_dir, muni_clusters, data_start, age_groups):
+    """
+    Load municipality-level dengue incidence per month and age groups and compute the mean case age
+
+    Parameters
+    ----------
+    data_dir : str or path
+        Path to incidence data per municipality and month
+
+    muni_clusters : pandas.DataFrame
+        Mapping of municipalities to clusters. Must contain the column
+        ``CD_MUN`` plus exactly one additional column holding the cluster
+        identifier.
+
+    data_start: datetime.datetime
+        When the data should start.
+        Must be the transmission model simulation start
+
+    age_groups: list[tuple]
+        age intervals as (lower_age, upper_age), e.g. [(0, 1), (1, 6), (6, 12), ...]
+    
+    Returns
+    -------
+
+    data_dates: list containing np.datetime
+        shape: (n_years)
+        years from data_start to the end of the available data
+
+    mean_case_age_year : jnp.ndarray
+        shape: (n_years, n_clusters)
+
+    total_incidence_year: jnp.ndarray
+        shape: (n_years, n_clusters)
+    """
+
+    cluster_col = [c for c in muni_clusters.columns if c != "CD_MUN"][0]
+
+    # get the data and group into clusters
+    clusters_lf = pl.from_pandas(muni_clusters).lazy()
+
+    inc = (
+        pl.scan_parquet(data_dir)
+        .filter(pl.col("date") >= data_start)
+        .select(["date", "age_group", "CD_MUN", "DENV_total"])
+        .join(clusters_lf, on="CD_MUN", how="inner")
+        .with_columns(pl.col("date").dt.year().alias("year"))
+        .group_by(["year", cluster_col, "age_group"])
+        .agg(
+            pl.when(pl.col("DENV_total").count() > 0)
+            .then(pl.col("DENV_total").sum())
+            .otherwise(None)
+            .alias("DENV_total")
+        )
+        .sort(["year", cluster_col, "age_group"])
+        .collect(engine="streaming")
+        .to_pandas()
+    )
+
+    data_years = inc['year']
+
+    # verify the age groups in the data match those of the transmission model
+    age_groups_labels = [f"[{start}, {end})" for start, end in age_groups]
+    assert set(inc['age_group'].cat.categories) == set(age_groups_labels), "age groups in data don't match those of transmission model."
+
+    # compute the mean case age per year
+    midpoints = {f"[{start}, {end})": (start + end) / 2 for start, end in age_groups}
+
+    inc["midpoint"] = inc["age_group"].astype(str).map(midpoints)
+    inc["weighted_age"] = inc["midpoint"] * inc["DENV_total"]
+
+    mean_df = inc.groupby(["year", cluster_col], as_index=False).agg(
+        weighted_age_sum=("weighted_age", lambda s: s.sum(min_count=1)),
+        DENV_total=("DENV_total", lambda s: s.sum(min_count=1)),
+    )
+
+    mean_df["mean_age"] = mean_df["weighted_age_sum"] / mean_df["DENV_total"].replace(0, jnp.nan)
+    mean_df = mean_df.drop(columns=["weighted_age_sum"])
+
+    # extract data into 2D jnp.array (n_dates, n_clusters)
+    mean_case_age_year = jnp.asarray(mean_df.pivot(index="year", columns=cluster_col, values="mean_age").to_numpy())
+    total_incidence_year = jnp.asarray(mean_df.pivot(index="year", columns=cluster_col, values="DENV_total").to_numpy())
+
+    return data_years, mean_case_age_year, total_incidence_year
 
 def get_incidence_data(data_dir, muni_clusters, data_start):
     """
