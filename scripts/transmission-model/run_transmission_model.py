@@ -38,7 +38,7 @@ pi_mono2 = 0.33 * jnp.ones([n_munis, n_age_groups])
 I_estim = jnp.array([1e-5, 1e-5])
 p0 = jnp.array([[0.75, 0.25, 0, 0], [0.75, 0.25, 0, 0]])
 ## build
-pi_d = model.infection_history_from_foi(jnp.array([0.05, 0.05]))
+pi_d = model.infection_history_from_foi(jnp.array([0.05, 0.05]), simulation_start)
 S0 = model.build_initial_susceptibles(f_P, pi_d, pi_mono2) # (n_munis, n_age_groups, 16)
 P0 = model.build_initial_crossprotection(f_P, pi_d, f_P2)
 I0 = model.build_initial_infected(I_estim, p0, pi_d)
