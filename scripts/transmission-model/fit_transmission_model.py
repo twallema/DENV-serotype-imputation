@@ -1,6 +1,6 @@
 n_chains = 1
 nuts_progress_bar = True
-find_new_map = True
+find_new_map = False
 output_folder = ''
 
 
@@ -38,7 +38,7 @@ n_age_groups = len(age_groups)
 n_serotypes = 4
 ## when to start the simulation
 start_sim = datetime(1998, 9, 1)    
-end_sim = datetime(2010, 1, 1)
+end_sim = datetime(2016, 1, 1)
 simulation_dates = pd.date_range(start=start_sim, end=end_sim, freq="ME").to_pydatetime().tolist()
 
 ## when to introduce DENV 3 and DENV 4
@@ -132,6 +132,9 @@ print(map_params['phi'])
 print(map_params['f_P_raw'])
 print(map_params['f_P2_raw'])
 print(map_params['foi_year'])
+print(jnp.exp(map_params['log_or_34']))
+print(jnp.exp(map_params['log_or_serotype']))
+print(jnp.exp(map_params['log_or_hom']))
 
 # visualise the result
 end_sim_data_index = calculate_simend_data_index(simulation_dates, data_dates)

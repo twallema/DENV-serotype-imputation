@@ -72,7 +72,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     I_estim = numpyro.sample("I_estim", dist.HalfNormal(1e-4).expand([N,]))
 
-    foi_year = numpyro.sample("foi_year", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.05), scale=1/3).expand([N,]), dist.transforms.SigmoidTransform()))   # 95% CI: 3% - 9%
+    foi_year = numpyro.sample("foi_year", dist.TransformedDistribution(dist.Normal(loc=jsp.special.logit(0.05), scale=1/2).expand([N,]), dist.transforms.SigmoidTransform()))   # 5% +- 1%
 
     p0 = jnp.mean(transmission_model.seeding[:6,:,:], axis=0)   # first six months used to estimate initial serotype distribution
 
@@ -84,7 +84,7 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
 
     # build time-dependent parameters
     ## homologeous reinfection probability
-    spline_basis = jnp.asarray(dmatrix(f"bs(x, df={int(D/3)-1}, degree=3, include_intercept=False)", {"x": range(D)}, return_type="dataframe").to_numpy())
+    spline_basis = jnp.asarray(dmatrix(f"bs(x, df={int(D/6)-1}, degree=3, include_intercept=False)", {"x": range(D)}, return_type="dataframe").to_numpy())
 
     baseline = 0
     f1_coeff = numpyro.sample("f1_coeff", dist.Normal(baseline, 1).expand([spline_basis.shape[1], N]))     # TODO: RW(2) smoothness prior + force intercept at 50%?
@@ -123,11 +123,11 @@ def single_cluster_training_model(transmission_model, simulation_dates, total_in
     # Reported fraction (cluster x age_group x degree x serotype x homologous indicator)
     kappa0_logit = numpyro.sample("kappa0_logit", dist.Normal(jsp.special.logit(1/10), 1))                          # intercept
     is_34 = jnp.array([0, 0, 1, 1], dtype=jnp.float32)                                                              # indicator prim/sec versus tert/quart
-    log_or_34 = numpyro.sample("log_or_34", dist.Normal(-3, 1/3))                                                   # log-OR detecting prim/sec versus tert/quart
-    log_or_serotype_raw = numpyro.sample("log_or_serotype_raw", dist.Normal(0, 1/10).expand([n_serotypes - 1]))     # log-OR detecting serotypes (vs. baseline serotype)
+    log_or_34 = numpyro.sample("log_or_34", dist.Normal(-3, 1/100))                                                   # log-OR detecting prim/sec versus tert/quart
+    log_or_serotype_raw = numpyro.sample("log_or_serotype_raw", dist.Normal(0, 1/100).expand([n_serotypes - 1]))     # log-OR detecting serotypes (vs. baseline serotype)
     log_or_serotype = numpyro.deterministic("log_or_serotype", jnp.concatenate([jnp.zeros((1,), dtype=log_or_serotype_raw.dtype), log_or_serotype_raw]))
     is_hom = jnp.array([1, 0], dtype=jnp.float32)                                                           # indicator for homologous infection
-    log_or_hom = numpyro.sample("log_or_hom", dist.Normal(-3, 1/3))                                        # TODO: check if applied right (to)
+    log_or_hom = numpyro.sample("log_or_hom", dist.Normal(-3, 1/100))                                        # TODO: check if applied right (to)
     # Shape: (degree x serotype x homologous indicator)
     logit_kappa = kappa0_logit + log_or_34 * is_34[:, None, None] + log_or_serotype[None, :, None] + log_or_hom * is_hom[None, None, :]
     # Broadcast logit_kappa over the clusters and age groups
