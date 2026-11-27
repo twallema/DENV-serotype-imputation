@@ -38,7 +38,7 @@ n_age_groups = len(age_groups)
 n_serotypes = 4
 ## when to start the simulation
 start_sim = datetime(1998, 9, 1)    
-end_sim = datetime(2009, 1, 1)
+end_sim = datetime(2010, 1, 1)
 simulation_dates = pd.date_range(start=start_sim, end=end_sim, freq="ME").to_pydatetime().tolist()
 
 ## when to introduce DENV 3 and DENV 4
@@ -122,7 +122,7 @@ print('pre-optimizing MAP\n')
 print('(iter, score)', flush=True)
 
 # run optimiser
-map_params = find_map(single_cluster_training_model, model_kwargs, 100, map_params=map_params)
+map_params = find_map(single_cluster_training_model, model_kwargs, 2500, map_params=map_params)
 
 # Save dictionary to a file
 if find_new_map:
@@ -176,6 +176,25 @@ if len(indices) > 0:
     plt.tight_layout()
     plt.show()
     plt.close()
+
+## mean case age per year
+import numpy as np
+### sim output to years
+data = jnp.squeeze(map_params['dI_obs'])
+years = pd.to_datetime(simulation_dates).year
+unique_years, year_idx = np.unique(years, return_inverse=True)
+yearly_sum = jnp.zeros((len(unique_years), data.shape[1]), dtype=data.dtype).at[year_idx].add(data)
+### to mean case age
+midpoints = jnp.array([(low + high) / 2.0 for low, high in age_groups])
+total_age = jnp.sum(yearly_sum * midpoints, axis=1)
+total_cases = jnp.sum(yearly_sum, axis=1)
+mean_case_age_year_model = total_age / total_cases
+
+fig,ax = plt.subplots()
+ax.plot(unique_years, mean_case_age_year_model, color='red')
+ax.plot(unique_years, mean_case_age_year[:len(mean_case_age_year_model)], marker='o', color='black')
+plt.show()
+plt.close()
 
 ## latent states
 fig,ax=plt.subplots(nrows=5, figsize=(8.3, 11.7/3*2))
