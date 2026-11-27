@@ -720,8 +720,9 @@ df.write_parquet(
 
 print(f"\n\t\tDataframe with age groups..")
 
-breaks = [1, 6, 12, 18, 25, 35, 45, 65]
-labels = ["[00-01(", "[01-06(", "[06-12(", "[12-18", "[18-25(", "[25-35(", "[35-45", "[45-65(", "[65-120("]
+age_groups = [(0, 1), (1, 6), (6, 12), (12, 18), (18, 25), (25,35), (35,55), (55,120)]  # matches transmission model
+breaks = [end for _, end in age_groups[:-1]]
+labels = [f"[{start}, {end})" for start, end in age_groups]
 
 input_dir = Path("../interim/datasus_DENV-linelist/tmp/month")
 output_dir = Path("../interim/datasus_DENV-linelist/tmp/month_age_groups")
